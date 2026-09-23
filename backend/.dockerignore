@@ -1,0 +1,3 @@
+# O Dockerfile copia só pom.xml e src/: nada de target/ nem do .git no contexto de build.
+target/
+.git/

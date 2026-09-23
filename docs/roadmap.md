@@ -90,7 +90,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** pipeline verde no repositório remoto em push de teste.
   **Commit:** `ci: adiciona pipeline de build e testes`
 
-- [ ] **012 — Compose completo com a aplicação**
+- [x] **012 — Compose completo com a aplicação**
   **Objetivo:** subir backend + banco com um comando. **Depende:** 003, 004
   **Implementar:** serviço `app` no compose (build `backend/Dockerfile` multi-stage ou `mvn quarkus:dev` documentado), `depends_on` com healthcheck.
   **Testes/aceite:** `docker compose up` sobe banco e app; `/q/health` responde de dentro do compose.

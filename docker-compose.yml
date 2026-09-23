@@ -19,5 +19,19 @@ services:
       retries: 10
       start_period: 10s
 
+  # API em container (build em backend/Dockerfile). Sobe só depois do banco saudável.
+  app:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Host = nome do serviço postgres; credenciais espelham o serviço acima.
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-minimarket}
+      QUARKUS_DATASOURCE_USERNAME: ${POSTGRES_USER:-minimarket}
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-minimarket}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
 volumes:
   postgres-data:

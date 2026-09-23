@@ -87,6 +87,8 @@ versões seguem a estável do momento da instalação). Links verificados em 202
 | [Renovate](https://docs.renovatebot.com/) | atualização automatizada de dependências |
 | [Spotless — plugin Maven](https://github.com/diffplug/spotless/tree/main/plugin-maven) | formatação Java com google-java-format: `spotless:apply`, `spotless:check` |
 | [postgres — imagem Docker oficial](https://hub.docker.com/_/postgres) | variáveis do container, volume/PGDATA por versão, healthcheck |
+| [Quarkus — Quarkus and Maven](https://quarkus.io/version/3.33/guides/maven-tooling) | empacotamento `fast-jar` (`target/quarkus-app`, `quarkus-run.jar`) e perfil de build |
+| [Docker Hub — `maven` e `eclipse-temurin`](https://hub.docker.com/_/eclipse-temurin) | tags das imagens do `backend/Dockerfile` (build e runtime) |
 
 ---
 

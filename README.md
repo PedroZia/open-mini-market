@@ -45,10 +45,14 @@ docker-compose.yml      PostgreSQL (+ app) para desenvolvimento
 Do zero ao PDV respondendo, em três comandos:
 
 ```bash
-docker compose up -d              # 1. banco PostgreSQL de desenvolvimento
+docker compose up -d postgres     # 1. banco PostgreSQL de desenvolvimento
 cd backend && ./mvnw quarkus:dev  # 2. API em http://localhost:8080
 cd backend && ./mvnw verify       # 3. build + testes
 ```
+
+Para subir banco e API em containers, use `docker compose up -d --build`: a API fica em
+http://localhost:8080 (health em `/q/health`, porta configurável por `APP_PORT`) e roda no perfil de
+produção, sem o seed de dev. Nesse caso não rode o `quarkus:dev` junto, os dois usam a porta 8080.
 
 No Windows (PowerShell/cmd), use `.\mvnw.cmd` no lugar de `./mvnw`. Ao subir, o Flyway aplica o schema
 e o seed de desenvolvimento (`backend/src/main/resources/db/seed-dev/R__seed_dev.sql`, idempotente);
