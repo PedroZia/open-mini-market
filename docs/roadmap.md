@@ -251,7 +251,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** após logout, `GET /auth/me` retorna 401.
   **Commit:** `feat(auth): implementa logout`
 
-- [ ] **209 — Expiração e idle timeout**
+- [x] **209 — Expiração e idle timeout**
   **Objetivo:** sessão não dura para sempre. **Depende:** 206
   **Implementar:** validação de `expires_at` e de inatividade por `last_seen_at` (limites configuráveis por cliente TUI/WEB); teste com clock controlado (injetar `Clock`).
   **Testes/aceite:** sessão inativa além do limite → 401 `SESSION_IDLE_TIMEOUT`; uso renova `last_seen_at`; expiração absoluta nunca é estendida.

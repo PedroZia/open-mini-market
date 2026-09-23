@@ -4,14 +4,20 @@ import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.minimarket.IntegrationTestBase;
+import com.minimarket.auth.application.AuthSessionSnapshot;
 import com.minimarket.auth.domain.TokenHasher;
+import com.minimarket.auth.infrastructure.AuthSessionRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
+import jakarta.inject.Inject;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -34,8 +40,20 @@ class BearerAuthenticationTest extends IntegrationTestBase {
   private static final String META_PATH = "/api/v1/meta";
   private static final String AUTHORIZATION = "Authorization";
 
+  /**
+   * Idle timeout configurado (passo 209): WEB 30 min, TUI 8 h — o teste envelhece além da janela.
+   */
+  private static final Duration WEB_IDLE_LIMIT = Duration.ofMinutes(30);
+
+  private static final Duration TUI_IDLE_LIMIT = Duration.ofHours(8);
+
   /** Domínio puro, sem estado e sem CDI (passo 203): o teste instancia o hash do token. */
   private final TokenHasher tokenHasher = new TokenHasher();
+
+  /**
+   * Repositório de sessões (passo 202): envelhece {@code last_seen_at} sem SQL de coluna na mão.
+   */
+  @Inject AuthSessionRepository sessionRepository;
 
   @Test
   @DisplayName("sem token o path protegido responde 401 problem+json com INVALID_CREDENTIALS")
@@ -136,6 +154,61 @@ class BearerAuthenticationTest extends IntegrationTestBase {
   }
 
   @Test
+  @DisplayName("sessão WEB inativa por mais de 30 min responde 401 SESSION_IDLE_TIMEOUT")
+  void rejectsIdleWebSession() {
+    String username = "bearer.web.inativo." + SUFFIX;
+    createUser(username, null);
+    String token = login(username);
+
+    ageLastSeenByToken(token, Instant.now().minus(WEB_IDLE_LIMIT.plusMinutes(1)));
+
+    Response response = getIdentity(token);
+
+    assertThat(response.statusCode()).isEqualTo(401);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("SESSION_IDLE_TIMEOUT");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Sessão expirada por inatividade");
+    assertThat(response.jsonPath().getString("detail")).contains("inatividade");
+    assertThat(response.jsonPath().getString("instance")).isEqualTo(IDENTITY_PATH);
+  }
+
+  @Test
+  @DisplayName("sessão TUI inativa por mais de 8 h responde 401 SESSION_IDLE_TIMEOUT")
+  void rejectsIdleTuiSession() {
+    String username = "bearer.tui.inativo." + SUFFIX;
+    createUser(username, null);
+    String token = login(username, "TUI");
+
+    ageLastSeenByToken(token, Instant.now().minus(TUI_IDLE_LIMIT.plusHours(1)));
+
+    Response response = getIdentity(token);
+
+    assertThat(response.statusCode()).isEqualTo(401);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("SESSION_IDLE_TIMEOUT");
+  }
+
+  @Test
+  @DisplayName(
+      "uso dentro da janela mantém a sessão viva, renova last_seen_at e não estende expires_at")
+  void keepsActiveSessionAlive() {
+    String username = "bearer.ativo." + SUFFIX;
+    createUser(username, null);
+    String token = login(username);
+    Instant expiresAt = sessionOf(token).expiresAt();
+
+    // 2 min de inatividade: dentro da janela WEB (30 min) e além do intervalo de toque (1 min).
+    Instant agedAt = Instant.now().minus(Duration.ofMinutes(2));
+    ageLastSeenByToken(token, agedAt);
+
+    assertThat(getIdentity(token).statusCode()).isEqualTo(200);
+
+    AuthSessionSnapshot renewed = sessionOf(token);
+    assertThat(renewed.lastSeenAt()).isAfter(agedAt);
+    assertThat(renewed.expiresAt()).isEqualTo(expiresAt);
+  }
+
+  @Test
   @DisplayName("GET /api/v1/meta continua 200 sem token: a janela da Fase 1 não foi fechada")
   void keepsUnprotectedRoutesOpen() {
     Response response = given().when().get(META_PATH).then().extract().response();
@@ -192,15 +265,28 @@ class BearerAuthenticationTest extends IntegrationTestBase {
         .getString("id");
   }
 
-  /** Login pela API (passo 205) e devolve o token em claro da sessão nova. */
+  /** Login pela API (passo 205) sem o header {@code X-Client}: a sessão nasce WEB. */
   private static String login(String username) {
-    return given()
-        .contentType("application/json")
-        .body(
-            """
-            {"username": "%s", "password": "%s"}
-            """
-                .formatted(username, PASSWORD))
+    return login(username, null);
+  }
+
+  /**
+   * Login pela API (passo 205) e devolve o token em claro da sessão nova; {@code client} vai no
+   * header {@code X-Client} (ausente é WEB) e é o que decide o limite de inatividade (passo 209).
+   */
+  private static String login(String username, String client) {
+    RequestSpecification request =
+        given()
+            .contentType("application/json")
+            .body(
+                """
+                {"username": "%s", "password": "%s"}
+                """
+                    .formatted(username, PASSWORD));
+    if (client != null) {
+      request = request.header(AuthResource.CLIENT_HEADER, client);
+    }
+    return request
         .when()
         .post("/api/v1/auth/login")
         .then()
@@ -208,6 +294,32 @@ class BearerAuthenticationTest extends IntegrationTestBase {
         .extract()
         .jsonPath()
         .getString("token");
+  }
+
+  /**
+   * Empurra {@code last_seen_at} para o passado pelo repositório de sessões (passo 209): o request
+   * HTTP commita de verdade, então o ajuste roda em transação própria para o servidor enxergá-lo. O
+   * token continua vivo — o id da sessão sai do próprio token apresentado.
+   */
+  private void ageLastSeenByToken(String token, Instant lastSeenAt) {
+    QuarkusTransaction.requiringNew()
+        .run(
+            () -> {
+              AuthSessionSnapshot session = activeSession(token);
+              sessionRepository.touchLastSeen(session.id(), lastSeenAt);
+            });
+  }
+
+  /** Sessão viva do token, lida pelo repositório numa transação própria (passo 209). */
+  private AuthSessionSnapshot sessionOf(String token) {
+    return QuarkusTransaction.requiringNew().call(() -> activeSession(token));
+  }
+
+  /** Leitura da sessão viva: quem chama já abriu a transação. */
+  private AuthSessionSnapshot activeSession(String token) {
+    return sessionRepository
+        .findActiveByTokenHash(tokenHasher.hash(token))
+        .orElseThrow(() -> new IllegalStateException("sessão do token não encontrada"));
   }
 
   private static Response getIdentity(String token) {

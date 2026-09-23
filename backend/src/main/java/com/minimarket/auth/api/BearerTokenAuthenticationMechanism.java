@@ -45,7 +45,8 @@ public class BearerTokenAuthenticationMechanism implements HttpAuthenticationMec
   /**
    * Chave do {@code RoutingContext} e atributo da {@link AuthenticationFailedException} com o
    * {@link ErrorCode} que explica a falha: o provider registra o motivo, o challenge o lê para
-   * escolher entre {@code INVALID_CREDENTIALS} e {@code SESSION_EXPIRED}.
+   * escolher entre {@code INVALID_CREDENTIALS}, {@code SESSION_EXPIRED} e {@code
+   * SESSION_IDLE_TIMEOUT}.
    */
   public static final String FAILURE_CODE_ATTRIBUTE = "minimarket.auth.failure-code";
 
@@ -150,9 +151,11 @@ public class BearerTokenAuthenticationMechanism implements HttpAuthenticationMec
 
   /** Mesmas mensagens do caso de uso: o corpo do 401 não inventa um texto próprio. */
   private static String detailOf(ErrorCode code) {
-    return code == ErrorCode.SESSION_EXPIRED
-        ? AuthenticateSessionUseCase.SESSION_EXPIRED_DETAIL
-        : AuthenticateSessionUseCase.INVALID_TOKEN_DETAIL;
+    return switch (code) {
+      case SESSION_EXPIRED -> AuthenticateSessionUseCase.SESSION_EXPIRED_DETAIL;
+      case SESSION_IDLE_TIMEOUT -> AuthenticateSessionUseCase.SESSION_IDLE_TIMEOUT_DETAIL;
+      default -> AuthenticateSessionUseCase.INVALID_TOKEN_DETAIL;
+    };
   }
 
   /** Correlação da resposta: o header do cliente ou um UUID novo, ecoado como o filtro faria. */
