@@ -1,6 +1,8 @@
 package com.minimarket.users.infrastructure;
 
 import com.github.f4b6a3.uuid.UuidCreator;
+import com.minimarket.users.application.NewUser;
+import com.minimarket.users.application.UserStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -16,10 +18,13 @@ import java.util.UUID;
  *
  * <p>{@link #findByUsername} e {@link #findById} devolvem também usuário soft-deletado — quem
  * decide o que fazer com {@code deletedAt} é o caso de uso (o login precisa ver o registro para
- * decidir); {@link #search} sempre ignora deletados.
+ * decidir); {@link #search} e {@link #existsByUsername} sempre ignoram deletados.
+ *
+ * <p>Implementa a porta {@link UserStore}: é por ela que {@code application} grava usuário sem
+ * tocar em JPA.
  */
 @ApplicationScoped
-public class UserRepository {
+public class UserRepository implements UserStore {
 
   @Inject EntityManager entityManager;
 
@@ -46,6 +51,33 @@ public class UserRepository {
     user.assignUsername(normalize(user.getUsername()));
     entityManager.persist(user);
     return user;
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Aplica o status informado e reaproveita {@link #insert(UserEntity)}: o id (UUIDv7) e a
+   * normalização do username continuam no adaptador.
+   */
+  @Override
+  public UUID insert(NewUser user) {
+    UserEntity entity = new UserEntity(user.username(), user.passwordHash(), user.displayName());
+    entity.setStatus(user.status());
+    insert(entity);
+    return entity.getId();
+  }
+
+  /** {@inheritDoc} */
+  @Override
+  public boolean existsByUsername(String username) {
+    return !entityManager
+        .createQuery(
+            "select u.id from UserEntity u where u.username = :username and u.deletedAt is null",
+            UUID.class)
+        .setParameter("username", normalize(username))
+        .setMaxResults(1)
+        .getResultList()
+        .isEmpty();
   }
 
   /** Grava o estado atual do usuário; a transação é do caso de uso. */

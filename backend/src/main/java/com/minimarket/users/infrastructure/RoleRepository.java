@@ -1,6 +1,7 @@
 package com.minimarket.users.infrastructure;
 
 import com.minimarket.shared.domain.NotFoundException;
+import com.minimarket.users.application.RoleStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -15,10 +16,10 @@ import java.util.UUID;
  * {@code @Transactional} — a transação é do caso de uso (§2.2, regra 6).
  *
  * <p>Devolve códigos, nunca entidades: a fronteira com o caso de uso é só String, então JPA não
- * vaza para {@code application} nem para JSON.
+ * vaza para {@code application} nem para JSON. Implementa a porta {@link RoleStore}.
  */
 @ApplicationScoped
-public class RoleRepository {
+public class RoleRepository implements RoleStore {
 
   @Inject EntityManager entityManager;
 
@@ -36,6 +37,7 @@ public class RoleRepository {
    * Substitui o conjunto de roles do usuário pelos códigos informados; lista vazia remove todas.
    * Usuário ou código de role inexistente → {@link NotFoundException}, sem gravar nada.
    */
+  @Override
   public void assignRoles(UUID userId, Collection<String> roleCodes) {
     UserEntity user = entityManager.find(UserEntity.class, userId);
     if (user == null) {

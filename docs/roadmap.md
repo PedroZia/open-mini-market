@@ -139,7 +139,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de integração: permissões efetivas de um OPERADOR; troca de permissões de role reflete na consulta.
   **Commit:** `feat(users): adiciona repositorio de roles e permissoes`
 
-- [ ] **107 — Caso de uso `CreateUser`**
+- [x] **107 — Caso de uso `CreateUser`**
   **Objetivo:** criar usuário com regra de negócio. **Depende:** 102, 104, 106
   **Implementar:** `CreateUserUseCase` (normaliza username, valida duplicidade, exige senha com política mínima de 8 caracteres, faz hash, atribui roles, status ACTIVE) + exceções de negócio.
   **Testes/aceite:** unitário: username duplicado → `ConflictException`; senha fraca → erro de validação; senha nunca aparece no objeto retornado.
