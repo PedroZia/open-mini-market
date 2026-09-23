@@ -54,7 +54,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste passa usando Dev Services (container automático); documentar no README como rodar.
   **Commit:** `test(backend): adiciona base de testes de integracao com PostgreSQL`
 
-- [ ] **006 — Fronteiras de módulo com ArchUnit**
+- [x] **006 — Fronteiras de módulo com ArchUnit**
   **Objetivo:** garantir §2.2 por teste. **Depende:** 002
   **Implementar:** pacotes `com.minimarket.{shared,auth,users,catalog,inventory,cash,sales,customers,audit,reports}` com `package-info.java`; testes ArchUnit: `domain` não importa JPA/Quarkus/Jackson, `api` não acessa `infrastructure` de outro módulo, sem ciclos.
   **Testes/aceite:** ArchUnit verde; teste falha se alguém violar a regra (validar com exemplo temporário).
