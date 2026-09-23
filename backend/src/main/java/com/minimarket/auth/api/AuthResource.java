@@ -50,6 +50,10 @@ public class AuthResource {
       @HeaderParam(CLIENT_HEADER) String clientHeader,
       @Context HttpHeaders headers,
       @Context HttpServerRequest httpRequest) {
+    if (request == null) {
+      // Sem corpo o leitor entrega null: é erro de forma (400), não erro interno.
+      throw new BusinessException(ErrorCode.VALIDATION_ERROR, "corpo do login é obrigatório");
+    }
     LoginResult result =
         loginUseCase.execute(
             new LoginCommand(

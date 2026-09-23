@@ -145,9 +145,22 @@ class AuthResourceTest extends IntegrationTestBase {
   }
 
   @Test
-  @DisplayName("corpo sem username e password responde 400 de validação")
+  @DisplayName("login sem corpo ou sem os campos obrigatórios responde 400 de validação")
   void rejectsEmptyBody() {
-    Response response =
+    Response missingBody =
+        given()
+            .contentType("application/json")
+            .when()
+            .post(LOGIN_PATH)
+            .then()
+            .statusCode(400)
+            .extract()
+            .response();
+    assertThat(missingBody.contentType()).contains("application/problem+json");
+    assertThat(missingBody.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    assertThat(missingBody.jsonPath().getString("detail")).contains("corpo");
+
+    Response blankFields =
         given()
             .contentType("application/json")
             .body("{}")
@@ -158,9 +171,9 @@ class AuthResourceTest extends IntegrationTestBase {
             .extract()
             .response();
 
-    assertThat(response.contentType()).contains("application/problem+json");
-    assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
-    assertThat(response.jsonPath().getList("errors.field", String.class))
+    assertThat(blankFields.contentType()).contains("application/problem+json");
+    assertThat(blankFields.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    assertThat(blankFields.jsonPath().getList("errors.field", String.class))
         .containsExactlyInAnyOrder("username", "password");
   }
 
