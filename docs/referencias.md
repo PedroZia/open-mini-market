@@ -50,6 +50,7 @@ versões seguem a estável do momento da instalação). Links verificados em 202
 | Fonte | Quando consultar |
 | --- | --- |
 | [OWASP — Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html) | parâmetros de Argon2id, política de senha, hash de token |
+| [password4j](https://password4j.com/) | Argon2id em Java puro, saída PHC e leitura dos parâmetros (`getInstanceFromHash`) |
 
 ## Observabilidade (Fase 13)
 

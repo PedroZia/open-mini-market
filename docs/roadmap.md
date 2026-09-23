@@ -121,7 +121,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 4 testes verdes; nenhum comportamento novo de produção.
   **Commit:** `test(users): cobre unicidade e soft delete de usuarios`
 
-- [ ] **104 — Hash de senha (Argon2id)**
+- [x] **104 — Hash de senha (Argon2id)**
   **Objetivo:** senha nunca em texto puro. **Depende:** 002
   **Implementar:** `PasswordHasher` (Argon2id m=19 MiB, t=2, p=1, saída PHC) + `verify` + `needsRehash`; configuração por `application.properties`.
   **Testes/aceite:** hash ≠ senha; `verify` true/false; dois hashes da mesma senha diferem (salt); `needsRehash` detecta parâmetros antigos; verificação contra hash dummy de usuário inexistente.
