@@ -291,7 +291,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 3 — Auditoria (infraestrutura) e Autorização
 
-- [ ] **301 — Migration `audit_events`**
+- [x] **301 — Migration `audit_events`**
   **Objetivo:** log append-only pronto para receber eventos. **Depende:** 004
   **Implementar:** `V5__audit_events.sql` conforme §5.3 + índices; **role de aplicação sem `UPDATE`/`DELETE`** nesta tabela (grants explícitos).
   **Testes/aceite:** teste de integração: `INSERT`/`SELECT` funcionam; `UPDATE`/`DELETE` falham por permissão.
