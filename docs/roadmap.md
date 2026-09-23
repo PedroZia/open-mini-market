@@ -187,7 +187,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 lista roles; PUT troca permissões e a consulta reflete; código inexistente → 400 `UNKNOWN_PERMISSION`.
   **Commit:** `feat(users): expoe administracao de papeis e permissoes`
 
-- [ ] **115 — Seed do ADMIN inicial**
+- [x] **115 — Seed do ADMIN inicial**
   **Objetivo:** primeiro acesso em ambiente novo. **Depende:** 105, 107
   **Implementar:** criação do usuário ADMIN inicial por configuração/seed de dev, com senha definida por variável de ambiente e obrigação de troca no primeiro login.
   **Testes/aceite:** em banco limpo existe 1 ADMIN ativo com `mustChangePassword=true`.

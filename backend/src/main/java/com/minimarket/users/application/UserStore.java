@@ -56,6 +56,13 @@ public interface UserStore {
   Optional<UserSummary> resetPassword(UUID id, String passwordHash);
 
   /**
+   * ADMIN inicial (passo 115): exige a troca da senha no primeiro login sem tocar no hash, porque a
+   * senha já foi definida na criação. Soft-deletado não é marcado — mesmo filtro de {@link
+   * #updateDisplayName}.
+   */
+  void requirePasswordChange(UUID id);
+
+  /**
    * Página de usuários vivos (soft-deletado nunca aparece) com filtro textual em
    * username/display_name sem diferenciar maiúsculas ({@code search} em branco = sem filtro) e
    * filtro de status ({@code active} nulo = todos). {@code sort} é a whitelist já resolvida pelo

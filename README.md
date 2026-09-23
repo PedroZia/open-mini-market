@@ -58,6 +58,11 @@ No Windows (PowerShell/cmd), use `.\mvnw.cmd` no lugar de `./mvnw`. Ao subir, o 
 e o seed de desenvolvimento (`backend/src/main/resources/db/seed-dev/R__seed_dev.sql`, idempotente);
 copie `.env.example` para `.env` se quiser trocar porta ou credenciais.
 
+Na primeira subida em dev o backend cria o usuário **`admin`** com a senha **`admin123`** (variável
+`ADMIN_INITIAL_PASSWORD`), com **troca obrigatória no primeiro login**; se já existe ADMIN ativo, nada é
+criado. Em `%prod` não há senha padrão: defina `ADMIN_INITIAL_PASSWORD` no ambiente para semear o ADMIN
+inicial — sem a variável, o seed não acontece.
+
 Os testes de integração usam PostgreSQL real via **Dev Services**: o container do banco sobe sozinho,
 não é preciso subir o `docker-compose` antes — mas o **Docker precisa estar rodando**.
 

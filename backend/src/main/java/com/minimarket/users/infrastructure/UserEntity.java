@@ -128,6 +128,14 @@ public class UserEntity {
     this.passwordChangedAt = Instant.now();
   }
 
+  /**
+   * ADMIN inicial (passo 115): exige a troca da senha no primeiro login sem mexer no hash, que já
+   * foi definido na criação do usuário.
+   */
+  void requirePasswordChange() {
+    this.mustChangePassword = true;
+  }
+
   public UUID getId() {
     return id;
   }

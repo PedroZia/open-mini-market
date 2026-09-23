@@ -202,6 +202,19 @@ public class UserRepository implements UserStore {
             });
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Mesmo filtro de usuário vivo de {@link #updateDisplayName}; a alteração sai no flush da
+   * transação do caso de uso.
+   */
+  @Override
+  public void requirePasswordChange(UUID id) {
+    findById(id)
+        .filter(user -> user.getDeletedAt() == null)
+        .ifPresent(UserEntity::requirePasswordChange);
+  }
+
   /** Grava o estado atual do usuário; a transação é do caso de uso. */
   public UserEntity update(UserEntity user) {
     user.assignUsername(normalize(user.getUsername()));
