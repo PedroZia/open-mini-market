@@ -8,6 +8,7 @@ import com.minimarket.users.application.DisableUserUseCase;
 import com.minimarket.users.application.EnableUserUseCase;
 import com.minimarket.users.application.GetUserUseCase;
 import com.minimarket.users.application.ListUsersUseCase;
+import com.minimarket.users.application.ResetPasswordUseCase;
 import com.minimarket.users.application.UpdateUserUseCase;
 import com.minimarket.users.application.UserPage;
 import com.minimarket.users.application.UserSummary;
@@ -50,6 +51,8 @@ public class UsersResource {
 
   @Inject EnableUserUseCase enableUserUseCase;
 
+  @Inject ResetPasswordUseCase resetPasswordUseCase;
+
   @Context UriInfo uriInfo;
 
   @POST
@@ -70,7 +73,8 @@ public class UsersResource {
                 created.username(),
                 created.displayName(),
                 created.roles(),
-                CreateUserUseCase.STATUS_ACTIVE))
+                CreateUserUseCase.STATUS_ACTIVE,
+                false))
         .build();
   }
 
@@ -94,7 +98,12 @@ public class UsersResource {
 
   private static UserResponse toResponse(UserSummary user) {
     return new UserResponse(
-        user.id(), user.username(), user.displayName(), user.roles(), user.status());
+        user.id(),
+        user.username(),
+        user.displayName(),
+        user.roles(),
+        user.status(),
+        user.mustChangePassword());
   }
 
   /** Detalhe do usuário; inexistente ou soft-deletado → 404 {@code USER_NOT_FOUND}. */
@@ -136,5 +145,18 @@ public class UsersResource {
   @Produces(MediaType.APPLICATION_JSON)
   public UserResponse enable(@PathParam("id") UUID id) {
     return toResponse(enableUserUseCase.execute(id));
+  }
+
+  /**
+   * Reset de senha por ADMIN (passo 113): define a senha temporária e devolve o usuário com {@code
+   * mustChangePassword=true}. Id inexistente ou soft-deletado → 404 {@code USER_NOT_FOUND}; senha
+   * curta → 400 {@code VALIDATION_ERROR} com {@code errors[]}. Revogar as sessões é do passo 213.
+   */
+  @POST
+  @Path("/{id}/password-reset")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public UserResponse resetPassword(@PathParam("id") UUID id, @Valid ResetPasswordRequest request) {
+    return toResponse(resetPasswordUseCase.execute(id, request.newPassword()));
   }
 }

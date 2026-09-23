@@ -6,9 +6,11 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 
 import com.minimarket.IntegrationTestBase;
+import com.minimarket.users.application.PasswordHasher;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
+import jakarta.inject.Inject;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -29,6 +31,8 @@ import org.junit.jupiter.api.Test;
 class UsersResourceTest extends IntegrationTestBase {
 
   private static final String SUFFIX = UUID.randomUUID().toString().substring(0, 8);
+
+  @Inject PasswordHasher passwordHasher;
 
   @Test
   @DisplayName("POST /api/v1/users responde 201 com Location, roles e status, sem vazar credencial")
@@ -58,6 +62,7 @@ class UsersResourceTest extends IntegrationTestBase {
     assertThat(response.jsonPath().getString("username")).isEqualTo(username);
     assertThat(response.jsonPath().getString("displayName")).isEqualTo("Maria Silva");
     assertThat(response.jsonPath().getString("status")).isEqualTo("ACTIVE");
+    assertThat(response.jsonPath().getBoolean("mustChangePassword")).isFalse();
     assertThat(response.jsonPath().getList("roles", String.class)).containsExactly("OPERADOR");
     assertThat(response.asString()).doesNotContain("senha-secreta").doesNotContain("$argon2");
 
@@ -519,6 +524,112 @@ class UsersResourceTest extends IntegrationTestBase {
     assertThat(deletedAtOf(id)).isNull();
   }
 
+  @Test
+  @DisplayName(
+      "POST /api/v1/users/{id}/password-reset responde 200 com mustChangePassword=true e hash novo")
+  void resetsPassword() throws SQLException {
+    String username = "reset.senha." + SUFFIX;
+    String id = createUserWithRole(username, "Reset Senha", "OPERADOR");
+    String hashBefore = passwordHashOf(username);
+    assertThat(passwordHasher.verify("senha-secreta", hashBefore)).isTrue();
+
+    Response response =
+        postPasswordReset(
+            id,
+            """
+            {"newPassword": "nova-senha-temporaria"}
+            """,
+            200);
+
+    assertThat(response.jsonPath().getString("id")).isEqualTo(id);
+    assertThat(response.jsonPath().getString("username")).isEqualTo(username);
+    assertThat(response.jsonPath().getString("status")).isEqualTo("ACTIVE");
+    assertThat(response.jsonPath().getBoolean("mustChangePassword")).isTrue();
+    assertThat(response.asString())
+        .doesNotContain("nova-senha-temporaria")
+        .doesNotContain("senha-secreta")
+        .doesNotContain("$argon2");
+
+    String hashAfter = passwordHashOf(username);
+    assertThat(hashAfter).startsWith("$argon2id$").isNotEqualTo(hashBefore);
+    assertThat(passwordHasher.verify("senha-secreta", hashAfter)).isFalse();
+    assertThat(passwordHasher.verify("nova-senha-temporaria", hashAfter)).isTrue();
+    assertThat(columnOf(id, "must_change_password")).isEqualTo("t");
+    assertThat(columnOf(id, "password_changed_at")).isNotNull();
+  }
+
+  @Test
+  @DisplayName(
+      "POST /api/v1/users/{id}/password-reset de id inexistente ou desativado responde 404")
+  void returnsNotFoundWhenResettingUnknownUser() throws SQLException {
+    Response unknown =
+        postPasswordReset(
+            UUID.randomUUID().toString(),
+            """
+            {"newPassword": "nova-senha-temporaria"}
+            """,
+            404);
+
+    assertThat(unknown.contentType()).contains("application/problem+json");
+    assertThat(unknown.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/user-not-found");
+    assertThat(unknown.jsonPath().getString("title")).isEqualTo("Usuário não encontrado");
+    assertThat(unknown.jsonPath().getInt("status")).isEqualTo(404);
+    assertThat(unknown.jsonPath().getString("code")).isEqualTo("USER_NOT_FOUND");
+
+    String username = "reset.apagado." + SUFFIX;
+    String id = createUserWithRole(username, "Reset Apagado", "OPERADOR");
+    softDeleteUser(username);
+
+    assertThat(
+            postPasswordReset(
+                    id,
+                    """
+                    {"newPassword": "nova-senha-temporaria"}
+                    """,
+                    404)
+                .jsonPath()
+                .getString("code"))
+        .isEqualTo("USER_NOT_FOUND");
+  }
+
+  @Test
+  @DisplayName(
+      "POST /api/v1/users/{id}/password-reset com senha curta ou em branco responde 400 e não altera nada")
+  void rejectsInvalidResetPassword() throws SQLException {
+    String username = "reset.curta." + SUFFIX;
+    String id = createUserWithRole(username, "Reset Curta", "OPERADOR");
+    String hashBefore = passwordHashOf(username);
+
+    Response shortPassword =
+        postPasswordReset(
+            id,
+            """
+            {"newPassword": "1234567"}
+            """,
+            400);
+
+    assertThat(shortPassword.contentType()).contains("application/problem+json");
+    assertThat(shortPassword.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    assertThat(shortPassword.jsonPath().getList("errors.field", String.class))
+        .containsExactly("newPassword");
+    assertThat(shortPassword.jsonPath().getString("errors[0].message")).contains("8 caracteres");
+
+    Response blankPassword =
+        postPasswordReset(
+            id,
+            """
+            {"newPassword": "   "}
+            """,
+            400);
+    assertThat(blankPassword.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    assertThat(blankPassword.jsonPath().getList("errors.field", String.class))
+        .contains("newPassword");
+
+    assertThat(passwordHashOf(username)).isEqualTo(hashBefore);
+    assertThat(columnOf(id, "must_change_password")).isEqualTo("f");
+  }
+
   /**
    * O request HTTP commita, então os usuários criados aqui são removidos ao fim de cada teste: os
    * testes de repositório assumem a tabela como a encontraram. A FK de {@code user_roles} é {@code
@@ -639,6 +750,19 @@ class UsersResourceTest extends IntegrationTestBase {
     return given()
         .when()
         .post("/api/v1/users/{id}/{action}", id, action)
+        .then()
+        .statusCode(expectedStatus)
+        .extract()
+        .response();
+  }
+
+  /** POST com corpo na ação de reset de senha; espera o status informado. */
+  private static Response postPasswordReset(String id, String body, int expectedStatus) {
+    return given()
+        .contentType("application/json")
+        .body(body)
+        .when()
+        .post("/api/v1/users/{id}/password-reset", id)
         .then()
         .statusCode(expectedStatus)
         .extract()

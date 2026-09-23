@@ -49,6 +49,13 @@ public interface UserStore {
   Optional<UserSummary> enable(UUID id);
 
   /**
+   * Reset de senha por ADMIN (passo 113): grava o hash da senha temporária, marca {@code
+   * must_change_password} e atualiza {@code password_changed_at}, devolvendo a projeção já
+   * atualizada. Soft-deletado devolve vazio — o 404 é do caso de uso.
+   */
+  Optional<UserSummary> resetPassword(UUID id, String passwordHash);
+
+  /**
    * Página de usuários vivos (soft-deletado nunca aparece) com filtro textual em
    * username/display_name sem diferenciar maiúsculas ({@code search} em branco = sem filtro) e
    * filtro de status ({@code active} nulo = todos). {@code sort} é a whitelist já resolvida pelo

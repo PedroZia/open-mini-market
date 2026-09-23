@@ -185,6 +185,23 @@ public class UserRepository implements UserStore {
             });
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Mesmo filtro de usuário vivo de {@link #disable}: soft-deletado não é resetado. O flush (e o
+   * avanço de {@code version}) fica com a transação do caso de uso.
+   */
+  @Override
+  public Optional<UserSummary> resetPassword(UUID id, String passwordHash) {
+    return findById(id)
+        .filter(user -> user.getDeletedAt() == null)
+        .map(
+            user -> {
+              user.resetPassword(passwordHash);
+              return toSummaries(List.of(user)).getFirst();
+            });
+  }
+
   /** Grava o estado atual do usuário; a transação é do caso de uso. */
   public UserEntity update(UserEntity user) {
     user.assignUsername(normalize(user.getUsername()));
@@ -291,7 +308,8 @@ public class UserRepository implements UserStore {
                     user.getUsername(),
                     user.getDisplayName(),
                     user.getStatus(),
-                    rolesByUserId.getOrDefault(user.getId(), List.of())))
+                    rolesByUserId.getOrDefault(user.getId(), List.of()),
+                    user.isMustChangePassword()))
         .toList();
   }
 

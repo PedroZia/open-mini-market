@@ -175,7 +175,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** desativado não aparece na busca padrão nem pode autenticar (teste antecipado com o serviço); 409 ao tentar desativar o último ADMIN.
   **Commit:** `feat(users): permite desativar e reativar usuario`
 
-- [ ] **113 — Reset de senha por ADMIN**
+- [x] **113 — Reset de senha por ADMIN**
   **Objetivo:** admin devolve acesso ao usuário. **Depende:** 108
   **Implementar:** `POST /users/{id}/password-reset` (admin define nova senha temporária) + flag `mustChangePassword` no usuário.
   **Testes/aceite:** senha antiga deixa de funcionar; novo hash gerado; `mustChangePassword=true`.

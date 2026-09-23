@@ -42,6 +42,7 @@ class UsersMigrationTest extends IntegrationTestBase {
                 "failed_login_attempts",
                 "locked_until",
                 "password_changed_at",
+                "must_change_password",
                 "last_login_at",
                 "created_at",
                 "updated_at",

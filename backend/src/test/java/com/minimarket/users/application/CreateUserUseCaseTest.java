@@ -153,6 +153,11 @@ class CreateUserUseCaseTest {
     }
 
     @Override
+    public Optional<UserSummary> resetPassword(UUID id, String passwordHash) {
+      throw new UnsupportedOperationException("resetPassword não é usado por CreateUser");
+    }
+
+    @Override
     public List<UserSummary> search(
         String search, Boolean active, UserSort sort, boolean ascending, int page, int size) {
       throw new UnsupportedOperationException("search não é usado por CreateUser");

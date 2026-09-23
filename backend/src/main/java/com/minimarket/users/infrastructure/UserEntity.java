@@ -20,8 +20,8 @@ import java.util.UUID;
  * username normalizado chegam prontos do {@link UserRepository}; regra de negócio mora nos casos de
  * uso. A entidade não sai do módulo — nada de JPA em JSON.
  *
- * <p>Só as colunas usadas hoje: {@code failed_login_attempts}, {@code locked_until}, {@code
- * password_changed_at} e {@code last_login_at} entram quando o caso de uso que as usa existir.
+ * <p>Só as colunas usadas hoje: {@code failed_login_attempts}, {@code locked_until} e {@code
+ * last_login_at} entram quando o caso de uso que as usa existir.
  */
 @Entity
 @Table(name = "users")
@@ -45,6 +45,13 @@ public class UserEntity {
 
   @Column(name = "status")
   private String status;
+
+  /** Senha temporária definida por ADMIN (passo 113) exige troca no próximo login. */
+  @Column(name = "must_change_password")
+  private boolean mustChangePassword;
+
+  @Column(name = "password_changed_at")
+  private Instant passwordChangedAt;
 
   @Column(name = "created_at")
   private Instant createdAt;
@@ -111,6 +118,16 @@ public class UserEntity {
     this.deletedAt = null;
   }
 
+  /**
+   * Reset de senha por ADMIN (passo 113): troca o hash, exige a troca no próximo login e registra
+   * quando a senha mudou.
+   */
+  void resetPassword(String passwordHash) {
+    this.passwordHash = passwordHash;
+    this.mustChangePassword = true;
+    this.passwordChangedAt = Instant.now();
+  }
+
   public UUID getId() {
     return id;
   }
@@ -137,6 +154,11 @@ public class UserEntity {
 
   public void setStatus(String status) {
     this.status = status;
+  }
+
+  /** Indica se o usuário precisa trocar a senha no próximo login. */
+  public boolean isMustChangePassword() {
+    return mustChangePassword;
   }
 
   public Instant getCreatedAt() {
