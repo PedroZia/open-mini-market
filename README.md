@@ -51,9 +51,6 @@ cd backend
 .\mvnw.cmd verify      # Windows (PowerShell/cmd)
 ```
 
-O reuso do container entre execuções é opt-in: defina `TESTCONTAINERS_REUSE_ENABLE=true` no ambiente
-(o Testcontainers 2.0.4 ignora `backend/src/test/resources/testcontainers.properties` nessa checagem).
-
 ## Estado do projeto
 
 🚧 **Em implementação** — o progresso passo a passo está nos checkboxes do
