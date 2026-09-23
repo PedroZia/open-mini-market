@@ -209,7 +209,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de integração para cada operação; sessão revogada não é encontrada como ativa.
   **Commit:** `feat(auth): adiciona repositorio de sessoes`
 
-- [ ] **203 — Gerador e hash de token**
+- [x] **203 — Gerador e hash de token**
   **Objetivo:** token opaco seguro. **Depende:** 002
   **Implementar:** `TokenGenerator` (32 bytes `SecureRandom` → Base64URL) + `TokenHasher` (SHA-256 hex) + comparação em tempo constante.
   **Testes/aceite:** tokens distintos a cada chamada; hash estável; comparação rejeita token alterado.
