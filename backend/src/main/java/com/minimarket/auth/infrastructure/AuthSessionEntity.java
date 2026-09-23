@@ -79,8 +79,9 @@ public class AuthSessionEntity {
   protected AuthSessionEntity() {}
 
   /**
-   * Sessão nova; o id (UUIDv7) fica com o repositório e {@code created_at}/{@code last_seen_at} com
-   * o ciclo de vida do JPA.
+   * Sessão nova; o id (UUIDv7) fica com o repositório e {@code created_at} com o ciclo de vida do
+   * JPA. {@code lastSeenAt} (marco zero do idle timeout) e {@code expiresAt} vêm do relógio do caso
+   * de uso — o login injeta o {@code Clock} e os testes de expiração precisam dele.
    */
   public AuthSessionEntity(
       UUID userId,
@@ -90,6 +91,7 @@ public class AuthSessionEntity {
       UUID cashRegisterId,
       InetAddress ip,
       String userAgent,
+      Instant lastSeenAt,
       Instant expiresAt) {
     this.userId = userId;
     this.tokenHash = tokenHash;
@@ -98,15 +100,13 @@ public class AuthSessionEntity {
     this.cashRegisterId = cashRegisterId;
     this.ip = ip;
     this.userAgent = userAgent;
+    this.lastSeenAt = lastSeenAt;
     this.expiresAt = expiresAt;
   }
 
-  /** A sessão nasce com os dois instantes iguais: a criação é o primeiro "visto". */
   @PrePersist
   void markCreated() {
-    Instant now = Instant.now();
-    createdAt = now;
-    lastSeenAt = now;
+    createdAt = Instant.now();
   }
 
   void assignId(UUID id) {

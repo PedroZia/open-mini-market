@@ -1,5 +1,6 @@
 package com.minimarket.users.application;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -76,4 +77,26 @@ public interface UserStore {
    * e o {@code totalPages} da página.
    */
   long count(String search, Boolean active);
+
+  /**
+   * Estado de autenticação do usuário pelo username (já normalizado), para o login (passo 204a).
+   * Diferente de {@link #findSummaryById}, enxerga o usuário soft-deletado: é o caso de uso que
+   * decide recusar — e o faz com a mensagem genérica de credenciais inválidas. Vazio quando não
+   * existe usuário com o username.
+   */
+  Optional<UserAuthState> findAuthStateByUsername(String username);
+
+  /**
+   * Sucesso do login (passo 204a): grava {@code last_login_at} e zera o contador de falhas. Usuário
+   * soft-deletado é no-op, como em {@link #updateDisplayName}; o instante vem do {@code Clock} do
+   * caso de uso.
+   */
+  void recordSuccessfulLogin(UUID id, Instant loginAt);
+
+  /**
+   * Rehash do login (passo 204a): troca o hash quando a política de senha ficou mais forte, sem
+   * exigir troca nem mexer em {@code password_changed_at} — a senha é a mesma. Soft-deletado é
+   * no-op, como em {@link #updateDisplayName}.
+   */
+  void updatePasswordHash(UUID id, String passwordHash);
 }

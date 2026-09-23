@@ -10,6 +10,7 @@ public enum ErrorCode {
   VALIDATION_ERROR(400, "Dados inválidos"),
   UNKNOWN_ROLE(400, "Papel desconhecido"),
   UNKNOWN_PERMISSION(400, "Permissão desconhecida"),
+  INVALID_CREDENTIALS(401, "Credenciais inválidas"),
   NOT_FOUND(404, "Recurso não encontrado"),
   USER_NOT_FOUND(404, "Usuário não encontrado"),
   ROLE_NOT_FOUND(404, "Papel não encontrado"),
@@ -17,6 +18,7 @@ public enum ErrorCode {
   CONFLICT(409, "Conflito de estado"),
   USERNAME_ALREADY_EXISTS(409, "Username já está em uso"),
   BUSINESS_ERROR(422, "Regra de negócio violada"),
+  ACCOUNT_LOCKED(423, "Conta bloqueada"),
   INTERNAL_ERROR(500, "Erro interno");
 
   private static final String TYPE_BASE = "https://minimarket.local/problems/";

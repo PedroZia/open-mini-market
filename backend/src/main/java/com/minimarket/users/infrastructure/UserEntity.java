@@ -21,7 +21,8 @@ import java.util.UUID;
  * uso. A entidade não sai do módulo — nada de JPA em JSON.
  *
  * <p>Só as colunas usadas hoje: {@code failed_login_attempts}, {@code locked_until} e {@code
- * last_login_at} entram quando o caso de uso que as usa existir.
+ * last_login_at} passaram a ser mapeadas no passo 204a (login); o lock em si (passo 204b) e o
+ * restante entram quando o caso de uso que os usa existir.
  */
 @Entity
 @Table(name = "users")
@@ -52,6 +53,19 @@ public class UserEntity {
 
   @Column(name = "password_changed_at")
   private Instant passwordChangedAt;
+
+  /**
+   * Falhas de login desde o último sucesso; o lock por tentativas (passo 204b) lê este contador.
+   */
+  @Column(name = "failed_login_attempts")
+  private int failedLoginAttempts;
+
+  /** Instante até o qual o login está bloqueado (passo 204b); nulo quando não há bloqueio. */
+  @Column(name = "locked_until")
+  private Instant lockedUntil;
+
+  @Column(name = "last_login_at")
+  private Instant lastLoginAt;
 
   @Column(name = "created_at")
   private Instant createdAt;
@@ -136,6 +150,23 @@ public class UserEntity {
     this.mustChangePassword = true;
   }
 
+  /**
+   * Sucesso do login (passo 204a): registra o instante e zera o contador de falhas. O lock por
+   * tentativas (passo 204b) é quem decide sobre {@code locked_until}.
+   */
+  void recordSuccessfulLogin(Instant loginAt) {
+    this.lastLoginAt = loginAt;
+    this.failedLoginAttempts = 0;
+  }
+
+  /**
+   * Rehash do login (passo 204a): troca só o hash — a senha é a mesma, então nada de {@code
+   * mustChangePassword} nem de {@code password_changed_at}.
+   */
+  void replacePasswordHash(String passwordHash) {
+    this.passwordHash = passwordHash;
+  }
+
   public UUID getId() {
     return id;
   }
@@ -167,6 +198,16 @@ public class UserEntity {
   /** Indica se o usuário precisa trocar a senha no próximo login. */
   public boolean isMustChangePassword() {
     return mustChangePassword;
+  }
+
+  /** Falhas de login acumuladas desde o último sucesso. */
+  public int getFailedLoginAttempts() {
+    return failedLoginAttempts;
+  }
+
+  /** Instante do último login bem-sucedido; nulo enquanto o usuário nunca entrou. */
+  public Instant getLastLoginAt() {
+    return lastLoginAt;
   }
 
   public Instant getCreatedAt() {

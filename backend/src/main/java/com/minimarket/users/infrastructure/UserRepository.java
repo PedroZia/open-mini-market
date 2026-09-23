@@ -4,6 +4,7 @@ import com.github.f4b6a3.uuid.UuidCreator;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.users.application.NewUser;
+import com.minimarket.users.application.UserAuthState;
 import com.minimarket.users.application.UserSort;
 import com.minimarket.users.application.UserStore;
 import com.minimarket.users.application.UserSummary;
@@ -40,6 +41,12 @@ public class UserRepository implements UserStore {
   private static final String UNIQUE_VIOLATION = "23505";
 
   @Inject EntityManager entityManager;
+
+  /**
+   * Permissões efetivas do usuário (união das roles): consulta de {@code role_permissions} que já
+   * mora em {@link PermissionRepository} — a projeção do login não repete o JPQL.
+   */
+  @Inject PermissionRepository permissionRepository;
 
   /** Busca pelo username normalizado, incluindo usuário soft-deletado. */
   public Optional<UserEntity> findByUsername(String username) {
@@ -120,6 +127,32 @@ public class UserRepository implements UserStore {
   /**
    * {@inheritDoc}
    *
+   * <p>Mesmo filtro de usuário vivo de {@link #updateDisplayName}; a alteração sai no flush da
+   * transação do caso de uso.
+   */
+  @Override
+  public void recordSuccessfulLogin(UUID id, Instant loginAt) {
+    findById(id)
+        .filter(user -> user.getDeletedAt() == null)
+        .ifPresent(user -> user.recordSuccessfulLogin(loginAt));
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Mesmo filtro de usuário vivo de {@link #updateDisplayName}; o flush fica com a transação do
+   * caso de uso.
+   */
+  @Override
+  public void updatePasswordHash(UUID id, String passwordHash) {
+    findById(id)
+        .filter(user -> user.getDeletedAt() == null)
+        .ifPresent(user -> user.replacePasswordHash(passwordHash));
+  }
+
+  /**
+   * {@inheritDoc}
+   *
    * <p>O filtro de {@code deleted_at} fica aqui, junto com o de {@link #search}: usuário
    * soft-deletado não existe para a aplicação.
    */
@@ -134,6 +167,30 @@ public class UserRepository implements UserStore {
             .setMaxResults(1)
             .getResultList();
     return toSummaries(found).stream().findFirst();
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Reaproveita a busca por username (que já enxerga o soft-deletado) e monta a projeção com o
+   * RBAC efetivo: as roles saem de {@link #loadRoles} e as permissões, da consulta de {@code
+   * role_permissions} de {@link PermissionRepository} — nenhuma entidade atravessa a porta.
+   */
+  @Override
+  public Optional<UserAuthState> findAuthStateByUsername(String username) {
+    return findByUsername(username)
+        .map(
+            user ->
+                new UserAuthState(
+                    user.getId(),
+                    user.getUsername(),
+                    user.getDisplayName(),
+                    user.getPasswordHash(),
+                    user.getStatus(),
+                    user.getDeletedAt(),
+                    user.isMustChangePassword(),
+                    loadRoles(List.of(user.getId())).getOrDefault(user.getId(), List.of()),
+                    permissionRepository.effectivePermissions(user.getId())));
   }
 
   /** {@inheritDoc} */

@@ -215,11 +215,17 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** tokens distintos a cada chamada; hash estável; comparação rejeita token alterado.
   **Commit:** `feat(auth): adiciona geracao e hash de token de sessao`
 
-- [ ] **204 — Caso de uso `Login`**
-  **Objetivo:** autenticar com todas as regras. **Depende:** 104, 106, 202, 203
-  **Implementar:** `LoginUseCase`: busca usuário (ou hash dummy), verifica senha, checa `status`/`deleted_at`, checa `locked_until`, zera contador em sucesso, incrementa/registra falha e lock após 5 tentativas (15 min), rehash se necessário, cria sessão (expiração absoluta 12 h, idle 30 min WEB / 8 h TUI), atualiza `last_login_at`, resolve loja e caixa.
-  **Testes/aceite:** unitários com repositórios fake: sucesso, senha errada, usuário inexistente, usuário desativado, bloqueado, desbloqueio após expirar, rehash.
-  **Commit:** `feat(auth): implementa caso de uso de login`
+- [x] **204a — Caso de uso `Login` (núcleo)**
+  **Objetivo:** autenticar sem a política de lock. **Depende:** 104, 106, 202, 203
+  **Implementar:** mapear os campos de autenticação na `UserEntity` (`failed_login_attempts`, `locked_until`, `last_login_at`), porta de leitura do estado de autenticação, porta de sessões, config de expiração/idle, `LoginUseCase` (busca usuário ou hash dummy; verifica senha; recusa `status != ACTIVE`/`deleted_at`; zera contador no sucesso; rehash se necessário; cria sessão com expiração absoluta 12 h e idle 30 min WEB / 8 h TUI; atualiza `last_login_at`; resolve loja e caixa).
+  **Testes/aceite:** unitários com fakes — sucesso, senha errada, usuário inexistente, usuário desativado, rehash.
+  **Commit:** `feat(auth): implementa nucleo do caso de uso de login`
+
+- [ ] **204b — Lock por tentativas de login**
+  **Objetivo:** bloquear após 5 falhas por 15 min. **Depende:** 204a
+  **Implementar:** contador de falhas, `locked_until`, config do lock, desbloqueio ao expirar.
+  **Testes/aceite:** unitários — bloqueado recusa mesmo com senha certa; desbloqueio após expirar; sucesso zera contador e lock.
+  **Commit:** `feat(auth): bloqueia login apos tentativas falhas`
 
 - [ ] **205 — API `POST /api/v1/auth/login`**
   **Objetivo:** login via HTTP. **Depende:** 204

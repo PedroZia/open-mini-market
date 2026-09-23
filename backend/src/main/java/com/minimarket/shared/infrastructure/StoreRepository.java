@@ -27,6 +27,9 @@ public class StoreRepository implements StoreLookup {
 
   private static Store toDomain(StoreEntity entity) {
     return new Store(
-        entity.getCode(), entity.isAllowNegativeStock(), entity.getMaxDiscountPercent());
+        entity.getId(),
+        entity.getCode(),
+        entity.isAllowNegativeStock(),
+        entity.getMaxDiscountPercent());
   }
 }

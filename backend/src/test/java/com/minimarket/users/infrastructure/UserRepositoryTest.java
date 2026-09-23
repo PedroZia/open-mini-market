@@ -7,6 +7,7 @@ import com.minimarket.IntegrationTestBase;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.users.application.NewUser;
+import com.minimarket.users.application.RoleStore;
 import com.minimarket.users.application.UserSort;
 import com.minimarket.users.application.UserSummary;
 import io.quarkus.test.TestTransaction;
@@ -14,6 +15,8 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +29,8 @@ import org.junit.jupiter.api.Test;
 class UserRepositoryTest extends IntegrationTestBase {
 
   @Inject UserRepository userRepository;
+
+  @Inject RoleStore roleStore;
 
   @Inject EntityManager entityManager;
 
@@ -301,5 +306,82 @@ class UserRepositoryTest extends IntegrationTestBase {
     assertThat(userRepository.search(null, null, UserSort.USERNAME, true, 2, 2))
         .extracting(UserSummary::username)
         .containsExactly("user5");
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName(
+      "findAuthStateByUsername traz hash, status, roles e permissões efetivas, e enxerga o soft-deletado")
+  void findsAuthStateByUsername() {
+    UUID userId = userRepository.insert(new NewUser("ana.auth", "Ana Auth", "hash-auth", "ACTIVE"));
+    roleStore.assignRoles(userId, List.of("OPERADOR"));
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(userRepository.findAuthStateByUsername("ANA.AUTH"))
+        .hasValueSatisfying(
+            state -> {
+              assertThat(state.id()).isEqualTo(userId);
+              assertThat(state.username()).isEqualTo("ana.auth");
+              assertThat(state.displayName()).isEqualTo("Ana Auth");
+              assertThat(state.passwordHash()).isEqualTo("hash-auth");
+              assertThat(state.status()).isEqualTo(UserEntity.STATUS_ACTIVE);
+              assertThat(state.deletedAt()).isNull();
+              assertThat(state.mustChangePassword()).isFalse();
+              assertThat(state.roles()).containsExactly("OPERADOR");
+              assertThat(state.permissions()).contains("sale.create").doesNotContain("user.write");
+            });
+    assertThat(userRepository.findAuthStateByUsername("nao.existe")).isEmpty();
+
+    // O login precisa enxergar o soft-deletado para recusar com a mensagem genérica (passo 204a).
+    userRepository.softDelete(userId);
+    entityManager.flush();
+    entityManager.clear();
+    assertThat(userRepository.findAuthStateByUsername("ana.auth"))
+        .hasValueSatisfying(state -> assertThat(state.deletedAt()).isNotNull());
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("recordSuccessfulLogin grava last_login_at e zera o contador de falhas")
+  void recordsSuccessfulLogin() {
+    UUID userId = userRepository.insert(new NewUser("ana.login", "Ana Login", "hash", "ACTIVE"));
+    entityManager.flush();
+    entityManager.clear();
+    entityManager
+        .createQuery("update UserEntity u set u.failedLoginAttempts = 3 where u.id = :id")
+        .setParameter("id", userId)
+        .executeUpdate();
+    entityManager.flush();
+    entityManager.clear();
+    Instant loginAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+
+    userRepository.recordSuccessfulLogin(userId, loginAt);
+    entityManager.flush();
+    entityManager.clear();
+
+    UserEntity reloaded = userRepository.findById(userId).orElseThrow();
+    assertThat(reloaded.getLastLoginAt()).isEqualTo(loginAt);
+    assertThat(reloaded.getFailedLoginAttempts()).isZero();
+    // Id desconhecido é no-op, como nas outras escritas por id.
+    userRepository.recordSuccessfulLogin(UUID.randomUUID(), loginAt);
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("updatePasswordHash troca só o hash, sem exigir troca de senha")
+  void updatesPasswordHash() {
+    UUID userId =
+        userRepository.insert(new NewUser("ana.rehash", "Ana Rehash", "hash-antigo", "ACTIVE"));
+    entityManager.flush();
+    entityManager.clear();
+
+    userRepository.updatePasswordHash(userId, "hash-novo");
+    entityManager.flush();
+    entityManager.clear();
+
+    UserEntity reloaded = userRepository.findById(userId).orElseThrow();
+    assertThat(reloaded.getPasswordHash()).isEqualTo("hash-novo");
+    assertThat(reloaded.isMustChangePassword()).isFalse();
   }
 }

@@ -3,6 +3,9 @@ package com.minimarket.auth.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.minimarket.IntegrationTestBase;
+import com.minimarket.auth.application.NewAuthSession;
+import com.minimarket.auth.domain.SessionClient;
+import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.users.application.NewUser;
 import com.minimarket.users.application.UserStore;
 import io.quarkus.test.TestTransaction;
@@ -16,6 +19,7 @@ import java.sql.ResultSet;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -34,7 +38,12 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
 
   @Inject UserStore userStore;
 
+  @Inject StoreLookup storeLookup;
+
   @Inject EntityManager entityManager;
+
+  @ConfigProperty(name = "minimarket.store.default-code")
+  String defaultStoreCode;
 
   private UUID storeId;
 
@@ -45,11 +54,20 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
     UUID userId = newUser("sessao.insert");
     UUID cashRegisterId = UUID.randomUUID();
     UUID store = storeId();
+    Instant lastSeenAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
     Instant expiresAt = expiresAt();
     InetAddress ip = InetAddress.getByName("192.168.0.10");
     AuthSessionEntity session =
         new AuthSessionEntity(
-            userId, "hash-insert", "TUI", store, cashRegisterId, ip, "terminal/1.0", expiresAt);
+            userId,
+            "hash-insert",
+            "TUI",
+            store,
+            cashRegisterId,
+            ip,
+            "terminal/1.0",
+            lastSeenAt,
+            expiresAt);
 
     UUID id = sessionRepository.insert(session);
     assertThat(id).isNotNull();
@@ -68,7 +86,7 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
               assertThat(found.getIp()).isEqualTo(ip);
               assertThat(found.getUserAgent()).isEqualTo("terminal/1.0");
               assertThat(found.getCreatedAt()).isNotNull();
-              assertThat(found.getLastSeenAt()).isNotNull();
+              assertThat(found.getLastSeenAt()).isEqualTo(lastSeenAt);
               assertThat(found.getExpiresAt()).isEqualTo(expiresAt);
               assertThat(found.getRevokedAt()).isNull();
               assertThat(found.getRevokedReason()).isNull();
@@ -109,6 +127,40 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
             });
     assertThat(sessionRepository.findActiveByTokenHash("hash-opcional-2"))
         .hasValueSatisfying(found -> assertThat(found.getId()).isEqualTo(second));
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("insert(NewAuthSession) da porta traduz o client e mantém o hash e os instantes")
+  void insertsThroughStorePort() throws Exception {
+    UUID userId = newUser("sessao.porta");
+    NewAuthSession session =
+        new NewAuthSession(
+            userId,
+            "hash-porta",
+            SessionClient.WEB,
+            storeId(),
+            null,
+            null,
+            "web/1.0",
+            Instant.now().truncatedTo(ChronoUnit.MICROS),
+            expiresAt());
+
+    UUID id = sessionRepository.insert(session);
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(sessionRepository.findById(id))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.getUserId()).isEqualTo(userId);
+              assertThat(found.getTokenHash()).isEqualTo("hash-porta");
+              assertThat(found.getClient()).isEqualTo("WEB");
+              assertThat(found.getStoreId()).isEqualTo(storeId());
+              assertThat(found.getUserAgent()).isEqualTo("web/1.0");
+              assertThat(found.getLastSeenAt()).isEqualTo(session.lastSeenAt());
+              assertThat(found.getExpiresAt()).isEqualTo(session.expiresAt());
+            });
   }
 
   @Test
@@ -278,7 +330,16 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
 
   private AuthSessionEntity session(UUID userId, String tokenHash, Instant expiresAt)
       throws Exception {
-    return new AuthSessionEntity(userId, tokenHash, "TUI", storeId(), null, null, null, expiresAt);
+    return new AuthSessionEntity(
+        userId,
+        tokenHash,
+        "TUI",
+        storeId(),
+        null,
+        null,
+        null,
+        Instant.now().truncatedTo(ChronoUnit.MICROS),
+        expiresAt);
   }
 
   /** Sessão de 12 h (§6.2), truncada ao microssegundo que o {@code timestamptz} guarda. */
@@ -293,17 +354,14 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
     return id;
   }
 
-  /** Id da loja MATRIZ: a porta {@code StoreLookup} devolve só os parâmetros de negócio, sem id. */
-  private UUID storeId() throws Exception {
+  /** Id da loja configurada: a porta {@code StoreLookup} devolve o id desde o passo 204a. */
+  private UUID storeId() {
     if (storeId == null) {
-      try (Connection connection = dataSource.getConnection();
-          PreparedStatement statement =
-              connection.prepareStatement("select id from stores where code = 'MATRIZ'")) {
-        try (ResultSet resultSet = statement.executeQuery()) {
-          assertThat(resultSet.next()).as("loja MATRIZ do seed da V1").isTrue();
-          storeId = UUID.fromString(resultSet.getString("id"));
-        }
-      }
+      storeId =
+          storeLookup
+              .findByCode(defaultStoreCode)
+              .orElseThrow(() -> new IllegalStateException("loja do seed da V1 ausente"))
+              .id();
     }
     return storeId;
   }

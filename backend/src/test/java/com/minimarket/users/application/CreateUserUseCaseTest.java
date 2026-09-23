@@ -7,6 +7,7 @@ import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import java.lang.reflect.RecordComponent;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -171,6 +172,21 @@ class CreateUserUseCaseTest {
     @Override
     public long count(String search, Boolean active) {
       throw new UnsupportedOperationException("count não é usado por CreateUser");
+    }
+
+    @Override
+    public Optional<UserAuthState> findAuthStateByUsername(String username) {
+      throw new UnsupportedOperationException("findAuthStateByUsername não é usado por CreateUser");
+    }
+
+    @Override
+    public void recordSuccessfulLogin(UUID id, Instant loginAt) {
+      throw new UnsupportedOperationException("recordSuccessfulLogin não é usado por CreateUser");
+    }
+
+    @Override
+    public void updatePasswordHash(UUID id, String passwordHash) {
+      throw new UnsupportedOperationException("updatePasswordHash não é usado por CreateUser");
     }
   }
 

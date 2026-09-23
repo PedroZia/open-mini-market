@@ -1,6 +1,8 @@
 package com.minimarket.auth.infrastructure;
 
 import com.github.f4b6a3.uuid.UuidCreator;
+import com.minimarket.auth.application.AuthSessionStore;
+import com.minimarket.auth.application.NewAuthSession;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -16,11 +18,36 @@ import java.util.UUID;
  *
  * <p>"Ativa" aqui é só "não revogada": a expiração (absoluta e idle, §6.2) é decisão do caso de uso
  * com o {@code Clock} injetado, que também decide quando a sessão deixa de ser atualizada.
+ *
+ * <p>Implementa a porta {@link AuthSessionStore} (passo 204a): é por ela que {@code application}
+ * cria sessão sem tocar em JPA.
  */
 @ApplicationScoped
-public class AuthSessionRepository {
+public class AuthSessionRepository implements AuthSessionStore {
 
   @Inject EntityManager entityManager;
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Traduz o record de aplicação para a entidade: o {@code client} vira o texto aceito pelo
+   * check constraint e o resto chega pronto (hash do token, loja, caixa, ip, user agent,
+   * instantes).
+   */
+  @Override
+  public UUID insert(NewAuthSession session) {
+    return insert(
+        new AuthSessionEntity(
+            session.userId(),
+            session.tokenHash(),
+            session.client().name(),
+            session.storeId(),
+            session.cashRegisterId(),
+            session.ip(),
+            session.userAgent(),
+            session.lastSeenAt(),
+            session.expiresAt()));
+  }
 
   /** Gera o id (UUIDv7, §5.1) na aplicação e persiste; a transação é do caso de uso. */
   public UUID insert(AuthSessionEntity session) {

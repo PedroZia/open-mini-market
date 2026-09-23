@@ -31,6 +31,10 @@ public class StoreEntity {
   /** Exigido pelo JPA. */
   protected StoreEntity() {}
 
+  public UUID getId() {
+    return id;
+  }
+
   public String getCode() {
     return code;
   }
