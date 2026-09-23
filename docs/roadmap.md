@@ -109,7 +109,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** migration aplica do zero; constraint de `status` rejeita valor inválido (teste de integração).
   **Commit:** `feat(users): cria tabela de usuarios`
 
-- [ ] **102 — `UserEntity` + `UserRepository`**
+- [x] **102 — `UserEntity` + `UserRepository`**
   **Objetivo:** persistência do usuário. **Depende:** 101
   **Implementar:** entidade JPA em `users/infrastructure`; repositório com `findByUsername`, `findById`, `insert`, `update`, `softDelete`, `search(search, active, page, size)`; normalização de `username` (lowercase/trim).
   **Testes/aceite:** teste de integração: inserir, buscar, atualizar, soft delete (não aparece na busca).

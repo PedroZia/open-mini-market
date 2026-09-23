@@ -1,0 +1,135 @@
+package com.minimarket.users.infrastructure;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * Mapeamento da tabela {@code users} (§5.3 do plano). JPA explícito, sem Panache: o id (UUIDv7) e o
+ * username normalizado chegam prontos do {@link UserRepository}; regra de negócio mora nos casos de
+ * uso. A entidade não sai do módulo — nada de JPA em JSON.
+ *
+ * <p>Só as colunas usadas hoje: {@code failed_login_attempts}, {@code locked_until}, {@code
+ * password_changed_at} e {@code last_login_at} entram quando o caso de uso que as usa existir.
+ */
+@Entity
+@Table(name = "users")
+public class UserEntity {
+
+  public static final String STATUS_ACTIVE = "ACTIVE";
+  public static final String STATUS_DISABLED = "DISABLED";
+
+  @Id
+  @Column(name = "id")
+  private UUID id;
+
+  @Column(name = "username")
+  private String username;
+
+  @Column(name = "password_hash")
+  private String passwordHash;
+
+  @Column(name = "display_name")
+  private String displayName;
+
+  @Column(name = "status")
+  private String status;
+
+  @Column(name = "created_at")
+  private Instant createdAt;
+
+  @Column(name = "updated_at")
+  private Instant updatedAt;
+
+  @Column(name = "deleted_at")
+  private Instant deletedAt;
+
+  @Version
+  @Column(name = "version")
+  private long version;
+
+  /** Exigido pelo JPA. */
+  protected UserEntity() {}
+
+  /** Usuário novo nasce {@code ACTIVE}; id e normalização do username ficam com o repositório. */
+  public UserEntity(String username, String passwordHash, String displayName) {
+    this.username = username;
+    this.passwordHash = passwordHash;
+    this.displayName = displayName;
+    this.status = STATUS_ACTIVE;
+  }
+
+  @PrePersist
+  void markCreated() {
+    Instant now = Instant.now();
+    createdAt = now;
+    updatedAt = now;
+  }
+
+  @PreUpdate
+  void markUpdated() {
+    updatedAt = Instant.now();
+  }
+
+  void assignId(UUID id) {
+    this.id = id;
+  }
+
+  void assignUsername(String username) {
+    this.username = username;
+  }
+
+  void markDeleted(Instant deletedAt) {
+    this.deletedAt = deletedAt;
+  }
+
+  public UUID getId() {
+    return id;
+  }
+
+  public String getUsername() {
+    return username;
+  }
+
+  public String getPasswordHash() {
+    return passwordHash;
+  }
+
+  public String getDisplayName() {
+    return displayName;
+  }
+
+  public void setDisplayName(String displayName) {
+    this.displayName = displayName;
+  }
+
+  public String getStatus() {
+    return status;
+  }
+
+  public void setStatus(String status) {
+    this.status = status;
+  }
+
+  public Instant getCreatedAt() {
+    return createdAt;
+  }
+
+  public Instant getUpdatedAt() {
+    return updatedAt;
+  }
+
+  public Instant getDeletedAt() {
+    return deletedAt;
+  }
+
+  public long getVersion() {
+    return version;
+  }
+}
