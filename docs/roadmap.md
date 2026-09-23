@@ -84,7 +84,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** em banco limpo, `%dev` aplica seed sem erro e reexecutar não duplica.
   **Commit:** `chore(db): adiciona seed de desenvolvimento`
 
-- [ ] **011 — CI**
+- [x] **011 — CI**
   **Objetivo:** build verde obrigatório. **Depende:** 002, 005
   **Implementar:** GitHub Actions com JDK 25, cache Maven, `mvn -B verify`; job de lint/`tsc` para Node (habilitado quando existir código TS).
   **Testes/aceite:** pipeline verde no repositório remoto em push de teste.
