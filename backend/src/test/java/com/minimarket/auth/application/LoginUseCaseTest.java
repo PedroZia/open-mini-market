@@ -509,6 +509,11 @@ class LoginUseCaseTest {
     public void revoke(UUID id, String reason, Instant revokedAt) {
       throw new UnsupportedOperationException("revoke não é usado por Login");
     }
+
+    @Override
+    public int revokeAllByUser(UUID userId, String reason, Instant revokedAt) {
+      throw new UnsupportedOperationException("revokeAllByUser não é usado por Login");
+    }
   }
 
   /** Dublê de {@link PasswordHasher}: controla o resultado e registra o hash conferido. */

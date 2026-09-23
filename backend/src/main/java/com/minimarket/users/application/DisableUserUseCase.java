@@ -4,6 +4,7 @@ import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.NotFoundException;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.UUID;
@@ -12,6 +13,10 @@ import java.util.UUID;
  * Desativa o usuário (passo 112) sem apagar histórico: o adaptador grava {@code status = DISABLED}
  * e {@code deleted_at}, o que tira o usuário da busca padrão e libera o username para reuso (§5.3).
  * Uma execução = uma transação (§2.2, regra 6).
+ *
+ * <p>Depois de desativar, publica {@link UserAccessChangedEvent} com o motivo {@code
+ * USER_DISABLED}: o observer de {@code auth} (passo 213) revoga todas as sessões vivas do usuário
+ * na mesma transação — o acesso cai já na requisição seguinte, sem esperar a expiração.
  */
 @ApplicationScoped
 public class DisableUserUseCase {
@@ -19,9 +24,15 @@ public class DisableUserUseCase {
   /** Papel cujo último exemplar ativo não pode ser desativado: sem ele o sistema fica sem ADMIN. */
   private static final String ADMIN_ROLE = "ADMIN";
 
+  /** Motivo gravado em {@code revoked_reason} das sessões revogadas pela desativação. */
+  public static final String USER_DISABLED_REASON = "USER_DISABLED";
+
   @Inject UserStore userStore;
 
   @Inject RoleStore roleStore;
+
+  /** Evento síncrono do corte de acesso (passo 213): a revogação das sessões é do módulo auth. */
+  @Inject Event<UserAccessChangedEvent> accessChanged;
 
   /**
    * 404 {@code USER_NOT_FOUND} quando não existe usuário vivo com o id (já desativado conta como
@@ -31,7 +42,9 @@ public class DisableUserUseCase {
   public UserSummary execute(UUID id) {
     UserSummary user = userStore.findSummaryById(id).orElseThrow(() -> notFound(id));
     requireNotLastActiveAdmin(user);
-    return userStore.disable(id).orElseThrow(() -> notFound(id));
+    UserSummary disabled = userStore.disable(id).orElseThrow(() -> notFound(id));
+    accessChanged.fire(new UserAccessChangedEvent(id, USER_DISABLED_REASON));
+    return disabled;
   }
 
   /**

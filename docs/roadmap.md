@@ -275,7 +275,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 21ª tentativa do mesmo IP → 429; IPs distintos não se afetam.
   **Commit:** `feat(auth): limita tentativas de login por IP`
 
-- [ ] **213 — Revogação automática de sessões**
+- [x] **213 — Revogação automática de sessões**
   **Objetivo:** cortar acesso imediatamente. **Depende:** 210, 112, 113
   **Implementar:** revogar todas as sessões ao desativar usuário e ao resetar senha; endpoint `DELETE /users/{id}/sessions` para ADMIN.
   **Testes/aceite:** usuário desativado perde acesso na requisição seguinte; reset de senha derruba sessões antigas.

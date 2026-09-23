@@ -9,12 +9,14 @@ import com.minimarket.users.application.EnableUserUseCase;
 import com.minimarket.users.application.GetUserUseCase;
 import com.minimarket.users.application.ListUsersUseCase;
 import com.minimarket.users.application.ResetPasswordUseCase;
+import com.minimarket.users.application.RevokeUserSessionsUseCase;
 import com.minimarket.users.application.UpdateUserUseCase;
 import com.minimarket.users.application.UserPage;
 import com.minimarket.users.application.UserSummary;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -52,6 +54,8 @@ public class UsersResource {
   @Inject EnableUserUseCase enableUserUseCase;
 
   @Inject ResetPasswordUseCase resetPasswordUseCase;
+
+  @Inject RevokeUserSessionsUseCase revokeUserSessionsUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -150,7 +154,8 @@ public class UsersResource {
   /**
    * Reset de senha por ADMIN (passo 113): define a senha temporária e devolve o usuário com {@code
    * mustChangePassword=true}. Id inexistente ou soft-deletado → 404 {@code USER_NOT_FOUND}; senha
-   * curta → 400 {@code VALIDATION_ERROR} com {@code errors[]}. Revogar as sessões é do passo 213.
+   * curta → 400 {@code VALIDATION_ERROR} com {@code errors[]}. As sessões antigas caem junto (passo
+   * 213).
    */
   @POST
   @Path("/{id}/password-reset")
@@ -158,5 +163,17 @@ public class UsersResource {
   @Produces(MediaType.APPLICATION_JSON)
   public UserResponse resetPassword(@PathParam("id") UUID id, @Valid ResetPasswordRequest request) {
     return toResponse(resetPasswordUseCase.execute(id, request.newPassword()));
+  }
+
+  /**
+   * Corta todas as sessões vivas do usuário (passo 213) e responde 204 sem corpo, como manda a
+   * especificação do JAX-RS para método {@code void}. Id inexistente ou soft-deletado → 404 {@code
+   * USER_NOT_FOUND}. A rota é para ADMIN na intenção, mas a permissão chega nos passos 305–307: até
+   * lá fica aberta, como as demais da Fase 1.
+   */
+  @DELETE
+  @Path("/{id}/sessions")
+  public void revokeSessions(@PathParam("id") UUID id) {
+    revokeUserSessionsUseCase.execute(id);
   }
 }

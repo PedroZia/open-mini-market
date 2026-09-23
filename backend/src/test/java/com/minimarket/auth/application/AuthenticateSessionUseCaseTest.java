@@ -289,6 +289,12 @@ class AuthenticateSessionUseCaseTest {
     public void revoke(UUID id, String reason, Instant revokedAt) {
       throw new UnsupportedOperationException("revoke não é usado por AuthenticateSession");
     }
+
+    @Override
+    public int revokeAllByUser(UUID userId, String reason, Instant revokedAt) {
+      throw new UnsupportedOperationException(
+          "revokeAllByUser não é usado por AuthenticateSession");
+    }
   }
 
   /** Dublê de {@link UserStore}: só o RBAC efetivo da autenticação por token é usado aqui. */

@@ -169,11 +169,12 @@ public class AuthSessionRepository implements AuthSessionStore {
   }
 
   /**
-   * Revoga todas as sessões vivas do usuário, com um motivo comum, e devolve quantas foram
-   * revogadas — as já revogadas não contam. Carrega as sessões em vez de fazer update em massa para
-   * o {@code @Version} de cada uma avançar; o volume por usuário é mínimo (logout de todos os
-   * dispositivos, §6.2).
+   * {@inheritDoc}
+   *
+   * <p>Carrega as sessões em vez de fazer update em massa para o {@code @Version} de cada uma
+   * avançar; o volume por usuário é mínimo (logout de todos os dispositivos, §6.2).
    */
+  @Override
   public int revokeAllByUser(UUID userId, String reason, Instant revokedAt) {
     List<AuthSessionEntity> active = activeEntitiesByUser(userId);
     active.forEach(session -> session.revoke(reason, revokedAt));

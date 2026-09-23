@@ -50,4 +50,11 @@ public interface AuthSessionStore {
    * saber se a sessão ainda existia, porque o token já deixou de autenticar de qualquer forma.
    */
   void revoke(UUID id, String reason, Instant revokedAt);
+
+  /**
+   * Revoga todas as sessões vivas do usuário com um motivo comum e devolve quantas foram revogadas
+   * (passo 213) — as já revogadas não contam. É o efeito da desativação, do reset de senha e do
+   * corte pelo ADMIN, disparado pelo evento {@code UserAccessChangedEvent}.
+   */
+  int revokeAllByUser(UUID userId, String reason, Instant revokedAt);
 }
