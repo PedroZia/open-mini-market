@@ -20,6 +20,13 @@ public interface UserStore {
   UUID insert(NewUser user);
 
   /**
+   * Troca o nome de exibição do usuário vivo; não mexe em username, senha, status nem papéis. Se o
+   * id não existe (ou está soft-deletado) nada é gravado — a existência é validada pelo caso de uso
+   * antes da chamada.
+   */
+  void updateDisplayName(UUID id, String displayName);
+
+  /**
    * Usuário vivo pelo id, com roles e status. Soft-deletado devolve vazio — o filtro de {@code
    * deleted_at} mora no adaptador, como em {@link #search}; usuário apenas {@code DISABLED}
    * continua sendo devolvido.

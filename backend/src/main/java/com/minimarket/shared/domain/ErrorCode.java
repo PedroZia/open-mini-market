@@ -8,6 +8,7 @@ import java.util.Locale;
  */
 public enum ErrorCode {
   VALIDATION_ERROR(400, "Dados inválidos"),
+  UNKNOWN_ROLE(400, "Papel desconhecido"),
   NOT_FOUND(404, "Recurso não encontrado"),
   USER_NOT_FOUND(404, "Usuário não encontrado"),
   METHOD_NOT_ALLOWED(405, "Método não permitido"),

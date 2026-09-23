@@ -6,6 +6,7 @@ import com.minimarket.users.application.CreateUserResult;
 import com.minimarket.users.application.CreateUserUseCase;
 import com.minimarket.users.application.GetUserUseCase;
 import com.minimarket.users.application.ListUsersUseCase;
+import com.minimarket.users.application.UpdateUserUseCase;
 import com.minimarket.users.application.UserPage;
 import com.minimarket.users.application.UserSummary;
 import jakarta.inject.Inject;
@@ -14,6 +15,7 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -39,6 +41,8 @@ public class UsersResource {
   @Inject ListUsersUseCase listUsersUseCase;
 
   @Inject GetUserUseCase getUserUseCase;
+
+  @Inject UpdateUserUseCase updateUserUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -93,5 +97,18 @@ public class UsersResource {
   @Produces(MediaType.APPLICATION_JSON)
   public UserResponse get(@PathParam("id") UUID id) {
     return toResponse(getUserUseCase.execute(id));
+  }
+
+  /**
+   * PUT substitui o nome de exibição e o conjunto de papéis; username e senha não mudam por aqui.
+   * Id inexistente → 404 {@code USER_NOT_FOUND}; papel desconhecido → 400 {@code UNKNOWN_ROLE} sem
+   * gravar nada.
+   */
+  @PUT
+  @Path("/{id}")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public UserResponse update(@PathParam("id") UUID id, @Valid UpdateUserRequest request) {
+    return toResponse(updateUserUseCase.execute(id, request.displayName(), request.roleCodes()));
   }
 }

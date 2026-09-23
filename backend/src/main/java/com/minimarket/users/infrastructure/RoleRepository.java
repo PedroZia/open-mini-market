@@ -6,6 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -48,23 +49,45 @@ public class RoleRepository implements RoleStore {
     user.getRoles().addAll(roles);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Só consulta os códigos existentes no catálogo; não grava nem lança — o caso de uso é quem
+   * decide transformar o resultado em 400 {@code UNKNOWN_ROLE}.
+   */
+  @Override
+  public Set<String> findUnknownCodes(Collection<String> roleCodes) {
+    if (roleCodes.isEmpty()) {
+      return Set.of();
+    }
+    Set<String> known =
+        new HashSet<>(
+            entityManager
+                .createQuery("select r.code from RoleEntity r where r.code in :codes", String.class)
+                .setParameter("codes", roleCodes)
+                .getResultList());
+    Set<String> unknown = new LinkedHashSet<>();
+    for (String code : roleCodes) {
+      if (!known.contains(code)) {
+        unknown.add(code);
+      }
+    }
+    return unknown;
+  }
+
   /** Carrega as roles dos códigos pedidos; qualquer código desconhecido derruba a operação. */
   private Set<RoleEntity> findRoles(Collection<String> roleCodes) {
     if (roleCodes.isEmpty()) {
       return Set.of();
     }
-    Set<RoleEntity> roles =
-        new LinkedHashSet<>(
-            entityManager
-                .createQuery("select r from RoleEntity r where r.code in :codes", RoleEntity.class)
-                .setParameter("codes", roleCodes)
-                .getResultList());
-    for (String code : roleCodes) {
-      boolean known = roles.stream().anyMatch(role -> role.getCode().equals(code));
-      if (!known) {
-        throw new NotFoundException("role %s não encontrada".formatted(code));
-      }
+    Set<String> unknown = findUnknownCodes(roleCodes);
+    if (!unknown.isEmpty()) {
+      throw new NotFoundException("role %s não encontrada".formatted(unknown.iterator().next()));
     }
-    return roles;
+    return new LinkedHashSet<>(
+        entityManager
+            .createQuery("select r from RoleEntity r where r.code in :codes", RoleEntity.class)
+            .setParameter("codes", roleCodes)
+            .getResultList());
   }
 }

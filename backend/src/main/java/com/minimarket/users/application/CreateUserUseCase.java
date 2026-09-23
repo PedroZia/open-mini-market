@@ -6,10 +6,8 @@ import com.minimarket.shared.domain.ErrorCode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -40,7 +38,7 @@ public class CreateUserUseCase {
           ErrorCode.USERNAME_ALREADY_EXISTS, "username %s já está em uso".formatted(username));
     }
     requireValidPassword(command.password());
-    List<String> roles = normalizeRoles(command.roleCodes());
+    List<String> roles = RoleCodes.normalize(command.roleCodes());
 
     UUID id =
         userStore.insert(
@@ -65,19 +63,5 @@ public class CreateUserUseCase {
           ErrorCode.VALIDATION_ERROR,
           "senha deve ter ao menos %d caracteres".formatted(MIN_PASSWORD_LENGTH));
     }
-  }
-
-  /** Trim e dedup preservando a ordem; código desconhecido é o adaptador que recusa. */
-  private static List<String> normalizeRoles(List<String> roleCodes) {
-    if (roleCodes == null) {
-      return List.of();
-    }
-    Set<String> unique = new LinkedHashSet<>();
-    for (String code : roleCodes) {
-      if (code != null) {
-        unique.add(code.trim());
-      }
-    }
-    return List.copyOf(unique);
   }
 }

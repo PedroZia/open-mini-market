@@ -163,7 +163,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 com dados corretos; 404 com `code=USER_NOT_FOUND`.
   **Commit:** `feat(users): expoe detalhe de usuario`
 
-- [ ] **111 — API `PUT /api/v1/users/{id}`**
+- [x] **111 — API `PUT /api/v1/users/{id}`**
   **Objetivo:** atualizar dados e roles. **Depende:** 108, 106
   **Implementar:** atualização de `displayName` e roles; username e senha **não** mudam por aqui.
   **Testes/aceite:** 200 altera nome e roles; 404 inexistente; roles inválidas → 400 com `code=UNKNOWN_ROLE`.

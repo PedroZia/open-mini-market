@@ -106,6 +106,45 @@ class UserRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
+  @DisplayName("updateDisplayName grava só o nome do usuário vivo e avança updated_at")
+  void updatesDisplayName() {
+    UserEntity user = userRepository.insert(new UserEntity("ana", "hash", "Ana"));
+    entityManager.flush();
+    entityManager.clear();
+    Instant before = userRepository.findById(user.getId()).orElseThrow().getUpdatedAt();
+
+    userRepository.updateDisplayName(user.getId(), "Ana Maria");
+    entityManager.flush();
+    entityManager.clear();
+
+    UserEntity reloaded = userRepository.findById(user.getId()).orElseThrow();
+    assertThat(reloaded.getDisplayName()).isEqualTo("Ana Maria");
+    assertThat(reloaded.getUsername()).isEqualTo("ana");
+    assertThat(reloaded.getPasswordHash()).isEqualTo("hash");
+    assertThat(reloaded.getUpdatedAt()).isAfterOrEqualTo(before);
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("updateDisplayName não grava nada em usuário soft-deletado nem em id desconhecido")
+  void ignoresDeletedUserOnUpdate() {
+    UserEntity deleted = userRepository.insert(new UserEntity("carla", "hash", "Carla"));
+    entityManager.flush();
+    userRepository.softDelete(deleted.getId());
+    entityManager.flush();
+    entityManager.clear();
+
+    userRepository.updateDisplayName(deleted.getId(), "Carla Nova");
+    userRepository.updateDisplayName(UUID.randomUUID(), "Ninguém");
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(userRepository.findById(deleted.getId()))
+        .hasValueSatisfying(found -> assertThat(found.getDisplayName()).isEqualTo("Carla"));
+  }
+
+  @Test
+  @TestTransaction
   @DisplayName("soft delete grava deleted_at sem mudar status e some da busca")
   void softDeletes() {
     UserEntity user = userRepository.insert(new UserEntity("carla", "hash", "Carla Dias"));

@@ -133,6 +133,11 @@ class CreateUserUseCaseTest {
     }
 
     @Override
+    public void updateDisplayName(UUID id, String displayName) {
+      throw new UnsupportedOperationException("updateDisplayName não é usado por CreateUser");
+    }
+
+    @Override
     public Optional<UserSummary> findSummaryById(UUID id) {
       throw new UnsupportedOperationException("findSummaryById não é usado por CreateUser");
     }
@@ -159,6 +164,11 @@ class CreateUserUseCaseTest {
     public void assignRoles(UUID userId, Collection<String> roleCodes) {
       this.userId = userId;
       this.roleCodes = List.copyOf(roleCodes);
+    }
+
+    @Override
+    public Set<String> findUnknownCodes(Collection<String> roleCodes) {
+      throw new UnsupportedOperationException("findUnknownCodes não é usado por CreateUser");
     }
   }
 

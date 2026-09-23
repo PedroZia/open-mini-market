@@ -286,6 +286,132 @@ class UsersResourceTest extends IntegrationTestBase {
         .isEqualTo("USER_NOT_FOUND");
   }
 
+  @Test
+  @DisplayName(
+      "PUT /api/v1/users/{id} responde 200 e altera nome e roles, sem tocar em username e senha")
+  void updatesDisplayNameAndRoles() throws SQLException {
+    String id = createUserWithRole("edita." + SUFFIX, "Nome Antigo", "OPERADOR");
+    String hashBefore = passwordHashOf("edita." + SUFFIX);
+
+    Response response =
+        given()
+            .contentType("application/json")
+            .body(
+                """
+                {"displayName": "Nome Novo", "roleCodes": ["GERENTE", "ADMIN"],
+                 "username": "invasor.%s", "password": "senha-invasora"}
+                """
+                    .formatted(SUFFIX))
+            .when()
+            .put("/api/v1/users/{id}", id)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("application/json"))
+            .extract()
+            .response();
+
+    assertThat(response.jsonPath().getString("id")).isEqualTo(id);
+    assertThat(response.jsonPath().getString("username")).isEqualTo("edita." + SUFFIX);
+    assertThat(response.jsonPath().getString("displayName")).isEqualTo("Nome Novo");
+    assertThat(response.jsonPath().getString("status")).isEqualTo("ACTIVE");
+    assertThat(response.jsonPath().getList("roles", String.class))
+        .containsExactly("ADMIN", "GERENTE");
+    assertThat(response.asString()).doesNotContain("senha-invasora").doesNotContain("$argon2");
+
+    Response persisted = getUser(id);
+    assertThat(persisted.jsonPath().getString("username")).isEqualTo("edita." + SUFFIX);
+    assertThat(persisted.jsonPath().getString("displayName")).isEqualTo("Nome Novo");
+    assertThat(persisted.jsonPath().getList("roles", String.class))
+        .containsExactly("ADMIN", "GERENTE");
+    assertThat(passwordHashOf("edita." + SUFFIX)).isEqualTo(hashBefore);
+
+    // roleCodes vazio é válido e remove todos os papéis
+    Response cleared =
+        putUser(
+            id,
+            """
+            {"displayName": "Nome Novo", "roleCodes": []}
+            """,
+            200);
+    assertThat(cleared.jsonPath().getList("roles")).isEmpty();
+    assertThat(getUser(id).jsonPath().getList("roles")).isEmpty();
+  }
+
+  @Test
+  @DisplayName("PUT /api/v1/users/{id} de id inexistente responde 404 USER_NOT_FOUND")
+  void returnsNotFoundWhenUpdatingUnknownId() {
+    Response response =
+        putUser(
+            UUID.randomUUID().toString(),
+            """
+            {"displayName": "Ninguém", "roleCodes": ["OPERADOR"]}
+            """,
+            404);
+
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/user-not-found");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Usuário não encontrado");
+    assertThat(response.jsonPath().getInt("status")).isEqualTo(404);
+    assertThat(response.jsonPath().getString("code")).isEqualTo("USER_NOT_FOUND");
+  }
+
+  @Test
+  @DisplayName(
+      "PUT /api/v1/users/{id} com role desconhecida responde 400 UNKNOWN_ROLE e não altera nada")
+  void rejectsUnknownRoleWithoutChangingUser() {
+    String id = createUserWithRole("role.invalida." + SUFFIX, "Nome Antigo", "OPERADOR");
+
+    Response response =
+        putUser(
+            id,
+            """
+            {"displayName": "Nome Novo", "roleCodes": ["OPERADOR", "FANTASMA"]}
+            """,
+            400);
+
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/unknown-role");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Papel desconhecido");
+    assertThat(response.jsonPath().getInt("status")).isEqualTo(400);
+    assertThat(response.jsonPath().getString("code")).isEqualTo("UNKNOWN_ROLE");
+
+    Response persisted = getUser(id);
+    assertThat(persisted.jsonPath().getString("displayName")).isEqualTo("Nome Antigo");
+    assertThat(persisted.jsonPath().getList("roles", String.class)).containsExactly("OPERADOR");
+  }
+
+  @Test
+  @DisplayName("PUT /api/v1/users/{id} com displayName em branco ou roleCodes ausente responde 400")
+  void rejectsInvalidUpdateBody() {
+    String id = createUserWithRole("corpo.invalido." + SUFFIX, "Nome Antigo", "OPERADOR");
+
+    Response blankName =
+        putUser(
+            id,
+            """
+            {"displayName": "   ", "roleCodes": []}
+            """,
+            400);
+    assertThat(blankName.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    assertThat(blankName.jsonPath().getList("errors.field", String.class))
+        .containsExactly("displayName");
+
+    Response missingRoles =
+        putUser(
+            id,
+            """
+            {"displayName": "Nome Novo"}
+            """,
+            400);
+    assertThat(missingRoles.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    assertThat(missingRoles.jsonPath().getList("errors.field", String.class))
+        .containsExactly("roleCodes");
+
+    assertThat(getUser(id).jsonPath().getString("displayName")).isEqualTo("Nome Antigo");
+  }
+
   /**
    * O request HTTP commita, então os usuários criados aqui são removidos ao fim de cada teste: os
    * testes de repositório assumem a tabela como a encontraram. A FK de {@code user_roles} é {@code
@@ -373,6 +499,19 @@ class UsersResourceTest extends IntegrationTestBase {
 
   private static Response getUser(String id) {
     return given().when().get("/api/v1/users/{id}", id).then().statusCode(200).extract().response();
+  }
+
+  /** PUT com corpo bruto; espera o status informado e devolve a resposta. */
+  private static Response putUser(String id, String body, int expectedStatus) {
+    return given()
+        .contentType("application/json")
+        .body(body)
+        .when()
+        .put("/api/v1/users/{id}", id)
+        .then()
+        .statusCode(expectedStatus)
+        .extract()
+        .response();
   }
 
   private static Response getUserExpectingNotFound(String id) {

@@ -82,6 +82,18 @@ class RoleRepositoryTest extends IntegrationTestBase {
     assertThat(roleRepository.rolesOf(user.getId())).isEmpty();
   }
 
+  @Test
+  @TestTransaction
+  @DisplayName("findUnknownCodes devolve só os códigos fora do catálogo, na ordem de entrada")
+  void findsUnknownRoleCodes() {
+    assertThat(roleRepository.findUnknownCodes(List.of())).isEmpty();
+    assertThat(roleRepository.findUnknownCodes(List.of("OPERADOR", "ADMIN"))).isEmpty();
+    assertThat(
+            roleRepository.findUnknownCodes(
+                List.of("OPERADOR", "FANTASMA", "ADMIN", "OUTRO", "FANTASMA")))
+        .containsExactly("FANTASMA", "OUTRO");
+  }
+
   private UserEntity insertUser(String username) {
     return userRepository.insert(new UserEntity(username, "hash", "Usuário " + username));
   }

@@ -106,6 +106,20 @@ public class UserRepository implements UserStore {
   /**
    * {@inheritDoc}
    *
+   * <p>Reaproveita {@link #findById} e aplica o mesmo filtro de soft delete de {@link
+   * #findSummaryById}: usuário apagado não é atualizado. A alteração sai no flush da transação do
+   * caso de uso.
+   */
+  @Override
+  public void updateDisplayName(UUID id, String displayName) {
+    findById(id)
+        .filter(user -> user.getDeletedAt() == null)
+        .ifPresent(user -> user.setDisplayName(displayName));
+  }
+
+  /**
+   * {@inheritDoc}
+   *
    * <p>O filtro de {@code deleted_at} fica aqui, junto com o de {@link #search}: usuário
    * soft-deletado não existe para a aplicação.
    */
