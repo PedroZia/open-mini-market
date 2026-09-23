@@ -84,6 +84,7 @@ versões seguem a estável do momento da instalação). Links verificados em 202
 | --- | --- |
 | [GitHub Actions](https://docs.github.com/en/actions) | workflow, cache, matriz de jobs |
 | [Renovate](https://docs.renovatebot.com/) | atualização automatizada de dependências |
+| [Spotless — plugin Maven](https://github.com/diffplug/spotless/tree/main/plugin-maven) | formatação Java com google-java-format: `spotless:apply`, `spotless:check` |
 
 ---
 

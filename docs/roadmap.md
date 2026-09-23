@@ -30,7 +30,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `git status` limpo após commit; árvore confere com §2.1 do plano.
   **Commit:** `chore: cria estrutura inicial do monorepo`
 
-- [ ] **002 — Projeto Quarkus rodando**
+- [x] **002 — Projeto Quarkus rodando**
   **Objetivo:** backend Quarkus 3.33 LTS (Java 25) que sobe e responde health. **Depende:** 001
   **Implementar:** `pom.xml` com extensões `quarkus-rest`, `quarkus-rest-jackson`, `quarkus-hibernate-orm`, `quarkus-jdbc-postgresql`, `quarkus-flyway`, `quarkus-hibernate-validator`, `quarkus-smallrye-health`, `quarkus-micrometer-registry-prometheus`; `application.properties` mínimo; `mvn quarkus:dev` funcionando; formatação com Spotless + google-java-format (justificar no commit: diff determinístico e revisão mais barata).
   **Testes/aceite:** `GET /q/health` retorna `UP`; `mvn verify` verde (um teste trivial de contexto).
