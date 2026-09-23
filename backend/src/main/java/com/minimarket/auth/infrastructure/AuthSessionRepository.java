@@ -4,6 +4,7 @@ import com.github.f4b6a3.uuid.UuidCreator;
 import com.minimarket.auth.application.AuthSessionSnapshot;
 import com.minimarket.auth.application.AuthSessionStore;
 import com.minimarket.auth.application.NewAuthSession;
+import com.minimarket.auth.domain.SessionClient;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -76,14 +77,33 @@ public class AuthSessionRepository implements AuthSessionStore {
             .setParameter("tokenHash", tokenHash)
             .setMaxResults(1)
             .getResultList();
-    return found.isEmpty()
-        ? Optional.empty()
-        : Optional.of(
-            new AuthSessionSnapshot(
-                found.getFirst().getId(),
-                found.getFirst().getUserId(),
-                found.getFirst().getLastSeenAt(),
-                found.getFirst().getExpiresAt()));
+    return found.isEmpty() ? Optional.empty() : Optional.of(toSnapshot(found.getFirst()));
+  }
+
+  /** Sessão não revogada pelo id; revogada ou desconhecida devolve vazio (passo 207). */
+  @Override
+  public Optional<AuthSessionSnapshot> findActiveById(UUID id) {
+    List<AuthSessionEntity> found =
+        entityManager
+            .createQuery(
+                "select s from AuthSessionEntity s where s.id = :id and s.revokedAt is null",
+                AuthSessionEntity.class)
+            .setParameter("id", id)
+            .setMaxResults(1)
+            .getResultList();
+    return found.isEmpty() ? Optional.empty() : Optional.of(toSnapshot(found.getFirst()));
+  }
+
+  /** Projeção de aplicação da entidade: nunca deixa JPA atravessar a porta (§2.2). */
+  private static AuthSessionSnapshot toSnapshot(AuthSessionEntity entity) {
+    return new AuthSessionSnapshot(
+        entity.getId(),
+        entity.getUserId(),
+        SessionClient.valueOf(entity.getClient()),
+        entity.getStoreId(),
+        entity.getCashRegisterId(),
+        entity.getLastSeenAt(),
+        entity.getExpiresAt());
   }
 
   /** Sessão pelo id, revogada ou não; vazio para id desconhecido. */

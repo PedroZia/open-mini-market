@@ -22,6 +22,9 @@ public class StoreEntity {
   @Column(name = "code")
   private String code;
 
+  @Column(name = "name")
+  private String name;
+
   @Column(name = "allow_negative_stock")
   private boolean allowNegativeStock;
 
@@ -37,6 +40,10 @@ public class StoreEntity {
 
   public String getCode() {
     return code;
+  }
+
+  public String getName() {
+    return name;
   }
 
   public boolean isAllowNegativeStock() {

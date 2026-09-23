@@ -21,10 +21,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * API do {@code POST /api/v1/auth/login} contra PostgreSQL real (Dev Services). O request HTTP
- * commita de verdade: cada teste usa um sufixo único da execução e o {@link
- * #removeUsersCreatedByThisRun()} apaga sessões, papéis e usuários ao fim de cada um — as FKs de
- * {@code auth_sessions} e {@code user_roles} são {@code on delete restrict}.
+ * API do {@code POST /api/v1/auth/login} e do {@code GET /api/v1/auth/me} contra PostgreSQL real
+ * (Dev Services). O request HTTP commita de verdade: cada teste usa um sufixo único da execução e o
+ * {@link #removeUsersCreatedByThisRun()} apaga sessões, papéis e usuários ao fim de cada um — as
+ * FKs de {@code auth_sessions} e {@code user_roles} são {@code on delete restrict}.
  */
 @QuarkusTest
 class AuthResourceTest extends IntegrationTestBase {
@@ -33,6 +33,9 @@ class AuthResourceTest extends IntegrationTestBase {
   private static final String PASSWORD = "senha-secreta";
   private static final String USER_AGENT = "pdv-test/1.0";
   private static final String LOGIN_PATH = "/api/v1/auth/login";
+  private static final String ME_PATH = "/api/v1/auth/me";
+  private static final String META_PATH = "/api/v1/meta";
+  private static final String AUTHORIZATION = "Authorization";
 
   /** Domínio puro, sem estado e sem CDI (passo 203): o teste instancia o hash do token. */
   private final TokenHasher tokenHasher = new TokenHasher();
@@ -74,6 +77,89 @@ class AuthResourceTest extends IntegrationTestBase {
     assertThat(sessionColumn(userId, "cash_register_id")).isEqualTo(cashRegisterId.toString());
     assertThat(sessionColumn(userId, "ip")).isNotNull();
     assertThat(sessionColumn(userId, "user_agent")).isEqualTo(USER_AGENT);
+  }
+
+  @Test
+  @DisplayName(
+      "GET /api/v1/auth/me responde 200 com usuário, RBAC, loja, caixa, cliente e expiração")
+  void returnsCurrentSession() {
+    String username = "me.ok." + SUFFIX;
+    String id = createUser(username, "Me Ok", "OPERADOR");
+    UUID cashRegisterId = UUID.randomUUID();
+    String token =
+        login(username, PASSWORD, "TUI", cashRegisterId.toString()).jsonPath().getString("token");
+
+    Response response =
+        given()
+            .header(AUTHORIZATION, "Bearer " + token)
+            .when()
+            .get(ME_PATH)
+            .then()
+            .extract()
+            .response();
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.contentType()).contains("application/json");
+    assertThat(response.jsonPath().getString("user.id")).isEqualTo(id);
+    assertThat(response.jsonPath().getString("user.username")).isEqualTo(username);
+    assertThat(response.jsonPath().getString("user.displayName")).isEqualTo("Me Ok");
+    assertThat(response.jsonPath().getList("roles", String.class)).containsExactly("OPERADOR");
+    assertThat(response.jsonPath().getList("permissions", String.class))
+        .contains("sale.create", "payment.add", "cash.open");
+    assertThat(response.jsonPath().getString("store.code")).isEqualTo("MATRIZ");
+    assertThat(response.jsonPath().getString("store.name")).isEqualTo("Matriz");
+    assertThat(response.jsonPath().getString("cashRegisterId"))
+        .isEqualTo(cashRegisterId.toString());
+    assertThat(response.jsonPath().getString("client")).isEqualTo("TUI");
+
+    Instant expiresAt = Instant.parse(response.jsonPath().getString("expiresAt"));
+    assertThat(expiresAt)
+        .isBetween(
+            Instant.now().plus(11, ChronoUnit.HOURS), Instant.now().plus(13, ChronoUnit.HOURS));
+    Instant lastSeenAt = Instant.parse(response.jsonPath().getString("lastSeenAt"));
+    assertThat(lastSeenAt).isNotNull().isBeforeOrEqualTo(Instant.now());
+
+    // A sessão atual não devolve credencial nem hash de nada.
+    assertThat(response.asString()).doesNotContain(PASSWORD).doesNotContain("$argon2");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/auth/me sem token responde 401 problem+json")
+  void rejectsCurrentSessionWithoutToken() {
+    Response response = given().when().get(ME_PATH).then().extract().response();
+
+    assertThat(response.statusCode()).isEqualTo(401);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Credenciais inválidas");
+    assertThat(response.jsonPath().getString("instance")).isEqualTo(ME_PATH);
+    assertThat(response.jsonPath().getString("traceId")).isNotBlank();
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/auth/me com token desconhecido responde 401 sem enumerar o motivo")
+  void rejectsCurrentSessionWithUnknownToken() {
+    Response response =
+        given()
+            .header(AUTHORIZATION, "Bearer token-que-nunca-existiu")
+            .when()
+            .get(ME_PATH)
+            .then()
+            .extract()
+            .response();
+
+    assertThat(response.statusCode()).isEqualTo(401);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/meta continua 200 sem token: só o /auth/me foi protegido")
+  void keepsMetaPublic() {
+    Response response = given().when().get(META_PATH).then().extract().response();
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.jsonPath().getString("storeCode")).isEqualTo("MATRIZ");
   }
 
   @Test

@@ -1,16 +1,22 @@
 package com.minimarket.auth.api;
 
+import com.minimarket.auth.application.AuthenticateSessionUseCase;
+import com.minimarket.auth.application.CurrentSession;
+import com.minimarket.auth.application.GetCurrentSessionUseCase;
 import com.minimarket.auth.application.LoginCommand;
 import com.minimarket.auth.application.LoginResult;
 import com.minimarket.auth.application.LoginUseCase;
 import com.minimarket.auth.domain.SessionClient;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
+import io.quarkus.security.Authenticated;
+import io.quarkus.security.identity.SecurityIdentity;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.net.SocketAddress;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -19,12 +25,13 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import java.net.InetAddress;
+import java.util.UUID;
 
 /**
- * Login do PDV (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a resposta —
- * zero regra de negócio aqui. A rota é pública (exceção do passo 308): é por ela que o cliente
- * obtém o token. Falha de credenciais e conta bloqueada saem do {@code LoginUseCase} como {@code
- * problem+json} (401 {@code INVALID_CREDENTIALS} e 423 {@code ACCOUNT_LOCKED}).
+ * Login e sessão atual do PDV (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a
+ * resposta — zero regra de negócio aqui. O login é público (exceção do passo 308): é por ele que o
+ * cliente obtém o token. Falha de credenciais e conta bloqueada saem do {@code LoginUseCase} como
+ * {@code problem+json} (401 {@code INVALID_CREDENTIALS} e 423 {@code ACCOUNT_LOCKED}).
  */
 @Path(AuthResource.PATH)
 public class AuthResource {
@@ -40,6 +47,11 @@ public class AuthResource {
   public static final String CLIENT_HEADER = "X-Client";
 
   @Inject LoginUseCase loginUseCase;
+
+  @Inject GetCurrentSessionUseCase getCurrentSessionUseCase;
+
+  /** Identidade montada pelo mecanismo bearer (passo 206); só o {@code /auth/me} a usa. */
+  @Inject SecurityIdentity identity;
 
   @POST
   @Path("/login")
@@ -66,6 +78,20 @@ public class AuthResource {
     return toResponse(result);
   }
 
+  /**
+   * Sessão atual (§9.3, passo 207): o cliente valida a sessão ao abrir. É a única rota real
+   * protegida até aqui — as demais seguem abertas até os passos 307/308. Sem token, ou com token
+   * desconhecido/revogado/expirado, o challenge do mecanismo bearer (passo 206) responde 401 {@code
+   * problem+json}.
+   */
+  @GET
+  @Path("/me")
+  @Authenticated
+  @Produces(MediaType.APPLICATION_JSON)
+  public CurrentSessionResponse me() {
+    return toResponse(getCurrentSessionUseCase.execute(currentSessionId()));
+  }
+
   private static LoginResponse toResponse(LoginResult result) {
     return new LoginResponse(
         result.token(),
@@ -74,6 +100,31 @@ public class AuthResource {
         result.roles(),
         result.permissions(),
         result.mustChangePassword());
+  }
+
+  private static CurrentSessionResponse toResponse(CurrentSession session) {
+    return new CurrentSessionResponse(
+        new LoginResponse.LoginUser(session.userId(), session.username(), session.displayName()),
+        session.roles(),
+        session.permissions(),
+        new CurrentSessionResponse.StoreRef(session.storeCode(), session.storeName()),
+        session.cashRegisterId(),
+        session.client(),
+        session.expiresAt(),
+        session.lastSeenAt());
+  }
+
+  /**
+   * Id da sessão autenticada, do atributo que o provider bearer grava (passo 206). Identidade
+   * autenticada sem sessão só existe se o mecanismo mudar: responde 401, não 500.
+   */
+  private UUID currentSessionId() {
+    Object attribute = identity.getAttribute(BearerTokenIdentityProvider.SESSION_ID_ATTRIBUTE);
+    if (attribute instanceof String value) {
+      return UUID.fromString(value);
+    }
+    throw new BusinessException(
+        ErrorCode.INVALID_CREDENTIALS, AuthenticateSessionUseCase.INVALID_TOKEN_DETAIL);
   }
 
   /** Traduz o header no cliente da sessão; ausente é {@code WEB}, qualquer outro valor é 400. */

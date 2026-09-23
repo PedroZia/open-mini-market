@@ -239,7 +239,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** sem token → 401; token inválido → 401; token expirado → 401 `SESSION_EXPIRED`; token válido → identidade disponível.
   **Commit:** `feat(auth): autentica requisicoes por token de sessao`
 
-- [ ] **207 — `GET /api/v1/auth/me`**
+- [x] **207 — `GET /api/v1/auth/me`**
   **Objetivo:** cliente valida a sessão ao abrir. **Depende:** 206
   **Implementar:** resposta com usuário, roles, permissões, loja, caixa, expiração.
   **Testes/aceite:** 200 com dados; 401 sem token.

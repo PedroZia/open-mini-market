@@ -187,6 +187,31 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
+  @DisplayName("findActiveById acha a não revogada com loja, cliente e caixa e ignora a revogada")
+  void findsActiveById() throws Exception {
+    UUID userId = newUser("sessao.ativa-por-id");
+    UUID active = insert(session(userId, "hash-ativa-id"));
+    UUID revoked = insert(session(userId, "hash-revogada-id"));
+    sessionRepository.revoke(revoked, "LOGOUT", Instant.now().truncatedTo(ChronoUnit.MICROS));
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(sessionRepository.findActiveById(active))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.id()).isEqualTo(active);
+              assertThat(found.userId()).isEqualTo(userId);
+              assertThat(found.client()).isEqualTo(SessionClient.TUI);
+              assertThat(found.storeId()).isEqualTo(storeId());
+              assertThat(found.lastSeenAt()).isNotNull();
+              assertThat(found.expiresAt()).isNotNull();
+            });
+    assertThat(sessionRepository.findActiveById(revoked)).isEmpty();
+    assertThat(sessionRepository.findActiveById(UUID.randomUUID())).isEmpty();
+  }
+
+  @Test
+  @TestTransaction
   @DisplayName("findById devolve a sessão revogada também, e vazio para id desconhecido")
   void findsById() throws Exception {
     UUID userId = newUser("sessao.por-id");

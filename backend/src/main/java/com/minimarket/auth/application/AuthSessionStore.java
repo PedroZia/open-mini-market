@@ -21,6 +21,13 @@ public interface AuthSessionStore {
   Optional<AuthSessionSnapshot> findActiveByTokenHash(String tokenHash);
 
   /**
+   * Sessão não revogada pelo id (passo 207): o {@code /auth/me} recebe o id da identidade e precisa
+   * do que ela não carrega (loja, caixa, cliente, expiração e último uso). Sessão revogada entre a
+   * autenticação e a leitura não é encontrada — vira 401, como token desconhecido.
+   */
+  Optional<AuthSessionSnapshot> findActiveById(UUID id);
+
+  /**
    * Grava o instante de atividade da sessão viva (idle timeout, §6.2) sem carregar a entidade: o
    * update é condicional e conflict-free, porque {@code last_seen_at} é um sinal de melhor esforço
    * e uma disputa entre dois requests do mesmo token não pode derrubar a autenticação. Sessão

@@ -482,6 +482,11 @@ class LoginUseCaseTest {
     }
 
     @Override
+    public Optional<AuthSessionSnapshot> findActiveById(UUID id) {
+      throw new UnsupportedOperationException("findActiveById não é usado por Login");
+    }
+
+    @Override
     public void touchLastSeen(UUID id, Instant lastSeenAt) {
       throw new UnsupportedOperationException("touchLastSeen não é usado por Login");
     }
@@ -516,7 +521,12 @@ class LoginUseCaseTest {
 
     @Override
     public Optional<Store> findByCode(String code) {
-      return Optional.of(new Store(STORE_ID, code, false, BigDecimal.ZERO));
+      return Optional.of(new Store(STORE_ID, code, "Loja " + code, false, BigDecimal.ZERO));
+    }
+
+    @Override
+    public Optional<Store> findById(UUID id) {
+      throw new UnsupportedOperationException("findById não é usado por Login");
     }
   }
 }
