@@ -48,7 +48,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de integração lê a loja `MATRIZ`; migration roda do zero e em banco já migrado.
   **Commit:** `feat(db): configura Flyway e cria tabela stores`
 
-- [ ] **005 — Base de testes de integração**
+- [x] **005 — Base de testes de integração**
   **Objetivo:** padrão de teste com PostgreSQL real. **Depende:** 004
   **Implementar:** dependências de teste (`quarkus-junit5`, `rest-assured`, `assertj`); primeiro `@QuarkusTest` que consulta o banco; classe base `IntegrationTestBase` (se agregar valor, sem herança forçada); `src/test/resources/testcontainers.properties` com `testcontainers.reuse.enable=true` — **escopo do projeto**, nunca `~/.testcontainers.properties` (que afetaria todos os projetos da máquina).
   **Testes/aceite:** teste passa usando Dev Services (container automático); documentar no README como rodar.

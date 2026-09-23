@@ -40,10 +40,24 @@ docs/                   plano técnico e roadmap
 docker-compose.yml      PostgreSQL (+ app) para desenvolvimento
 ```
 
+## Como rodar os testes
+
+Os testes de integração do backend usam PostgreSQL real via Dev Services: **Docker precisa estar
+rodando** — o container do banco sobe sozinho, não é preciso subir o `docker-compose` antes.
+
+```bash
+cd backend
+./mvnw verify          # Linux/macOS
+.\mvnw.cmd verify      # Windows (PowerShell/cmd)
+```
+
+O reuso do container entre execuções é opt-in: defina `TESTCONTAINERS_REUSE_ENABLE=true` no ambiente
+(o Testcontainers 2.0.4 ignora `backend/src/test/resources/testcontainers.properties` nessa checagem).
+
 ## Estado do projeto
 
-📋 **Planejamento concluído — implementação ainda não iniciada.**
-O próximo passo é o `001` do [`docs/roadmap.md`](docs/roadmap.md) (estrutura do monorepo).
+🚧 **Em implementação** — o progresso passo a passo está nos checkboxes do
+[`docs/roadmap.md`](docs/roadmap.md).
 
 ## Decisões centrais (resumo)
 

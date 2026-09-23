@@ -43,6 +43,7 @@ versões seguem a estável do momento da instalação). Links verificados em 202
 | [Testcontainers for Java](https://java.testcontainers.org/) | container de PostgreSQL, `reuse`, configuração |
 | [ArchUnit — guia do usuário](https://www.archunit.org/userguide/html/000_Index.html) | regras de fronteira entre pacotes, DSL de arquitetura |
 | [REST Assured](https://rest-assured.io/) | testes de API, matchers, extração de resposta |
+| [AssertJ — documentação](https://assertj.github.io/doc/) | asserções fluentes, mensagens de falha, `BigDecimal` (`isEqualByComparingTo`) |
 
 ## Segurança
 
