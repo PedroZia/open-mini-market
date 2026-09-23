@@ -1,6 +1,8 @@
 package com.minimarket.users.infrastructure;
 
 import com.github.f4b6a3.uuid.UuidCreator;
+import com.minimarket.shared.domain.ConflictException;
+import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.users.application.NewUser;
 import com.minimarket.users.application.UserStore;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -11,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import org.hibernate.exception.ConstraintViolationException;
 
 /**
  * Adaptador JPA da tabela {@code users}. Sem {@code @Transactional}: a transação é do caso de uso
@@ -25,6 +28,9 @@ import java.util.UUID;
  */
 @ApplicationScoped
 public class UserRepository implements UserStore {
+
+  /** SQLState de violação de unique constraint no PostgreSQL. */
+  private static final String UNIQUE_VIOLATION = "23505";
 
   @Inject EntityManager entityManager;
 
@@ -57,14 +63,37 @@ public class UserRepository implements UserStore {
    * {@inheritDoc}
    *
    * <p>Aplica o status informado e reaproveita {@link #insert(UserEntity)}: o id (UUIDv7) e a
-   * normalização do username continuam no adaptador.
+   * normalização do username continuam no adaptador. Depois do insert força o flush para traduzir a
+   * violação do índice único de username ainda dentro da transação do caso de uso.
    */
   @Override
   public UUID insert(NewUser user) {
     UserEntity entity = new UserEntity(user.username(), user.passwordHash(), user.displayName());
     entity.setStatus(user.status());
     insert(entity);
+    flushTranslatingUsernameConflict(user.username());
     return entity.getId();
+  }
+
+  /**
+   * O {@code existsByUsername} do caso de uso não é atômico: entre a checagem e o insert, outro
+   * request pode gravar o mesmo username. O flush antecipado faz a violação do índice único parcial
+   * aparecer aqui e virar {@link ConflictException} com o mesmo código do caminho comum — o
+   * backstop do banco nunca responde 500. {@code users} só tem o índice de username além da chave
+   * primária (e o id é UUIDv7 gerado na aplicação), então SQLState 23505 neste insert só pode ser
+   * username duplicado; qualquer outra falha de persistência sobe como está.
+   */
+  private void flushTranslatingUsernameConflict(String username) {
+    try {
+      entityManager.flush();
+    } catch (ConstraintViolationException exception) {
+      if (!UNIQUE_VIOLATION.equals(exception.getSQLState())) {
+        throw exception;
+      }
+      throw new ConflictException(
+          ErrorCode.USERNAME_ALREADY_EXISTS,
+          "username %s já está em uso".formatted(normalize(username)));
+    }
   }
 
   /** {@inheritDoc} */

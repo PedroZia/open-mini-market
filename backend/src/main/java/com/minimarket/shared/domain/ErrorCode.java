@@ -11,6 +11,7 @@ public enum ErrorCode {
   NOT_FOUND(404, "Recurso não encontrado"),
   METHOD_NOT_ALLOWED(405, "Método não permitido"),
   CONFLICT(409, "Conflito de estado"),
+  USERNAME_ALREADY_EXISTS(409, "Username já está em uso"),
   BUSINESS_ERROR(422, "Regra de negócio violada"),
   INTERNAL_ERROR(500, "Erro interno");
 

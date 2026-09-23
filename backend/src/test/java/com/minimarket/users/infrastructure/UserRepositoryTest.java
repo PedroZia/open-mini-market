@@ -1,8 +1,12 @@
 package com.minimarket.users.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.minimarket.IntegrationTestBase;
+import com.minimarket.shared.domain.ConflictException;
+import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.users.application.NewUser;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -60,6 +64,21 @@ class UserRepositoryTest extends IntegrationTestBase {
     assertThat(userRepository.findById(user.getId()))
         .hasValueSatisfying(found -> assertThat(found.getUsername()).isEqualTo("bruno"));
     assertThat(userRepository.findById(UUID.randomUUID())).isEmpty();
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("insert(NewUser) traduz a violação do índice único de username em ConflictException")
+  void translatesUsernameUniqueViolation() {
+    userRepository.insert(new UserEntity("ana.silva", "hash", "Ana Silva"));
+    entityManager.flush();
+
+    assertThatThrownBy(
+            () ->
+                userRepository.insert(new NewUser("ana.silva", "Ana Duplicada", "hash", "ACTIVE")))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.USERNAME_ALREADY_EXISTS));
   }
 
   @Test

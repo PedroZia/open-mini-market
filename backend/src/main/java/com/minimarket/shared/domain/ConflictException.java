@@ -4,6 +4,11 @@ package com.minimarket.shared.domain;
 public class ConflictException extends BusinessException {
 
   public ConflictException(String detail) {
-    super(ErrorCode.CONFLICT, detail);
+    this(ErrorCode.CONFLICT, detail);
+  }
+
+  /** Conflito com código estável próprio (ex.: {@code USERNAME_ALREADY_EXISTS}). */
+  public ConflictException(ErrorCode code, String detail) {
+    super(code, detail);
   }
 }

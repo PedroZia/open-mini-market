@@ -145,7 +145,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitário: username duplicado → `ConflictException`; senha fraca → erro de validação; senha nunca aparece no objeto retornado.
   **Commit:** `feat(users): adiciona caso de uso de criacao de usuario`
 
-- [ ] **108 — API `POST /api/v1/users`**
+- [x] **108 — API `POST /api/v1/users`**
   **Objetivo:** criar usuário via HTTP. **Depende:** 107, 007
   **Implementar:** resource + `CreateUserRequest` (Bean Validation) + `UserResponse`; `201` + `Location`; mapeamento de erros para `problem+json`.
   **Testes/aceite:** API: 201 cria; 409 username duplicado com `code=USERNAME_ALREADY_EXISTS`; 400 senha curta com `errors[]`.

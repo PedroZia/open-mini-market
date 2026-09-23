@@ -23,7 +23,8 @@ public class CreateUserUseCase {
   /** Política mínima: só tamanho; maiúscula/símbolo não fazem parte do escopo. */
   private static final int MIN_PASSWORD_LENGTH = 8;
 
-  private static final String STATUS_ACTIVE = "ACTIVE";
+  /** Status com que todo usuário criado nasce; a API devolve no corpo da criação. */
+  public static final String STATUS_ACTIVE = "ACTIVE";
 
   @Inject UserStore userStore;
 
@@ -35,7 +36,8 @@ public class CreateUserUseCase {
   public CreateUserResult execute(CreateUserCommand command) {
     String username = normalizeUsername(command.username());
     if (userStore.existsByUsername(username)) {
-      throw new ConflictException("username %s já está em uso".formatted(username));
+      throw new ConflictException(
+          ErrorCode.USERNAME_ALREADY_EXISTS, "username %s já está em uso".formatted(username));
     }
     requireValidPassword(command.password());
     List<String> roles = normalizeRoles(command.roleCodes());
