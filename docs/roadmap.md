@@ -115,7 +115,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de integração: inserir, buscar, atualizar, soft delete (não aparece na busca).
   **Commit:** `feat(users): adiciona entidade e repositorio de usuarios`
 
-- [ ] **103 — Testes de integridade de usuário**
+- [x] **103 — Testes de integridade de usuário**
   **Objetivo:** garantir unicidade e soft delete. **Depende:** 102
   **Implementar:** testes para username duplicado (falha), reuso de username após soft delete (permitido), `created_at`/`updated_at` preenchidos, `version` incrementando.
   **Testes/aceite:** 4 testes verdes; nenhum comportamento novo de produção.
