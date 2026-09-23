@@ -203,7 +203,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** migration aplica; `token_hash` único rejeita duplicidade.
   **Commit:** `feat(auth): cria tabela de sessoes`
 
-- [ ] **202 — Repositório de sessões**
+- [x] **202 — Repositório de sessões**
   **Objetivo:** persistir e consultar sessões. **Depende:** 201
   **Implementar:** `AuthSessionEntity` + repo: `insert`, `findActiveByTokenHash`, `touchLastSeen`, `revoke`, `revokeAllByUser`, `listActiveByUser`, `findById`.
   **Testes/aceite:** teste de integração para cada operação; sessão revogada não é encontrada como ativa.
