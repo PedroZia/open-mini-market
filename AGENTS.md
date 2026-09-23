@@ -108,3 +108,6 @@ cd web && npm test && npx tsc --noEmit && npm run dev
    a alternativa mais simples, seguindo o princípio de menor complexidade.
 3. Se o plano e o roadmap conflitarem, o plano vence em arquitetura e o roadmap em sequência; registre o
    conflito para revisão.
+4. Antes de escrever API de biblioteca (Quarkus, Hibernate, Flyway, Ink, TanStack Query...), confirme a
+   assinatura na fonte oficial listada em [`docs/referencias.md`](docs/referencias.md). Não invente
+   método, anotação, parâmetro ou propriedade de configuração.
