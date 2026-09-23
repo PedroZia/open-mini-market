@@ -42,7 +42,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `docker compose up -d` sobe o banco saudável e a app conecta em dev.
   **Commit:** `chore: adiciona PostgreSQL 18 no docker-compose`
 
-- [ ] **004 — Flyway + tabela `stores`**
+- [x] **004 — Flyway + tabela `stores`**
   **Objetivo:** migrations sob controle e a loja única semeada. **Depende:** 002, 003
   **Implementar:** `V1__stores.sql` (tabela conforme §5.3, seed `MATRIZ`); `quarkus.flyway.migrate-at-start=true`; `quarkus.hibernate-orm.database.generation=none`.
   **Testes/aceite:** teste de integração lê a loja `MATRIZ`; migration roda do zero e em banco já migrado.
