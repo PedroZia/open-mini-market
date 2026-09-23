@@ -39,5 +39,5 @@ Cubra: caminho feliz, cada código de erro aplicável, autorização por permiss
 
 ## Fechamento
 
-- `cd backend && mvn verify`.
+- `cd backend && ./mvnw verify` (Windows: `cd backend; .\mvnw.cmd verify`).
 - Se o contrato mudou, o OpenAPI é a fonte dos clients TS — mantenha-o correto.

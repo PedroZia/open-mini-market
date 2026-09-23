@@ -30,7 +30,7 @@ As regras inegociáveis estão em `AGENTS.md` — releia antes de começar. Este
      endpoint → RestAssured. **Nunca H2, nunca mock de banco, nunca entidade JPA em JSON.**
 
 5. **Rode o gate** (do diretório correto):
-   - Backend: `cd backend && mvn verify`
+   - Backend: `cd backend && ./mvnw verify` (Windows: `cd backend; .\mvnw.cmd verify`)
    - TUI: `cd terminal && npm test && npx tsc --noEmit`
    - Web: `cd web && npm test && npx tsc --noEmit`
    Se falhar, conserte. Nunca deixe o build vermelho.

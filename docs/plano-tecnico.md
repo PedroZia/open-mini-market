@@ -836,7 +836,7 @@ health**, sem precisar de ferramenta externa.
   `audit_events` recebeu o evento esperado com ator, entidade e motivo.
 - **Teste de imutabilidade:** `UPDATE`/`DELETE` em `audit_events` e `stock_movements` deve falhar por permissão.
 - Sem meta de cobertura percentual arbitrária; a meta é: toda BR-xx de §4.4 tem teste.
-- `mvn verify` roda tudo; build verde é pré-requisito para qualquer commit de módulo concluído.
+- `./mvnw verify` roda tudo; build verde é pré-requisito para qualquer commit de módulo concluído.
 - CI (GitHub Actions) desde o passo 011: backend (`mvn verify`) + TUI/web (`npm test`, `tsc --noEmit`).
 
 ---
@@ -916,7 +916,7 @@ health**, sem precisar de ferramenta externa.
    do passo no roadmap.
 4. Se um passo não couber em ~1 hora de trabalho ou gerar mais de ~300 linhas de mudança, **divida-o** e
    registre a divisão no roadmap antes de continuar.
-5. Nunca deixe o build vermelho entre passos. `mvn verify` verde é a definição de "pronto para o próximo".
+5. Nunca deixe o build vermelho entre passos. `./mvnw verify` verde é a definição de "pronto para o próximo".
 6. Ao concluir um módulo (conjunto de passos), pare e apresente: o que foi feito, testes executados,
    critérios de aceite atendidos e próximo passo sugerido.
 

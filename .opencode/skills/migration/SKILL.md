@@ -45,4 +45,5 @@ Reexecutar não pode duplicar nada.
 - Teste de integração que **falha se a garantia não existir** — ex.: tentar `UPDATE` em `audit_events` e
   esperar erro de permissão; inserir duplicata e esperar violação de unique; tentar abrir duas sessões no
   mesmo caixa e esperar `409`.
-- Migration quebrada derruba os testes de todos: rode `cd backend && mvn verify` antes de commitar.
+- Migration quebrada derruba os testes de todos: rode `cd backend && ./mvnw verify` (Windows:
+  `cd backend; .\mvnw.cmd verify`) antes de commitar.

@@ -7,7 +7,7 @@ código que usa biblioteca, confirme a assinatura na fonte listada aqui.
 
 1. Vai usar API de biblioteca? **Consulte a fonte antes de escrever.** Não invente método, anotação,
    parâmetro, propriedade de configuração ou nome de classe.
-2. Use `webfetch` na URL exata — é mais barato que descobrir o erro no `mvn verify`.
+2. Use `webfetch` na URL exata — é mais barato que descobrir o erro no `./mvnw verify`.
 3. Se a documentação contradizer `docs/plano-tecnico.md`, **o plano vence** em arquitetura; registre o
    conflito para revisão em vez de decidir sozinho.
 4. Biblioteca nova entra no projeto? Justifique no commit **e** acrescente a fonte aqui.

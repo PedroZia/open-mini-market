@@ -12,7 +12,7 @@ checkbox do passo no roadmap e o diretório antes de rodar comandos que dependem
 1. **Um passo por vez, na ordem do roadmap.** Encontre o primeiro passo com checkbox vazio, execute apenas ele.
 2. **Não antecipe passos futuros.** Não crie abstração, endpoint, campo ou tabela "para depois" sem que
    exista um passo pedindo aquilo.
-3. **Ciclo obrigatório:** implementar → testar → validar (`mvn verify` ou `npm test` + `tsc --noEmit`) →
+3. **Ciclo obrigatório:** implementar → testar → validar (`./mvnw verify` ou `npm test` + `tsc --noEmit`) →
    commit → marcar o checkbox do passo no roadmap (dentro do mesmo commit) → seguir.
 4. **Se o passo parecer grande, divida antes de codar.** Registre a divisão no roadmap (subpassos com
    letra: `413a`, `413b`) e execute um de cada vez. Um passo não deve passar de ~300 linhas de mudança
@@ -40,7 +40,7 @@ Carregue a skill correspondente **antes** de codar; cada uma tem o procedimento 
 - [ ] Escopo exatamente o do passo (nem mais, nem menos).
 - [ ] Testes no nível adequado: regra pura → unitário; persistência → integração com PostgreSQL real;
       endpoint → teste de API com RestAssured.
-- [ ] `mvn verify` verde (backend) / `npm test` + `tsc --noEmit` verdes (TUI/Web).
+- [ ] `./mvnw verify` verde (backend) / `npm test` + `tsc --noEmit` verdes (TUI/Web).
 - [ ] Critério de aceite descrito no passo conferido e citado na mensagem de commit ou no PR.
 - [ ] Commit no padrão `tipo(módulo): descrição` em pt-BR, ex.: `feat(cash): implementa sangria`.
 - [ ] Checkbox do passo atualizado em `docs/roadmap.md`.
@@ -95,12 +95,14 @@ Estão em §4.4 do plano (`BR-01` a `BR-14`). As mais fáceis de esquecer:
 ## Comandos úteis
 
 ```bash
-# pré-requisitos: JDK 25, Maven, Docker (testes de integração) e Node 22+ (Fases 11–12)
+# pré-requisitos: JDK 25, Docker (testes de integração) e Node 22+ (Fases 11–12)
+
+# Maven: use o wrapper do backend — ./mvnw (Linux/macOS) ou .\mvnw.cmd (Windows)
 
 # backend — só existe a partir do passo 002
-cd backend && mvn quarkus:dev          # API em modo dev (http://localhost:8080)
-cd backend && mvn spotless:apply       # formatação (a partir do passo 002)
-cd backend && mvn verify               # build + testes (obrigatório antes do commit)
+cd backend && ./mvnw quarkus:dev       # API em modo dev (http://localhost:8080)
+cd backend && ./mvnw spotless:apply    # formatação (a partir do passo 002)
+cd backend && ./mvnw verify            # build + testes (obrigatório antes do commit)
 
 # banco de dev — só existe a partir do passo 003
 docker compose up -d

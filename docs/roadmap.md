@@ -10,7 +10,7 @@ futuros. Se um passo ficar grande durante a execução, **divida-o** e registre 
 
 1. **Implementar** exatamente o escopo do passo — nada além.
 2. **Testar** no nível adequado (unitário para regra pura, integração para persistência, API para endpoint).
-3. **Validar**: `mvn verify` verde (ou `npm test` + `tsc --noEmit` no front/TUI) e critério de aceite do passo conferido.
+3. **Validar**: `./mvnw verify` verde (ou `npm test` + `tsc --noEmit` no front/TUI) e critério de aceite do passo conferido.
 4. **Commitar** com a mensagem sugerida (`feat|fix|test|chore|docs(<módulo>): descrição`).
 5. **Atualizar** o checkbox do passo neste arquivo (parte do commit).
 6. O sistema permanece **funcional** ao final do passo. Se algo ficou temporariamente desprotegido
