@@ -126,7 +126,7 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
               assertThat(found.getUserAgent()).isNull();
             });
     assertThat(sessionRepository.findActiveByTokenHash("hash-opcional-2"))
-        .hasValueSatisfying(found -> assertThat(found.getId()).isEqualTo(second));
+        .hasValueSatisfying(found -> assertThat(found.id()).isEqualTo(second));
   }
 
   @Test
@@ -178,10 +178,10 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
     entityManager.clear();
 
     assertThat(sessionRepository.findActiveByTokenHash("hash-ativo"))
-        .hasValueSatisfying(found -> assertThat(found.getId()).isEqualTo(active));
+        .hasValueSatisfying(found -> assertThat(found.id()).isEqualTo(active));
     assertThat(sessionRepository.findActiveByTokenHash("hash-revogado")).isEmpty();
     assertThat(sessionRepository.findActiveByTokenHash("hash-expirado"))
-        .hasValueSatisfying(found -> assertThat(found.getId()).isEqualTo(expired));
+        .hasValueSatisfying(found -> assertThat(found.id()).isEqualTo(expired));
     assertThat(sessionRepository.findActiveByTokenHash("hash-inexistente")).isEmpty();
   }
 

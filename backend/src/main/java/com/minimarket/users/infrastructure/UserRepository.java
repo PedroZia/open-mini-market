@@ -204,21 +204,41 @@ public class UserRepository implements UserStore {
    */
   @Override
   public Optional<UserAuthState> findAuthStateByUsername(String username) {
-    return findByUsername(username)
-        .map(
-            user ->
-                new UserAuthState(
-                    user.getId(),
-                    user.getUsername(),
-                    user.getDisplayName(),
-                    user.getPasswordHash(),
-                    user.getStatus(),
-                    user.getDeletedAt(),
-                    user.getFailedLoginAttempts(),
-                    user.getLockedUntil(),
-                    user.isMustChangePassword(),
-                    loadRoles(List.of(user.getId())).getOrDefault(user.getId(), List.of()),
-                    permissionRepository.effectivePermissions(user.getId())));
+    return findByUsername(username).map(this::toAuthState);
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Mesma projeção de {@link #findAuthStateByUsername}, pela chave que a sessão guarda: {@code
+   * status} e {@code deletedAt} vêm junto, mas quem decide se o usuário pode autenticar é o caso de
+   * uso — a revogação das sessões do usuário desativado é do passo 213.
+   */
+  @Override
+  public Optional<UserAuthState> findAuthStateById(UUID id) {
+    List<UserEntity> found =
+        entityManager
+            .createQuery("select u from UserEntity u where u.id = :id", UserEntity.class)
+            .setParameter("id", id)
+            .setMaxResults(1)
+            .getResultList();
+    return found.stream().findFirst().map(this::toAuthState);
+  }
+
+  /** Projeção do usuário para a porta: RBAC efetivo já resolvido, sem entidade JPA na saída. */
+  private UserAuthState toAuthState(UserEntity user) {
+    return new UserAuthState(
+        user.getId(),
+        user.getUsername(),
+        user.getDisplayName(),
+        user.getPasswordHash(),
+        user.getStatus(),
+        user.getDeletedAt(),
+        user.getFailedLoginAttempts(),
+        user.getLockedUntil(),
+        user.isMustChangePassword(),
+        loadRoles(List.of(user.getId())).getOrDefault(user.getId(), List.of()),
+        permissionRepository.effectivePermissions(user.getId()));
   }
 
   /** {@inheritDoc} */

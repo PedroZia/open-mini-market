@@ -1,6 +1,7 @@
 package com.minimarket.auth.infrastructure;
 
 import com.github.f4b6a3.uuid.UuidCreator;
+import com.minimarket.auth.application.AuthSessionSnapshot;
 import com.minimarket.auth.application.AuthSessionStore;
 import com.minimarket.auth.application.NewAuthSession;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -57,10 +58,15 @@ public class AuthSessionRepository implements AuthSessionStore {
   }
 
   /**
-   * Sessão não revogada com o hash informado. Expiração não entra no filtro: cabe ao caso de uso
-   * decidir com o {@code Clock} se ela ainda vale.
+   * {@inheritDoc}
+   *
+   * <p>Traduz a entidade na projeção de aplicação: o caso de uso decide a expiração com o {@code
+   * Clock}, o adaptador só garante "não revogada". Expiração não entra no filtro da consulta — a
+   * sessão expirada precisa ser encontrada para responder {@code SESSION_EXPIRED}, não "token
+   * inválido".
    */
-  public Optional<AuthSessionEntity> findActiveByTokenHash(String tokenHash) {
+  @Override
+  public Optional<AuthSessionSnapshot> findActiveByTokenHash(String tokenHash) {
     List<AuthSessionEntity> found =
         entityManager
             .createQuery(
@@ -70,7 +76,14 @@ public class AuthSessionRepository implements AuthSessionStore {
             .setParameter("tokenHash", tokenHash)
             .setMaxResults(1)
             .getResultList();
-    return found.isEmpty() ? Optional.empty() : Optional.of(found.getFirst());
+    return found.isEmpty()
+        ? Optional.empty()
+        : Optional.of(
+            new AuthSessionSnapshot(
+                found.getFirst().getId(),
+                found.getFirst().getUserId(),
+                found.getFirst().getLastSeenAt(),
+                found.getFirst().getExpiresAt()));
   }
 
   /** Sessão pelo id, revogada ou não; vazio para id desconhecido. */
@@ -79,11 +92,25 @@ public class AuthSessionRepository implements AuthSessionStore {
   }
 
   /**
-   * Grava o instante de atividade da sessão viva (idle timeout, §6.2). Sessão revogada não é
-   * atualizada — não há "última vez vista" para token morto — e id desconhecido é no-op.
+   * {@inheritDoc}
+   *
+   * <p>Um {@code update} condicional só na coluna de atividade — a sessão não é carregada nem passa
+   * pelo {@code @Version}: {@code last_seen_at} é um sinal de melhor esforço e duas requisições do
+   * mesmo token podem tocar a sessão ao mesmo tempo sem que nenhuma falhe por conflito otimista (o
+   * banco serializa os updates e o instante mais novo vence). O {@code versioned} mantém o
+   * comportamento da entidade — o update conta como modificação e incrementa a versão. Sessão
+   * revogada não é atualizada — não há "última vez vista" para token morto — e id desconhecido é
+   * no-op.
    */
+  @Override
   public void touchLastSeen(UUID id, Instant lastSeenAt) {
-    findById(id).filter(AuthSessionEntity::isActive).ifPresent(s -> s.markSeen(lastSeenAt));
+    entityManager
+        .createQuery(
+            "update versioned AuthSessionEntity s set s.lastSeenAt = :lastSeenAt"
+                + " where s.id = :id and s.revokedAt is null")
+        .setParameter("lastSeenAt", lastSeenAt)
+        .setParameter("id", id)
+        .executeUpdate();
   }
 
   /**

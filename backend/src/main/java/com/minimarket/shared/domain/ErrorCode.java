@@ -11,6 +11,7 @@ public enum ErrorCode {
   UNKNOWN_ROLE(400, "Papel desconhecido"),
   UNKNOWN_PERMISSION(400, "Permissão desconhecida"),
   INVALID_CREDENTIALS(401, "Credenciais inválidas"),
+  SESSION_EXPIRED(401, "Sessão expirada"),
   NOT_FOUND(404, "Recurso não encontrado"),
   USER_NOT_FOUND(404, "Usuário não encontrado"),
   ROLE_NOT_FOUND(404, "Papel não encontrado"),

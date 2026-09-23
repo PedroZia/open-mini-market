@@ -233,7 +233,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 com token; 401 genérico (`code=INVALID_CREDENTIALS`); 403/423 quando bloqueado (`code=ACCOUNT_LOCKED`).
   **Commit:** `feat(auth): expoe endpoint de login`
 
-- [ ] **206 — Autenticação de requisições (bearer)**
+- [x] **206 — Autenticação de requisições (bearer)**
   **Objetivo:** proteger a API por token. **Depende:** 202, 203
   **Implementar:** `HttpAuthenticationMechanism` customizado (lê `Authorization: Bearer`, busca sessão ativa, valida expiração absoluta/idle, atualiza `last_seen_at` no máximo 1×/min, monta `SecurityIdentity` com roles e atributo de permissões); `401` em `problem+json`.
   **Testes/aceite:** sem token → 401; token inválido → 401; token expirado → 401 `SESSION_EXPIRED`; token válido → identidade disponível.

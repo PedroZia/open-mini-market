@@ -128,6 +128,11 @@ class CreateUserUseCaseTest {
     }
 
     @Override
+    public Optional<UserAuthState> findAuthStateById(UUID id) {
+      throw new UnsupportedOperationException("findAuthStateById não é usado por CreateUser");
+    }
+
+    @Override
     public UUID insert(NewUser user) {
       inserted = user;
       return generatedId;

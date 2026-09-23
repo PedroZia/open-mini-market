@@ -87,6 +87,14 @@ public interface UserStore {
   Optional<UserAuthState> findAuthStateByUsername(String username);
 
   /**
+   * Estado de autenticação do usuário pelo id, para a autenticação por token (passo 206): a sessão
+   * guarda só o {@code user_id} e o RBAC efetivo é relido a cada requisição (§6.4). Enxerga o
+   * usuário soft-deletado, como {@link #findAuthStateByUsername} — quem decide recusar é o caso de
+   * uso, e a revogação por desativação é do passo 213. Vazio quando não existe usuário com o id.
+   */
+  Optional<UserAuthState> findAuthStateById(UUID id);
+
+  /**
    * Sucesso do login (passos 204a/204b): grava {@code last_login_at} e zera o contador de falhas e
    * o lock. Usuário soft-deletado é no-op, como em {@link #updateDisplayName}; o instante vem do
    * {@code Clock} do caso de uso.

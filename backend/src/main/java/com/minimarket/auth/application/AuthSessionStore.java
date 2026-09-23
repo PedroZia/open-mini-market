@@ -1,14 +1,31 @@
 package com.minimarket.auth.application;
 
+import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Porta de persistência da sessão (passo 204a); o adaptador JPA fica em {@code
- * auth.infrastructure}. Só tipos de aplicação atravessam: entidade JPA nunca chega aqui. As
- * leituras e revogações entram quando os passos 206+ existirem.
+ * Porta de persistência da sessão (passos 204a/206); o adaptador JPA fica em {@code
+ * auth.infrastructure}. Só tipos de aplicação atravessam: entidade JPA nunca chega aqui.
  */
 public interface AuthSessionStore {
 
   /** Insere a sessão e devolve o id gerado (UUIDv7) pelo adaptador. */
   UUID insert(NewAuthSession session);
+
+  /**
+   * Sessão não revogada com o hash informado (passo 206). Expiração não entra no filtro: cabe ao
+   * caso de uso decidir com o {@code Clock} se ela ainda vale — o token desconhecido e o revogado
+   * são indistinguíveis para quem tenta.
+   */
+  Optional<AuthSessionSnapshot> findActiveByTokenHash(String tokenHash);
+
+  /**
+   * Grava o instante de atividade da sessão viva (idle timeout, §6.2) sem carregar a entidade: o
+   * update é condicional e conflict-free, porque {@code last_seen_at} é um sinal de melhor esforço
+   * e uma disputa entre dois requests do mesmo token não pode derrubar a autenticação. Sessão
+   * revogada não é atualizada — não há "última vez vista" para token morto — e id desconhecido é
+   * no-op.
+   */
+  void touchLastSeen(UUID id, Instant lastSeenAt);
 }

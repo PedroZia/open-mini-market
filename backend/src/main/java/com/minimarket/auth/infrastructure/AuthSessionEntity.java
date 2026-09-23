@@ -113,11 +113,6 @@ public class AuthSessionEntity {
     this.id = id;
   }
 
-  /** Atualização de atividade do idle timeout (§6.2); o instante é decisão do caso de uso. */
-  void markSeen(Instant seenAt) {
-    this.lastSeenAt = seenAt;
-  }
-
   /** Revogação idempotente: sessão já revogada mantém instante e motivo originais. */
   void revoke(String reason, Instant revokedAt) {
     if (this.revokedAt != null) {

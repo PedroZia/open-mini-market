@@ -384,6 +384,11 @@ class LoginUseCaseTest {
     }
 
     @Override
+    public Optional<UserAuthState> findAuthStateById(UUID id) {
+      throw new UnsupportedOperationException("findAuthStateById não é usado por Login");
+    }
+
+    @Override
     public void recordSuccessfulLogin(UUID id, Instant loginAt) {
       successfulLoginId = id;
       successfulLoginAt = loginAt;
@@ -469,6 +474,16 @@ class LoginUseCaseTest {
     public UUID insert(NewAuthSession session) {
       inserted = session;
       return generatedId;
+    }
+
+    @Override
+    public Optional<AuthSessionSnapshot> findActiveByTokenHash(String tokenHash) {
+      throw new UnsupportedOperationException("findActiveByTokenHash não é usado por Login");
+    }
+
+    @Override
+    public void touchLastSeen(UUID id, Instant lastSeenAt) {
+      throw new UnsupportedOperationException("touchLastSeen não é usado por Login");
     }
   }
 
