@@ -72,7 +72,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de API confirma header `X-Request-Id` ecoado; log JSON em prod contém `traceId`.
   **Commit:** `feat(shared): adiciona correlation id e logs estruturados`
 
-- [ ] **009 — `GET /api/v1/meta`**
+- [x] **009 — `GET /api/v1/meta`**
   **Objetivo:** centralizar parâmetros de negócio para os clientes. **Depende:** 004, 007
   **Implementar:** resource + `MetaResponse` (versão da API, `storeCode`, `allowNegativeStock`, `maxDiscountPercent`, `serverTime`); configuração `minimarket.store.default-code`.
   **Testes/aceite:** teste de API valida 200 e os campos vindos da loja `MATRIZ`.
