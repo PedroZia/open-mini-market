@@ -197,9 +197,9 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 2 — Autenticação
 
-- [ ] **201 — Migration `auth_sessions`**
+- [x] **201 — Migration `auth_sessions`**
   **Objetivo:** sessões persistentes. **Depende:** 105
-  **Implementar:** `V4__auth_sessions.sql` conforme §5.3 + índices (`user_id` parcial onde não revogada, `expires_at`).
+  **Implementar:** `V5__auth_sessions.sql` conforme §5.3 + índices (`user_id` parcial onde não revogada, `expires_at`).
   **Testes/aceite:** migration aplica; `token_hash` único rejeita duplicidade.
   **Commit:** `feat(auth): cria tabela de sessoes`
 
