@@ -227,8 +227,8 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitários — bloqueado recusa mesmo com senha certa; desbloqueio após expirar; sucesso zera contador e lock.
   **Commit:** `feat(auth): bloqueia login apos tentativas falhas`
 
-- [ ] **205 — API `POST /api/v1/auth/login`**
-  **Objetivo:** login via HTTP. **Depende:** 204
+- [x] **205 — API `POST /api/v1/auth/login`**
+  **Objetivo:** login via HTTP. **Depende:** 204b
   **Implementar:** request `{username, password, cashRegisterId?}` → `{token, expiresAt, user, roles, permissions, mustChangePassword}`; mensagem genérica em falha; `cashRegisterId` validado quando informado (ainda sem tabela de caixa → aceitar nulo e validar na Fase 6).
   **Testes/aceite:** 200 com token; 401 genérico (`code=INVALID_CREDENTIALS`); 403/423 quando bloqueado (`code=ACCOUNT_LOCKED`).
   **Commit:** `feat(auth): expoe endpoint de login`

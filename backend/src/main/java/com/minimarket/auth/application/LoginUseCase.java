@@ -96,8 +96,12 @@ public class LoginUseCase {
    * senha; credenciais inválidas (senha errada ou usuário inexistente) lançam 401 {@code
    * INVALID_CREDENTIALS} com a mensagem genérica; o resto devolve o token em claro, a expiração
    * absoluta e o RBAC efetivo do usuário.
+   *
+   * <p>{@code dontRollbackOn}: a falha de credenciais é resultado esperado, mas o contador e o lock
+   * que ela acabou de gravar precisam sobreviver ao 401 — sem isso o interceptor desfaria a
+   * contagem e o bloqueio do §6.3.1 nunca aconteceria (coberto pelo teste de API do passo 205).
    */
-  @Transactional
+  @Transactional(dontRollbackOn = BusinessException.class)
   public LoginResult execute(LoginCommand command) {
     Instant now = clock.instant();
     UserAuthState user = userStore.findAuthStateByUsername(command.username()).orElse(null);
