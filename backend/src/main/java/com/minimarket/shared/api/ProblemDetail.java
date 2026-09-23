@@ -6,7 +6,7 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import java.util.List;
 import java.util.UUID;
-import org.jboss.logging.MDC;
+import org.jboss.logmanager.MDC;
 
 /** Corpo padrão de erro da API, no formato RFC 9457 (§9.2 do plano). */
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -45,9 +45,9 @@ public record ProblemDetail(
     return uriInfo == null ? null : uriInfo.getRequestUri().getPath();
   }
 
-  /** Correlação da requisição; o MDC é populado pelo filtro de request (passo 008). */
+  /** Correlação da requisição; o MDC é populado pelo {@link RequestIdFilter} a cada request. */
   private static String currentTraceId() {
-    Object traceId = MDC.get("traceId");
-    return traceId != null ? traceId.toString() : UUID.randomUUID().toString();
+    String traceId = MDC.get(RequestIdFilter.TRACE_ID_MDC_KEY);
+    return traceId != null ? traceId : UUID.randomUUID().toString();
   }
 }

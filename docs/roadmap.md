@@ -66,7 +66,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de API força 404 e 400 e valida `content-type: application/problem+json` + `code` + `traceId`.
   **Commit:** `feat(shared): padroniza erros da API com problem+json`
 
-- [ ] **008 — Correlation ID e logs estruturados**
+- [x] **008 — Correlation ID e logs estruturados**
   **Objetivo:** rastrear request ponta a ponta. **Depende:** 007
   **Implementar:** filtro que lê `X-Request-Id` ou gera UUID, coloca no MDC (`traceId`) e devolve no header; `quarkus-logging-json` em `%prod`; log de acesso com método, rota, status e duração.
   **Testes/aceite:** teste de API confirma header `X-Request-Id` ecoado; log JSON em prod contém `traceId`.
