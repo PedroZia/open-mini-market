@@ -25,14 +25,14 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 ## Fase 0 — Fundação
 
 - [ ] **001 — Estrutura do monorepo**
-  **Objetivo:** criar a árvore `backend/`, `terminal/`, `web/`, `packages/api-client/`, `docs/`, `docker-compose.yml`, `.gitignore`, `README.md`. **Depende:** —
-  **Implementar:** pastas vazias com `.gitkeep` onde necessário; `.gitignore` cobrindo Java/Maven, Node, IDE, `.env`; README com visão em 5 linhas e links para os docs.
+  **Objetivo:** criar a árvore `backend/`, `terminal/`, `web/`, `packages/api-client/`, `docs/`, `docker-compose.yml`, `.gitignore`, `.gitattributes`, `README.md`. **Depende:** —
+  **Implementar:** pastas vazias com `.gitkeep` onde necessário; `.gitignore` cobrindo Java/Maven, Node, IDE, `.env`; `.gitattributes` com `* text=auto eol=lf` (mantém o repositório em LF sem depender de `core.autocrlf` global — o desenvolvimento é em Windows); README com visão em 5 linhas e links para os docs.
   **Testes/aceite:** `git status` limpo após commit; árvore confere com §2.1 do plano.
   **Commit:** `chore: cria estrutura inicial do monorepo`
 
 - [ ] **002 — Projeto Quarkus rodando**
   **Objetivo:** backend Quarkus 3.33 LTS (Java 25) que sobe e responde health. **Depende:** 001
-  **Implementar:** `pom.xml` com extensões `quarkus-rest`, `quarkus-rest-jackson`, `quarkus-hibernate-orm`, `quarkus-jdbc-postgresql`, `quarkus-flyway`, `quarkus-hibernate-validator`, `quarkus-smallrye-health`, `quarkus-micrometer-registry-prometheus`; `application.properties` mínimo; `mvn quarkus:dev` funcionando.
+  **Implementar:** `pom.xml` com extensões `quarkus-rest`, `quarkus-rest-jackson`, `quarkus-hibernate-orm`, `quarkus-jdbc-postgresql`, `quarkus-flyway`, `quarkus-hibernate-validator`, `quarkus-smallrye-health`, `quarkus-micrometer-registry-prometheus`; `application.properties` mínimo; `mvn quarkus:dev` funcionando; formatação com Spotless + google-java-format (justificar no commit: diff determinístico e revisão mais barata).
   **Testes/aceite:** `GET /q/health` retorna `UP`; `mvn verify` verde (um teste trivial de contexto).
   **Commit:** `chore(backend): cria projeto Quarkus com health check`
 
@@ -50,7 +50,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 - [ ] **005 — Base de testes de integração**
   **Objetivo:** padrão de teste com PostgreSQL real. **Depende:** 004
-  **Implementar:** dependências de teste (`quarkus-junit5`, `rest-assured`, `assertj`); primeiro `@QuarkusTest` que consulta o banco; classe base `IntegrationTestBase` (se agregar valor, sem herança forçada).
+  **Implementar:** dependências de teste (`quarkus-junit5`, `rest-assured`, `assertj`); primeiro `@QuarkusTest` que consulta o banco; classe base `IntegrationTestBase` (se agregar valor, sem herança forçada); `src/test/resources/testcontainers.properties` com `testcontainers.reuse.enable=true` — **escopo do projeto**, nunca `~/.testcontainers.properties` (que afetaria todos os projetos da máquina).
   **Testes/aceite:** teste passa usando Dev Services (container automático); documentar no README como rodar.
   **Commit:** `test(backend): adiciona base de testes de integracao com PostgreSQL`
 
@@ -1049,7 +1049,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 - [ ] **1309 — Revisão de segurança e dependências**
   **Objetivo:** fechar arestas. **Depende:** 1305
-  **Implementar:** `mvn dependency-check`/`npm audit`, revisão de permissões por endpoint, revisão de mensagens de erro (sem vazamento), conferência do checklist de §6, teste de sessão expirada e revogada.
+  **Implementar:** `mvn dependency-check`/`npm audit`, revisão de permissões por endpoint, revisão de mensagens de erro (sem vazamento), conferência do checklist de §6, teste de sessão expirada e revogada; Renovate (ou Dependabot) configurado para abrir PR automático de atualização de dependências.
   **Testes/aceite:** sem CVE crítica/alta pendente; checklist assinado em `docs/seguranca.md`.
   **Commit:** `docs(security): revisa seguranca e dependencias`
 
@@ -1182,6 +1182,8 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 | PIN de operador para troca rápida de turno | reduz atrito; exige política própria de segurança | após 1118 |
 | Paginação por cursor em vendas/auditoria | só quando volume justificar | após 1307 |
 | Cache Caffeine de produto por barcode | só com latência medida | após 1308 |
+| Arquivos `.http` com exemplos de request | acelera teste manual e onboarding, mas não bloqueia nada | após 410 |
+| `openapi-diff` no CI (trava mudança incompatível no contrato) | só quando o contrato estabilizar | após 784 |
 | Múltiplas lojas operacionais (UI + permissão por loja) | requer operação real multi-loja | fase própria |
 | Fiscal (NFC-e/SAT) | requer módulo isolado e provedor; desenho em §18 do plano | **Fase 14** (≈ 3–4 semanas) |
 | Modo offline na TUI | complexidade alta, ganho duvidoso | não recomendado no curto prazo |
