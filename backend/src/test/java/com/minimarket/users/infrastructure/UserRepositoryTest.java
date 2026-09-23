@@ -14,6 +14,7 @@ import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -327,6 +328,8 @@ class UserRepositoryTest extends IntegrationTestBase {
               assertThat(state.passwordHash()).isEqualTo("hash-auth");
               assertThat(state.status()).isEqualTo(UserEntity.STATUS_ACTIVE);
               assertThat(state.deletedAt()).isNull();
+              assertThat(state.failedLoginAttempts()).isZero();
+              assertThat(state.lockedUntil()).isNull();
               assertThat(state.mustChangePassword()).isFalse();
               assertThat(state.roles()).containsExactly("OPERADOR");
               assertThat(state.permissions()).contains("sale.create").doesNotContain("user.write");
@@ -343,13 +346,16 @@ class UserRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
-  @DisplayName("recordSuccessfulLogin grava last_login_at e zera o contador de falhas")
+  @DisplayName("recordSuccessfulLogin grava last_login_at e zera contador e lock")
   void recordsSuccessfulLogin() {
     UUID userId = userRepository.insert(new NewUser("ana.login", "Ana Login", "hash", "ACTIVE"));
     entityManager.flush();
     entityManager.clear();
     entityManager
-        .createQuery("update UserEntity u set u.failedLoginAttempts = 3 where u.id = :id")
+        .createQuery(
+            "update UserEntity u set u.failedLoginAttempts = 3, u.lockedUntil = :until"
+                + " where u.id = :id")
+        .setParameter("until", Instant.now().plus(Duration.ofMinutes(5)))
         .setParameter("id", userId)
         .executeUpdate();
     entityManager.flush();
@@ -363,8 +369,44 @@ class UserRepositoryTest extends IntegrationTestBase {
     UserEntity reloaded = userRepository.findById(userId).orElseThrow();
     assertThat(reloaded.getLastLoginAt()).isEqualTo(loginAt);
     assertThat(reloaded.getFailedLoginAttempts()).isZero();
+    assertThat(reloaded.getLockedUntil()).isNull();
     // Id desconhecido é no-op, como nas outras escritas por id.
     userRepository.recordSuccessfulLogin(UUID.randomUUID(), loginAt);
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("recordFailedLogin grava contador e lock e clearLoginFailures zera os dois")
+  void recordsFailedLoginAndClearsFailures() {
+    UUID userId = userRepository.insert(new NewUser("ana.lock", "Ana Lock", "hash", "ACTIVE"));
+    entityManager.flush();
+    entityManager.clear();
+    Instant lockedUntil = Instant.now().plus(Duration.ofMinutes(15)).truncatedTo(ChronoUnit.MICROS);
+
+    userRepository.recordFailedLogin(userId, 5, lockedUntil);
+    entityManager.flush();
+    entityManager.clear();
+
+    UserEntity locked = userRepository.findById(userId).orElseThrow();
+    assertThat(locked.getFailedLoginAttempts()).isEqualTo(5);
+    assertThat(locked.getLockedUntil()).isEqualTo(lockedUntil);
+    assertThat(userRepository.findAuthStateByUsername("ana.lock"))
+        .hasValueSatisfying(
+            state -> {
+              assertThat(state.failedLoginAttempts()).isEqualTo(5);
+              assertThat(state.lockedUntil()).isEqualTo(lockedUntil);
+            });
+
+    userRepository.clearLoginFailures(userId);
+    entityManager.flush();
+    entityManager.clear();
+
+    UserEntity cleared = userRepository.findById(userId).orElseThrow();
+    assertThat(cleared.getFailedLoginAttempts()).isZero();
+    assertThat(cleared.getLockedUntil()).isNull();
+    // Id desconhecido é no-op, como nas outras escritas por id.
+    userRepository.recordFailedLogin(UUID.randomUUID(), 1, null);
+    userRepository.clearLoginFailures(UUID.randomUUID());
   }
 
   @Test

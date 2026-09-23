@@ -185,6 +185,16 @@ class CreateUserUseCaseTest {
     }
 
     @Override
+    public void recordFailedLogin(UUID id, int failedLoginAttempts, Instant lockedUntil) {
+      throw new UnsupportedOperationException("recordFailedLogin não é usado por CreateUser");
+    }
+
+    @Override
+    public void clearLoginFailures(UUID id) {
+      throw new UnsupportedOperationException("clearLoginFailures não é usado por CreateUser");
+    }
+
+    @Override
     public void updatePasswordHash(UUID id, String passwordHash) {
       throw new UnsupportedOperationException("updatePasswordHash não é usado por CreateUser");
     }

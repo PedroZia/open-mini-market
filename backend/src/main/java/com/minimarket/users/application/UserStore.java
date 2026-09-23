@@ -87,11 +87,25 @@ public interface UserStore {
   Optional<UserAuthState> findAuthStateByUsername(String username);
 
   /**
-   * Sucesso do login (passo 204a): grava {@code last_login_at} e zera o contador de falhas. Usuário
-   * soft-deletado é no-op, como em {@link #updateDisplayName}; o instante vem do {@code Clock} do
-   * caso de uso.
+   * Sucesso do login (passos 204a/204b): grava {@code last_login_at} e zera o contador de falhas e
+   * o lock. Usuário soft-deletado é no-op, como em {@link #updateDisplayName}; o instante vem do
+   * {@code Clock} do caso de uso.
    */
   void recordSuccessfulLogin(UUID id, Instant loginAt);
+
+  /**
+   * Falha de login (passo 204b): grava o contador já incrementado e, quando a política fecha o
+   * ciclo, o instante até o qual o login fica bloqueado ({@code lockedUntil} nulo enquanto não há
+   * bloqueio). O valor do contador e do lock é decisão do caso de uso — aqui só persiste. Usuário
+   * soft-deletado é no-op, como em {@link #updateDisplayName}.
+   */
+  void recordFailedLogin(UUID id, int failedLoginAttempts, Instant lockedUntil);
+
+  /**
+   * Desbloqueio por expiração (passo 204b): zera o contador e {@code locked_until} para a tentativa
+   * recomeçar do zero. Usuário soft-deletado é no-op, como em {@link #updateDisplayName}.
+   */
+  void clearLoginFailures(UUID id);
 
   /**
    * Rehash do login (passo 204a): troca o hash quando a política de senha ficou mais forte, sem

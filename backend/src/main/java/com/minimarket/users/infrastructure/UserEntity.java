@@ -21,8 +21,8 @@ import java.util.UUID;
  * uso. A entidade não sai do módulo — nada de JPA em JSON.
  *
  * <p>Só as colunas usadas hoje: {@code failed_login_attempts}, {@code locked_until} e {@code
- * last_login_at} passaram a ser mapeadas no passo 204a (login); o lock em si (passo 204b) e o
- * restante entram quando o caso de uso que os usa existir.
+ * last_login_at} são do login (passos 204a/204b); o restante entra quando o caso de uso que as usa
+ * existir.
  */
 @Entity
 @Table(name = "users")
@@ -151,12 +151,29 @@ public class UserEntity {
   }
 
   /**
-   * Sucesso do login (passo 204a): registra o instante e zera o contador de falhas. O lock por
-   * tentativas (passo 204b) é quem decide sobre {@code locked_until}.
+   * Sucesso do login (passos 204a/204b): registra o instante, zera o contador de falhas e o lock —
+   * quem passou pela senha só chega aqui com o bloqueio expirado e já zerado (passo 204b), mas
+   * limpar de novo garante que nenhum {@code locked_until} velho sobreviva.
    */
   void recordSuccessfulLogin(Instant loginAt) {
     this.lastLoginAt = loginAt;
     this.failedLoginAttempts = 0;
+    this.lockedUntil = null;
+  }
+
+  /**
+   * Falha de login (passo 204b): grava o contador já incrementado e o lock decidido pelo caso de
+   * uso ({@code lockedUntil} nulo enquanto o limite não foi atingido).
+   */
+  void recordFailedLogin(int failedLoginAttempts, Instant lockedUntil) {
+    this.failedLoginAttempts = failedLoginAttempts;
+    this.lockedUntil = lockedUntil;
+  }
+
+  /** Desbloqueio por expiração (passo 204b): contador e lock voltam ao estado de tentativa nova. */
+  void clearLoginFailures() {
+    this.failedLoginAttempts = 0;
+    this.lockedUntil = null;
   }
 
   /**
@@ -203,6 +220,11 @@ public class UserEntity {
   /** Falhas de login acumuladas desde o último sucesso. */
   public int getFailedLoginAttempts() {
     return failedLoginAttempts;
+  }
+
+  /** Instante até o qual o login está bloqueado; nulo quando não há bloqueio (passo 204b). */
+  public Instant getLockedUntil() {
+    return lockedUntil;
   }
 
   /** Instante do último login bem-sucedido; nulo enquanto o usuário nunca entrou. */

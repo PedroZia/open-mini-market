@@ -153,6 +153,32 @@ public class UserRepository implements UserStore {
   /**
    * {@inheritDoc}
    *
+   * <p>Mesmo filtro de usuário vivo de {@link #updateDisplayName}; contador e lock chegam decididos
+   * pelo caso de uso e o flush fica com a transação dele.
+   */
+  @Override
+  public void recordFailedLogin(UUID id, int failedLoginAttempts, Instant lockedUntil) {
+    findById(id)
+        .filter(user -> user.getDeletedAt() == null)
+        .ifPresent(user -> user.recordFailedLogin(failedLoginAttempts, lockedUntil));
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Mesmo filtro de usuário vivo de {@link #updateDisplayName}; o flush fica com a transação do
+   * caso de uso.
+   */
+  @Override
+  public void clearLoginFailures(UUID id) {
+    findById(id)
+        .filter(user -> user.getDeletedAt() == null)
+        .ifPresent(UserEntity::clearLoginFailures);
+  }
+
+  /**
+   * {@inheritDoc}
+   *
    * <p>O filtro de {@code deleted_at} fica aqui, junto com o de {@link #search}: usuário
    * soft-deletado não existe para a aplicação.
    */
@@ -188,6 +214,8 @@ public class UserRepository implements UserStore {
                     user.getPasswordHash(),
                     user.getStatus(),
                     user.getDeletedAt(),
+                    user.getFailedLoginAttempts(),
+                    user.getLockedUntil(),
                     user.isMustChangePassword(),
                     loadRoles(List.of(user.getId())).getOrDefault(user.getId(), List.of()),
                     permissionRepository.effectivePermissions(user.getId())));

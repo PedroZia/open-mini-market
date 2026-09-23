@@ -221,7 +221,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitários com fakes — sucesso, senha errada, usuário inexistente, usuário desativado, rehash.
   **Commit:** `feat(auth): implementa nucleo do caso de uso de login`
 
-- [ ] **204b — Lock por tentativas de login**
+- [x] **204b — Lock por tentativas de login**
   **Objetivo:** bloquear após 5 falhas por 15 min. **Depende:** 204a
   **Implementar:** contador de falhas, `locked_until`, config do lock, desbloqueio ao expirar.
   **Testes/aceite:** unitários — bloqueado recusa mesmo com senha certa; desbloqueio após expirar; sucesso zera contador e lock.

@@ -40,6 +40,8 @@ class LoginUseCaseTest {
 
   private static final Instant NOW = Instant.parse("2026-09-23T12:00:00Z");
   private static final Duration ABSOLUTE_EXPIRATION = Duration.ofHours(12);
+  private static final int MAX_ATTEMPTS = 5;
+  private static final int LOCK_MINUTES = 15;
   private static final String USERNAME = "ana.souza";
   private static final String PASSWORD = "senha-secreta";
   private static final String STORED_HASH = "$argon2id$v=19$m=19456,t=2,p=1$hash-antigo";
@@ -67,6 +69,8 @@ class LoginUseCaseTest {
     useCase.clock = Clock.fixed(NOW, ZoneOffset.UTC);
     useCase.defaultStoreCode = "MATRIZ";
     useCase.absoluteExpiration = ABSOLUTE_EXPIRATION;
+    useCase.maxLoginAttempts = MAX_ATTEMPTS;
+    useCase.lockMinutes = LOCK_MINUTES;
     passwordHasher.passwordMatches = true;
     userStore.authState = authState("ACTIVE", null, false);
   }
@@ -191,6 +195,114 @@ class LoginUseCaseTest {
   }
 
   @Test
+  @DisplayName("falha abaixo do limite só incrementa o contador, sem bloquear")
+  void incrementsCounterWithoutLockingBelowLimit() {
+    // Três falhas antes: a quarta ainda não bloqueia (o limite é 5).
+    userStore.authState = authState("ACTIVE", null, 3, null, false);
+    passwordHasher.passwordMatches = false;
+
+    assertInvalidCredentials();
+
+    assertThat(userStore.failedLoginId).isEqualTo(USER_ID);
+    assertThat(userStore.failedLoginAttempts).isEqualTo(4);
+    assertThat(userStore.failedLoginLockedUntil).isNull();
+    assertThat(userStore.clearedFailuresId).isNull();
+    assertThat(sessionStore.inserted).isNull();
+  }
+
+  @Test
+  @DisplayName("5ª falha grava o lock de 15 min e ainda responde INVALID_CREDENTIALS")
+  void locksOnFifthFailure() {
+    userStore.authState = authState("ACTIVE", null, MAX_ATTEMPTS - 1, null, false);
+    passwordHasher.passwordMatches = false;
+
+    assertInvalidCredentials();
+
+    assertThat(userStore.failedLoginId).isEqualTo(USER_ID);
+    assertThat(userStore.failedLoginAttempts).isEqualTo(MAX_ATTEMPTS);
+    assertThat(userStore.failedLoginLockedUntil)
+        .isEqualTo(NOW.plus(Duration.ofMinutes(LOCK_MINUTES)));
+    assertThat(sessionStore.inserted).isNull();
+  }
+
+  @Test
+  @DisplayName(
+      "conta bloqueada recusa com ACCOUNT_LOCKED mesmo com senha certa, sem conferir a senha")
+  void rejectsLockedAccountEvenWithCorrectPassword() {
+    userStore.authState =
+        authState("ACTIVE", null, MAX_ATTEMPTS, NOW.plus(Duration.ofMinutes(1)), false);
+    passwordHasher.passwordMatches = true;
+
+    assertThatThrownBy(() -> useCase.execute(command()))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> {
+              assertThat(exception.code()).isEqualTo(ErrorCode.ACCOUNT_LOCKED);
+              assertThat(exception.getMessage()).contains("bloqueada");
+            });
+
+    // A senha nem chega a ser verificada e nada é gravado: o bloqueio vence antes de tudo.
+    assertThat(passwordHasher.verifiedHash).isNull();
+    assertThat(userStore.failedLoginAttempts).isNull();
+    assertThat(userStore.clearedFailuresId).isNull();
+    assertThat(sessionStore.inserted).isNull();
+  }
+
+  @Test
+  @DisplayName("bloqueio expirado libera a senha certa e zera contador e lock antes de autenticar")
+  void expiredLockAllowsLoginAndClearsState() {
+    userStore.authState =
+        authState("ACTIVE", null, MAX_ATTEMPTS, NOW.minus(Duration.ofMinutes(1)), false);
+    passwordHasher.passwordMatches = true;
+
+    LoginResult result = useCase.execute(command());
+
+    assertThat(result.token()).isNotBlank();
+    assertThat(userStore.clearedFailuresId).isEqualTo(USER_ID);
+    assertThat(userStore.successfulLoginId).isEqualTo(USER_ID);
+    assertThat(userStore.failedLoginAttempts).isNull();
+    assertThat(sessionStore.inserted).isNotNull();
+  }
+
+  @Test
+  @DisplayName("falha depois do bloqueio expirado recomeça o contador em 1, não em 6")
+  void failureAfterExpiredLockRestartsCounter() {
+    userStore.authState =
+        authState("ACTIVE", null, MAX_ATTEMPTS, NOW.minus(Duration.ofMinutes(1)), false);
+    passwordHasher.passwordMatches = false;
+
+    assertInvalidCredentials();
+
+    assertThat(userStore.clearedFailuresId).isEqualTo(USER_ID);
+    assertThat(userStore.failedLoginAttempts).isEqualTo(1);
+    assertThat(userStore.failedLoginLockedUntil).isNull();
+  }
+
+  @Test
+  @DisplayName("sucesso grava o login bem-sucedido sem registrar falha nem lock")
+  void successRecordsLoginWithoutFailures() {
+    userStore.authState = authState("ACTIVE", null, 3, null, false);
+
+    useCase.execute(command());
+
+    // recordSuccessfulLogin (users.infrastructure) é quem zera contador e locked_until.
+    assertThat(userStore.successfulLoginId).isEqualTo(USER_ID);
+    assertThat(userStore.failedLoginAttempts).isNull();
+    assertThat(userStore.clearedFailuresId).isNull();
+  }
+
+  @Test
+  @DisplayName("senha errada de usuário desativado não incrementa o contador")
+  void failedDisabledUserDoesNotTouchCounter() {
+    userStore.authState = authState("DISABLED", null, 2, null, false);
+    passwordHasher.passwordMatches = false;
+
+    assertInvalidCredentials();
+
+    assertThat(userStore.failedLoginAttempts).isNull();
+  }
+
+  @Test
   @DisplayName("resultado não tem campo de senha nem de hash e não vaza o hash guardado")
   void resultDoesNotCarryCredentials() {
     LoginResult result =
@@ -213,10 +325,7 @@ class LoginUseCaseTest {
   }
 
   private void assertInvalidCredentials() {
-    assertThatThrownBy(
-            () ->
-                useCase.execute(
-                    new LoginCommand(USERNAME, PASSWORD, SessionClient.TUI, null, null, null)))
+    assertThatThrownBy(() -> useCase.execute(command()))
         .isInstanceOfSatisfying(
             BusinessException.class,
             exception -> {
@@ -228,6 +337,16 @@ class LoginUseCaseTest {
   }
 
   private static UserAuthState authState(String status, Instant deletedAt, boolean mustChange) {
+    return authState(status, deletedAt, 0, null, mustChange);
+  }
+
+  /** Estado de autenticação com o contador e o lock informados (passo 204b). */
+  private static UserAuthState authState(
+      String status,
+      Instant deletedAt,
+      int failedAttempts,
+      Instant lockedUntil,
+      boolean mustChange) {
     return new UserAuthState(
         USER_ID,
         USERNAME,
@@ -235,9 +354,15 @@ class LoginUseCaseTest {
         STORED_HASH,
         status,
         deletedAt,
+        failedAttempts,
+        lockedUntil,
         mustChange,
         List.of("OPERADOR"),
         Set.of("sale.create"));
+  }
+
+  private static LoginCommand command() {
+    return new LoginCommand(USERNAME, PASSWORD, SessionClient.TUI, null, null, null);
   }
 
   /** Dublê de {@link UserStore}: devolve o estado combinado e guarda o que o login gravou. */
@@ -248,6 +373,10 @@ class LoginUseCaseTest {
     private Instant successfulLoginAt;
     private UUID updatedHashId;
     private String updatedHash;
+    private UUID failedLoginId;
+    private Integer failedLoginAttempts;
+    private Instant failedLoginLockedUntil;
+    private UUID clearedFailuresId;
 
     @Override
     public Optional<UserAuthState> findAuthStateByUsername(String username) {
@@ -258,6 +387,18 @@ class LoginUseCaseTest {
     public void recordSuccessfulLogin(UUID id, Instant loginAt) {
       successfulLoginId = id;
       successfulLoginAt = loginAt;
+    }
+
+    @Override
+    public void recordFailedLogin(UUID id, int failedLoginAttempts, Instant lockedUntil) {
+      failedLoginId = id;
+      this.failedLoginAttempts = failedLoginAttempts;
+      this.failedLoginLockedUntil = lockedUntil;
+    }
+
+    @Override
+    public void clearLoginFailures(UUID id) {
+      clearedFailuresId = id;
     }
 
     @Override
