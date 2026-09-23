@@ -3,11 +3,16 @@ package com.minimarket.users.infrastructure;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.ManyToMany;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -53,6 +58,18 @@ public class UserEntity {
   @Version
   @Column(name = "version")
   private long version;
+
+  /**
+   * Lado dono de {@code user_roles}: as colunas extras da tabela de junção ({@code granted_at}, com
+   * default no banco, e {@code granted_by_user_id}, nulo) ficam sem mapeamento até existir caso de
+   * uso que as leia.
+   */
+  @ManyToMany
+  @JoinTable(
+      name = "user_roles",
+      joinColumns = @JoinColumn(name = "user_id"),
+      inverseJoinColumns = @JoinColumn(name = "role_id"))
+  private Set<RoleEntity> roles = new LinkedHashSet<>();
 
   /** Exigido pelo JPA. */
   protected UserEntity() {}
@@ -131,5 +148,10 @@ public class UserEntity {
 
   public long getVersion() {
     return version;
+  }
+
+  /** Roles atuais do usuário; alterar a coleção é o que a troca de papéis faz. */
+  public Set<RoleEntity> getRoles() {
+    return roles;
   }
 }

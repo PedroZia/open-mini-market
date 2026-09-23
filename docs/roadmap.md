@@ -133,7 +133,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de integração conta roles e permissões esperadas; ADMIN possui todas as permissões.
   **Commit:** `feat(users): cria tabelas de RBAC e catalogo de permissoes`
 
-- [ ] **106 — Repositório de RBAC**
+- [x] **106 — Repositório de RBAC**
   **Objetivo:** consultar permissões efetivas e papéis. **Depende:** 105
   **Implementar:** `RoleRepository`/`PermissionRepository`: `rolesOf(userId)`, `effectivePermissions(userId)`, `assignRoles(userId, roleCodes)`, `permissionsOf(roleCode)`, `replacePermissions(roleCode, codes)`.
   **Testes/aceite:** teste de integração: permissões efetivas de um OPERADOR; troca de permissões de role reflete na consulta.
