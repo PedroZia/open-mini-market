@@ -1,2 +1,23 @@
-# Serviços de desenvolvimento. Conteúdo definido no passo 003 (PostgreSQL 18).
-services: {}
+# Serviços de desenvolvimento. Variáveis em .env (copie de .env.example).
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-minimarket}
+      POSTGRES_USER: ${POSTGRES_USER:-minimarket}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minimarket}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # No postgres:18 o VOLUME da imagem é /var/lib/postgresql (PGDATA por versão).
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  postgres-data:

@@ -36,7 +36,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `GET /q/health` retorna `UP`; `mvn verify` verde (um teste trivial de contexto).
   **Commit:** `chore(backend): cria projeto Quarkus com health check`
 
-- [ ] **003 — PostgreSQL de desenvolvimento**
+- [x] **003 — PostgreSQL de desenvolvimento**
   **Objetivo:** banco local via Docker Compose. **Depende:** 001
   **Implementar:** `docker-compose.yml` com `postgres:18` (porta 5432, volume nomeado, healthcheck, variáveis por `.env.example`); datasource apontando para ele no perfil `%dev`.
   **Testes/aceite:** `docker compose up -d` sobe o banco saudável e a app conecta em dev.
