@@ -181,7 +181,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** senha antiga deixa de funcionar; novo hash gerado; `mustChangePassword=true`.
   **Commit:** `feat(users): adiciona reset de senha por administrador`
 
-- [ ] **114 — API de roles e permissões**
+- [x] **114 — API de roles e permissões**
   **Objetivo:** administrar o mapa de permissões sem deploy. **Depende:** 106
   **Implementar:** `GET /api/v1/roles` (com permissões) e `PUT /api/v1/roles/{code}/permissions` (valida códigos existentes, proíbe alterar role `system` se decidido, invalida cache de permissões se houver).
   **Testes/aceite:** 200 lista roles; PUT troca permissões e a consulta reflete; código inexistente → 400 `UNKNOWN_PERMISSION`.

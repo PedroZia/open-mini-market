@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.minimarket.IntegrationTestBase;
 import com.minimarket.shared.domain.NotFoundException;
+import com.minimarket.users.application.RoleSummary;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -95,13 +96,16 @@ class PermissionRepositoryTest extends IntegrationTestBase {
   @Test
   @TestTransaction
   @DisplayName(
-      "replacePermissions troca a role e a mudança reflete nas permissões efetivas do usuário")
+      "replacePermissions troca a role, devolve a projeção atualizada e reflete nas permissões efetivas")
   void replacesPermissionsAndReflectsOnEffectivePermissions() {
     UserEntity operator = insertUser("operador.troca");
     roleRepository.assignRoles(operator.getId(), List.of("OPERADOR"));
 
-    permissionRepository.replacePermissions("OPERADOR", List.of("stock.adjust", "report.read"));
+    RoleSummary updated =
+        permissionRepository.replacePermissions("OPERADOR", List.of("stock.adjust", "report.read"));
 
+    assertThat(updated.code()).isEqualTo("OPERADOR");
+    assertThat(updated.permissions()).containsExactly("report.read", "stock.adjust");
     assertThat(permissionRepository.permissionsOf("OPERADOR"))
         .containsExactly("report.read", "stock.adjust");
     assertThat(permissionRepository.effectivePermissions(operator.getId()))
@@ -137,6 +141,62 @@ class PermissionRepositoryTest extends IntegrationTestBase {
 
     assertThat(permissionRepository.permissionsOf("OPERADOR"))
         .containsExactlyInAnyOrderElementsOf(OPERADOR_PERMISSIONS);
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName(
+      "listRoles devolve as 3 roles em ordem de código, com metadados e permissões ordenadas")
+  void listsRolesFromCatalog() {
+    List<RoleSummary> roles = permissionRepository.listRoles();
+
+    assertThat(roles).extracting(RoleSummary::code).containsExactly("ADMIN", "GERENTE", "OPERADOR");
+    assertThat(roles).extracting(RoleSummary::system).containsOnly(true);
+
+    RoleSummary operador = roleOf(roles, "OPERADOR");
+    assertThat(operador.name()).isEqualTo("Operador");
+    assertThat(operador.description()).isEqualTo("Operação de caixa e vendas");
+    assertThat(operador.permissions())
+        .containsExactlyInAnyOrderElementsOf(OPERADOR_PERMISSIONS)
+        .isSorted();
+
+    assertThat(roleOf(roles, "GERENTE").permissions()).hasSize(22).isSorted();
+    assertThat(roleOf(roles, "ADMIN").permissions())
+        .hasSize(26)
+        .contains("role.write", "user.session.revoke")
+        .isSorted();
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("findRole devolve a projeção com permissões e vazio para código inexistente")
+  void findsRoleByCode() {
+    assertThat(permissionRepository.findRole("GERENTE"))
+        .hasValueSatisfying(
+            role -> {
+              assertThat(role.name()).isEqualTo("Gerente");
+              assertThat(role.system()).isTrue();
+              assertThat(role.permissions()).hasSize(22).isSorted();
+            });
+    assertThat(permissionRepository.findRole("FANTASMA")).isEmpty();
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("findUnknownPermissionCodes devolve só os fora do catálogo, na ordem de entrada")
+  void findsUnknownPermissionCodes() {
+    assertThat(permissionRepository.findUnknownPermissionCodes(List.of())).isEmpty();
+    assertThat(
+            permissionRepository.findUnknownPermissionCodes(List.of("product.read", "sale.create")))
+        .isEmpty();
+    assertThat(
+            permissionRepository.findUnknownPermissionCodes(
+                List.of("product.read", "nao.existe", "outro.fantasma", "nao.existe")))
+        .containsExactly("nao.existe", "outro.fantasma");
+  }
+
+  private static RoleSummary roleOf(List<RoleSummary> roles, String code) {
+    return roles.stream().filter(role -> role.code().equals(code)).findFirst().orElseThrow();
   }
 
   private UserEntity insertUser(String username) {

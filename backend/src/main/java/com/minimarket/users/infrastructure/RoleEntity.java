@@ -13,8 +13,8 @@ import java.util.UUID;
 
 /**
  * Mapeamento da tabela {@code roles} (§5.3 do plano). JPA explícito, sem Panache: só as colunas
- * usadas hoje (id e code) — name/description/system entram quando houver caso de uso que os leia —
- * e a entidade não sai do módulo: nada de JPA em JSON.
+ * usadas hoje — name/description/system passaram a ser lidas pela administração de papéis (passo
+ * 114) — e a entidade não sai do módulo: nada de JPA em JSON.
  *
  * <p>O lado dono de {@code role_permissions} é esta coleção: {@code replacePermissions} troca o
  * conjunto e o Hibernate cuida das linhas da tabela de junção.
@@ -30,6 +30,15 @@ public class RoleEntity {
   @Column(name = "code")
   private String code;
 
+  @Column(name = "name")
+  private String name;
+
+  @Column(name = "description")
+  private String description;
+
+  @Column(name = "system")
+  private boolean system;
+
   @ManyToMany
   @JoinTable(
       name = "role_permissions",
@@ -42,6 +51,19 @@ public class RoleEntity {
 
   public String getCode() {
     return code;
+  }
+
+  public String getName() {
+    return name;
+  }
+
+  public String getDescription() {
+    return description;
+  }
+
+  /** {@code true} para as roles semeadas por migration; todas podem ter permissões editadas. */
+  public boolean isSystem() {
+    return system;
   }
 
   /** Permissões atuais da role; alterar a coleção é o que a troca de permissões faz. */
