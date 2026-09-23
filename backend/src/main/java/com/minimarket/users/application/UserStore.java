@@ -1,5 +1,6 @@
 package com.minimarket.users.application;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -16,4 +17,19 @@ public interface UserStore {
 
   /** Insere o usuário e devolve o id gerado (UUIDv7) pelo adaptador. */
   UUID insert(NewUser user);
+
+  /**
+   * Página de usuários vivos (soft-deletado nunca aparece) com filtro textual em
+   * username/display_name sem diferenciar maiúsculas ({@code search} em branco = sem filtro) e
+   * filtro de status ({@code active} nulo = todos). {@code sort} é a whitelist já resolvida pelo
+   * caso de uso — string do cliente nunca chega à consulta.
+   */
+  List<UserSummary> search(
+      String search, Boolean active, UserSort sort, boolean ascending, int page, int size);
+
+  /**
+   * Total de usuários vivos que casam com {@code search}/{@code active}, para o {@code totalItems}
+   * e o {@code totalPages} da página.
+   */
+  long count(String search, Boolean active);
 }

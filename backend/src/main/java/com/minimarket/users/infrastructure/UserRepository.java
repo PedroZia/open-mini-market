@@ -4,13 +4,19 @@ import com.github.f4b6a3.uuid.UuidCreator;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.users.application.NewUser;
+import com.minimarket.users.application.UserSort;
 import com.minimarket.users.application.UserStore;
+import com.minimarket.users.application.UserSummary;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.TypedQuery;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.hibernate.exception.ConstraintViolationException;
@@ -124,28 +130,116 @@ public class UserRepository implements UserStore {
   }
 
   /**
-   * Lista usuários vivos ordenados por username, com filtro textual em username/display_name e
-   * filtro de status ({@code active} nulo = todos). {@code search} em branco = sem filtro textual.
+   * {@inheritDoc}
+   *
+   * <p>As cláusulas são fixas e montadas só com valores já resolvidos — o campo de ordenação vem do
+   * enum {@link UserSort}, nunca de string do cliente — e todo valor entra por parâmetro nomeado. O
+   * {@code u.id} no fim da ordenação mantém a paginação estável quando o campo escolhido empata.
    */
-  public List<UserEntity> search(String search, Boolean active, int page, int size) {
-    boolean hasTerm = search != null && !search.isBlank();
-    StringBuilder jpql = new StringBuilder("select u from UserEntity u where u.deletedAt is null");
-    if (active != null) {
-      jpql.append(" and u.status = :status");
-    }
-    if (hasTerm) {
-      jpql.append(" and (lower(u.username) like :term or lower(u.displayName) like :term)");
-    }
-    jpql.append(" order by u.username");
+  @Override
+  public List<UserSummary> search(
+      String search, Boolean active, UserSort sort, boolean ascending, int page, int size) {
+    boolean hasTerm = hasTerm(search);
+    TypedQuery<UserEntity> query =
+        entityManager
+            .createQuery(
+                "select u from UserEntity u where u.deletedAt is null"
+                    + statusClause(active)
+                    + termClause(hasTerm)
+                    + " order by "
+                    + orderBy(sort, ascending)
+                    + ", u.id",
+                UserEntity.class)
+            .setFirstResult(page * size)
+            .setMaxResults(size);
+    applyFilters(query, search, active, hasTerm);
+    return toSummaries(query.getResultList());
+  }
 
-    var query = entityManager.createQuery(jpql.toString(), UserEntity.class);
+  /** {@inheritDoc} */
+  @Override
+  public long count(String search, Boolean active) {
+    boolean hasTerm = hasTerm(search);
+    TypedQuery<Long> query =
+        entityManager.createQuery(
+            "select count(u) from UserEntity u where u.deletedAt is null"
+                + statusClause(active)
+                + termClause(hasTerm),
+            Long.class);
+    applyFilters(query, search, active, hasTerm);
+    return query.getSingleResult();
+  }
+
+  private static void applyFilters(
+      TypedQuery<?> query, String search, Boolean active, boolean hasTerm) {
     if (active != null) {
       query.setParameter("status", active ? UserEntity.STATUS_ACTIVE : UserEntity.STATUS_DISABLED);
     }
     if (hasTerm) {
       query.setParameter("term", "%" + search.trim().toLowerCase(Locale.ROOT) + "%");
     }
-    return query.setFirstResult(page * size).setMaxResults(size).getResultList();
+  }
+
+  private static boolean hasTerm(String search) {
+    return search != null && !search.isBlank();
+  }
+
+  private static String statusClause(Boolean active) {
+    return active == null ? "" : " and u.status = :status";
+  }
+
+  private static String termClause(boolean hasTerm) {
+    return hasTerm ? " and (lower(u.username) like :term or lower(u.displayName) like :term)" : "";
+  }
+
+  /** Campo ordenável do enum → coluna JPQL; a whitelist mora no tipo, não na string. */
+  private static String orderBy(UserSort sort, boolean ascending) {
+    String column =
+        switch (sort) {
+          case USERNAME -> "u.username";
+          case DISPLAY_NAME -> "u.displayName";
+          case CREATED_AT -> "u.createdAt";
+        };
+    return column + (ascending ? " asc" : " desc");
+  }
+
+  /**
+   * Projeções da página: as roles dos usuários listados saem em uma consulta só, em vez de uma por
+   * usuário, e nada de entidade ou JPA atravessa a porta.
+   */
+  private List<UserSummary> toSummaries(List<UserEntity> users) {
+    if (users.isEmpty()) {
+      return List.of();
+    }
+    Map<UUID, List<String>> rolesByUserId =
+        loadRoles(users.stream().map(UserEntity::getId).toList());
+    return users.stream()
+        .map(
+            user ->
+                new UserSummary(
+                    user.getId(),
+                    user.getUsername(),
+                    user.getDisplayName(),
+                    user.getStatus(),
+                    rolesByUserId.getOrDefault(user.getId(), List.of())))
+        .toList();
+  }
+
+  /** Códigos de role dos ids informados, agrupados por usuário e ordenados dentro de cada um. */
+  private Map<UUID, List<String>> loadRoles(List<UUID> userIds) {
+    Map<UUID, List<String>> rolesByUserId = new HashMap<>();
+    List<Object[]> rows =
+        entityManager
+            .createQuery(
+                "select u.id, r.code from UserEntity u join u.roles r where u.id in :userIds"
+                    + " order by r.code",
+                Object[].class)
+            .setParameter("userIds", userIds)
+            .getResultList();
+    for (Object[] row : rows) {
+      rolesByUserId.computeIfAbsent((UUID) row[0], id -> new ArrayList<>()).add((String) row[1]);
+    }
+    return rolesByUserId;
   }
 
   /** Username é sempre comparado em minúsculas e sem espaços nas pontas (§5.3). */

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.minimarket.IntegrationTestBase;
+import com.minimarket.users.application.UserSort;
+import com.minimarket.users.application.UserSummary;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -78,8 +80,8 @@ class UserIntegrityTest extends IntegrationTestBase {
             });
     assertThat(userRepository.findById(deleted.getId()))
         .hasValueSatisfying(found -> assertThat(found.getDeletedAt()).isNotNull());
-    assertThat(userRepository.search("carla.dias", null, 0, 10))
-        .extracting(UserEntity::getId)
+    assertThat(userRepository.search("carla.dias", null, UserSort.USERNAME, true, 0, 10))
+        .extracting(UserSummary::id)
         .containsExactly(recreated.getId());
   }
 

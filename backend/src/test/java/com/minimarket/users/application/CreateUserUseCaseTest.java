@@ -130,6 +130,17 @@ class CreateUserUseCaseTest {
       inserted = user;
       return generatedId;
     }
+
+    @Override
+    public List<UserSummary> search(
+        String search, Boolean active, UserSort sort, boolean ascending, int page, int size) {
+      throw new UnsupportedOperationException("search não é usado por CreateUser");
+    }
+
+    @Override
+    public long count(String search, Boolean active) {
+      throw new UnsupportedOperationException("count não é usado por CreateUser");
+    }
   }
 
   /** Dublê de {@link RoleStore}: guarda o usuário e os papéis da última atribuição. */

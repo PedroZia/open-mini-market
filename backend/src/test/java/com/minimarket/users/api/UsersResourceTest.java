@@ -8,10 +8,12 @@ import static org.hamcrest.Matchers.equalTo;
 import com.minimarket.IntegrationTestBase;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Locale;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -140,6 +142,112 @@ class UsersResourceTest extends IntegrationTestBase {
         .containsExactlyInAnyOrder("username", "displayName");
   }
 
+  @Test
+  @DisplayName(
+      "GET /api/v1/users pagina 25 usuários: página 0/size 10 devolve 10 itens e totalItems=25")
+  void listsWithPagination() {
+    createListingUsers(25);
+
+    Response firstPage = listUsers("search", SUFFIX, "page", "0", "size", "10");
+
+    assertThat(firstPage.jsonPath().getList("items")).hasSize(10);
+    assertThat(firstPage.jsonPath().getInt("page")).isZero();
+    assertThat(firstPage.jsonPath().getInt("size")).isEqualTo(10);
+    assertThat(firstPage.jsonPath().getInt("totalItems")).isEqualTo(25);
+    assertThat(firstPage.jsonPath().getInt("totalPages")).isEqualTo(3);
+
+    Response lastPage = listUsers("search", SUFFIX, "page", "2", "size", "10");
+    assertThat(lastPage.jsonPath().getList("items")).hasSize(5);
+  }
+
+  @Test
+  @DisplayName(
+      "GET /api/v1/users busca por trecho do username ou do nome, sem diferenciar maiúsculas")
+  void searchesByPartialName() {
+    createUser("ana.souza." + SUFFIX, "Ana Souza", "senha-secreta");
+    createUserWithRole("bruno.lima." + SUFFIX, "Bruno Lima " + SUFFIX, "OPERADOR");
+
+    Response byUsername = listUsers("search", ("SOUZA." + SUFFIX).toUpperCase(Locale.ROOT));
+    assertThat(byUsername.jsonPath().getList("items")).hasSize(1);
+    assertThat(byUsername.jsonPath().getString("items[0].username"))
+        .isEqualTo("ana.souza." + SUFFIX);
+    assertThat(byUsername.jsonPath().getInt("totalItems")).isEqualTo(1);
+
+    Response byDisplayName = listUsers("search", "lima " + SUFFIX);
+    assertThat(byDisplayName.jsonPath().getList("items")).hasSize(1);
+    assertThat(byDisplayName.jsonPath().getString("items[0].displayName"))
+        .isEqualTo("Bruno Lima " + SUFFIX);
+    assertThat(byDisplayName.jsonPath().getList("items[0].roles", String.class))
+        .containsExactly("OPERADOR");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/users com size=500 devolve size limitado a 100")
+  void limitsSizeToMaximum() {
+    createListingUsers(2);
+
+    Response response = listUsers("search", SUFFIX, "size", "500");
+
+    assertThat(response.jsonPath().getInt("size")).isEqualTo(100);
+    assertThat(response.jsonPath().getList("items")).hasSize(2);
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/users ordena por displayName,desc")
+  void sortsByDisplayNameDescending() {
+    createUser("mario.costa." + SUFFIX, "Mario Costa", "senha-secreta");
+    createUser("ana.souza." + SUFFIX, "Ana Souza", "senha-secreta");
+    createUser("zeca.alves." + SUFFIX, "Zeca Alves", "senha-secreta");
+
+    Response response = listUsers("search", SUFFIX, "sort", "displayName,desc");
+
+    assertThat(response.jsonPath().getList("items.displayName", String.class))
+        .containsExactly("Zeca Alves", "Mario Costa", "Ana Souza");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/users com sort fora da whitelist ou direção inválida responde 400")
+  void rejectsInvalidSort() {
+    Response response = listUsersBadRequest("sort", "password,desc");
+
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    assertThat(listUsersBadRequest("sort", "username,up").jsonPath().getString("code"))
+        .isEqualTo("VALIDATION_ERROR");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/users com page negativo ou size menor que 1 responde 400")
+  void rejectsInvalidPagination() {
+    assertThat(listUsersBadRequest("page", "-1").jsonPath().getString("code"))
+        .isEqualTo("VALIDATION_ERROR");
+    assertThat(listUsersBadRequest("size", "0").jsonPath().getString("code"))
+        .isEqualTo("VALIDATION_ERROR");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/users não lista usuário soft-deletado")
+  void hidesSoftDeletedUsers() throws SQLException {
+    createListingUsers(3);
+    softDeleteUser("lista02." + SUFFIX);
+
+    Response response = listUsers("search", SUFFIX);
+
+    assertThat(response.jsonPath().getInt("totalItems")).isEqualTo(2);
+    assertThat(response.jsonPath().getList("items.username", String.class))
+        .containsExactlyInAnyOrder("lista01." + SUFFIX, "lista03." + SUFFIX);
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/users sem resultado devolve items vazio e totalPages 0")
+  void returnsEmptyPage() {
+    Response response = listUsers("search", "ninguem." + SUFFIX);
+
+    assertThat(response.jsonPath().getList("items")).isEmpty();
+    assertThat(response.jsonPath().getInt("totalItems")).isZero();
+    assertThat(response.jsonPath().getInt("totalPages")).isZero();
+  }
+
   /**
    * O request HTTP commita, então os usuários criados aqui são removidos ao fim de cada teste: os
    * testes de repositório assumem a tabela como a encontraram. A FK de {@code user_roles} é {@code
@@ -174,6 +282,70 @@ class UsersResourceTest extends IntegrationTestBase {
         .post("/api/v1/users")
         .then()
         .statusCode(201);
+  }
+
+  private static void createUserWithRole(String username, String displayName, String roleCode) {
+    given()
+        .contentType("application/json")
+        .body(
+            """
+            {"username": "%s", "displayName": "%s", "password": "senha-secreta",
+             "roleCodes": ["%s"]}
+            """
+                .formatted(username, displayName, roleCode))
+        .when()
+        .post("/api/v1/users")
+        .then()
+        .statusCode(201);
+  }
+
+  /**
+   * Cria usuários numerados; o SUFFIX no username/displayName deixa a busca isolar a própria
+   * página.
+   */
+  private static void createListingUsers(int count) {
+    for (int i = 1; i <= count; i++) {
+      createUser("lista%02d.%s".formatted(i, SUFFIX), "Usuario %02d".formatted(i), "senha-secreta");
+    }
+  }
+
+  private static Response listUsers(String... queryParams) {
+    return withQueryParams(given(), queryParams)
+        .when()
+        .get("/api/v1/users")
+        .then()
+        .statusCode(200)
+        .extract()
+        .response();
+  }
+
+  private static Response listUsersBadRequest(String... queryParams) {
+    return withQueryParams(given(), queryParams)
+        .when()
+        .get("/api/v1/users")
+        .then()
+        .statusCode(400)
+        .extract()
+        .response();
+  }
+
+  /** Pares {@code nome, valor} viram query params. */
+  private static RequestSpecification withQueryParams(
+      RequestSpecification request, String... queryParams) {
+    for (int i = 0; i < queryParams.length; i += 2) {
+      request = request.queryParam(queryParams[i], queryParams[i + 1]);
+    }
+    return request;
+  }
+
+  /** Soft delete direto no banco: a API de desativar usuário só chega no passo 112. */
+  private void softDeleteUser(String username) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement("update users set deleted_at = now() where username = ?")) {
+      statement.setString(1, username);
+      statement.executeUpdate();
+    }
   }
 
   private String passwordHashOf(String username) throws SQLException {

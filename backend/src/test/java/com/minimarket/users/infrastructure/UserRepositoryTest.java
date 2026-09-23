@@ -7,6 +7,8 @@ import com.minimarket.IntegrationTestBase;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.users.application.NewUser;
+import com.minimarket.users.application.UserSort;
+import com.minimarket.users.application.UserSummary;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -120,8 +122,8 @@ class UserRepositoryTest extends IntegrationTestBase {
               assertThat(found.getDeletedAt()).isNotNull();
               assertThat(found.getStatus()).isEqualTo(UserEntity.STATUS_ACTIVE);
             });
-    assertThat(userRepository.search(null, null, 0, 10))
-        .extracting(UserEntity::getId)
+    assertThat(userRepository.search(null, null, UserSort.USERNAME, true, 0, 10))
+        .extracting(UserSummary::id)
         .doesNotContain(user.getId());
   }
 
@@ -137,24 +139,28 @@ class UserRepositoryTest extends IntegrationTestBase {
     entityManager.flush();
     entityManager.clear();
 
-    assertThat(userRepository.search(null, null, 0, 10))
-        .extracting(UserEntity::getUsername)
+    assertThat(userRepository.search(null, null, UserSort.USERNAME, true, 0, 10))
+        .extracting(UserSummary::username)
         .containsExactly("ana", "bruno", "carla");
-    assertThat(userRepository.search("LIMA", null, 0, 10))
-        .extracting(UserEntity::getUsername)
+    assertThat(userRepository.search("LIMA", null, UserSort.USERNAME, true, 0, 10))
+        .extracting(UserSummary::username)
         .containsExactly("bruno");
-    assertThat(userRepository.search("souza", null, 0, 10))
-        .extracting(UserEntity::getUsername)
+    assertThat(userRepository.search("souza", null, UserSort.USERNAME, true, 0, 10))
+        .extracting(UserSummary::username)
         .containsExactly("ana");
-    assertThat(userRepository.search(null, true, 0, 10))
-        .extracting(UserEntity::getUsername)
+    assertThat(userRepository.search(null, true, UserSort.USERNAME, true, 0, 10))
+        .extracting(UserSummary::username)
         .containsExactly("ana", "bruno");
-    assertThat(userRepository.search(null, false, 0, 10))
-        .extracting(UserEntity::getUsername)
+    assertThat(userRepository.search(null, false, UserSort.USERNAME, true, 0, 10))
+        .extracting(UserSummary::username)
         .containsExactly("carla");
-    assertThat(userRepository.search("   ", null, 0, 10))
-        .extracting(UserEntity::getUsername)
+    assertThat(userRepository.search("   ", null, UserSort.USERNAME, true, 0, 10))
+        .extracting(UserSummary::username)
         .containsExactly("ana", "bruno", "carla");
+
+    assertThat(userRepository.count(null, null)).isEqualTo(3);
+    assertThat(userRepository.count("LIMA", null)).isEqualTo(1);
+    assertThat(userRepository.count(null, true)).isEqualTo(2);
   }
 
   @Test
@@ -167,14 +173,14 @@ class UserRepositoryTest extends IntegrationTestBase {
     entityManager.flush();
     entityManager.clear();
 
-    assertThat(userRepository.search(null, null, 0, 2))
-        .extracting(UserEntity::getUsername)
+    assertThat(userRepository.search(null, null, UserSort.USERNAME, true, 0, 2))
+        .extracting(UserSummary::username)
         .containsExactly("user1", "user2");
-    assertThat(userRepository.search(null, null, 1, 2))
-        .extracting(UserEntity::getUsername)
+    assertThat(userRepository.search(null, null, UserSort.USERNAME, true, 1, 2))
+        .extracting(UserSummary::username)
         .containsExactly("user3", "user4");
-    assertThat(userRepository.search(null, null, 2, 2))
-        .extracting(UserEntity::getUsername)
+    assertThat(userRepository.search(null, null, UserSort.USERNAME, true, 2, 2))
+        .extracting(UserSummary::username)
         .containsExactly("user5");
   }
 }
