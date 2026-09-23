@@ -4,6 +4,7 @@ import com.minimarket.shared.api.PageResponse;
 import com.minimarket.users.application.CreateUserCommand;
 import com.minimarket.users.application.CreateUserResult;
 import com.minimarket.users.application.CreateUserUseCase;
+import com.minimarket.users.application.GetUserUseCase;
 import com.minimarket.users.application.ListUsersUseCase;
 import com.minimarket.users.application.UserPage;
 import com.minimarket.users.application.UserSummary;
@@ -14,12 +15,14 @@ import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import java.util.UUID;
 
 /**
  * Usuários (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a resposta — zero
@@ -34,6 +37,8 @@ public class UsersResource {
   @Inject CreateUserUseCase createUserUseCase;
 
   @Inject ListUsersUseCase listUsersUseCase;
+
+  @Inject GetUserUseCase getUserUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -80,5 +85,13 @@ public class UsersResource {
   private static UserResponse toResponse(UserSummary user) {
     return new UserResponse(
         user.id(), user.username(), user.displayName(), user.roles(), user.status());
+  }
+
+  /** Detalhe do usuário; inexistente ou soft-deletado → 404 {@code USER_NOT_FOUND}. */
+  @GET
+  @Path("/{id}")
+  @Produces(MediaType.APPLICATION_JSON)
+  public UserResponse get(@PathParam("id") UUID id) {
+    return toResponse(getUserUseCase.execute(id));
   }
 }

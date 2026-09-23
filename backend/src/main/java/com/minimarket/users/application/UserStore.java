@@ -1,6 +1,7 @@
 package com.minimarket.users.application;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -17,6 +18,13 @@ public interface UserStore {
 
   /** Insere o usuário e devolve o id gerado (UUIDv7) pelo adaptador. */
   UUID insert(NewUser user);
+
+  /**
+   * Usuário vivo pelo id, com roles e status. Soft-deletado devolve vazio — o filtro de {@code
+   * deleted_at} mora no adaptador, como em {@link #search}; usuário apenas {@code DISABLED}
+   * continua sendo devolvido.
+   */
+  Optional<UserSummary> findSummaryById(UUID id);
 
   /**
    * Página de usuários vivos (soft-deletado nunca aparece) com filtro textual em

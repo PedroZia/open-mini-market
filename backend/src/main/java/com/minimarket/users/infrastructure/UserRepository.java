@@ -27,7 +27,8 @@ import org.hibernate.exception.ConstraintViolationException;
  *
  * <p>{@link #findByUsername} e {@link #findById} devolvem também usuário soft-deletado — quem
  * decide o que fazer com {@code deletedAt} é o caso de uso (o login precisa ver o registro para
- * decidir); {@link #search} e {@link #existsByUsername} sempre ignoram deletados.
+ * decidir); {@link #search}, {@link #findSummaryById} e {@link #existsByUsername} sempre ignoram
+ * deletados.
  *
  * <p>Implementa a porta {@link UserStore}: é por ela que {@code application} grava usuário sem
  * tocar em JPA.
@@ -100,6 +101,25 @@ public class UserRepository implements UserStore {
           ErrorCode.USERNAME_ALREADY_EXISTS,
           "username %s já está em uso".formatted(normalize(username)));
     }
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>O filtro de {@code deleted_at} fica aqui, junto com o de {@link #search}: usuário
+   * soft-deletado não existe para a aplicação.
+   */
+  @Override
+  public Optional<UserSummary> findSummaryById(UUID id) {
+    List<UserEntity> found =
+        entityManager
+            .createQuery(
+                "select u from UserEntity u where u.id = :id and u.deletedAt is null",
+                UserEntity.class)
+            .setParameter("id", id)
+            .setMaxResults(1)
+            .getResultList();
+    return toSummaries(found).stream().findFirst();
   }
 
   /** {@inheritDoc} */

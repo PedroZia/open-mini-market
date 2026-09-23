@@ -10,6 +10,7 @@ import java.lang.reflect.RecordComponent;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -129,6 +130,11 @@ class CreateUserUseCaseTest {
     public UUID insert(NewUser user) {
       inserted = user;
       return generatedId;
+    }
+
+    @Override
+    public Optional<UserSummary> findSummaryById(UUID id) {
+      throw new UnsupportedOperationException("findSummaryById não é usado por CreateUser");
     }
 
     @Override

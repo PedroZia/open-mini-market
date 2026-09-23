@@ -248,6 +248,44 @@ class UsersResourceTest extends IntegrationTestBase {
     assertThat(response.jsonPath().getInt("totalPages")).isZero();
   }
 
+  @Test
+  @DisplayName("GET /api/v1/users/{id} devolve 200 com username, displayName, status e roles")
+  void returnsUserDetail() {
+    String id = createUserWithRole("detalhe." + SUFFIX, "Detalhe Usuario", "OPERADOR");
+
+    Response response = getUser(id);
+
+    assertThat(response.jsonPath().getString("id")).isEqualTo(id);
+    assertThat(response.jsonPath().getString("username")).isEqualTo("detalhe." + SUFFIX);
+    assertThat(response.jsonPath().getString("displayName")).isEqualTo("Detalhe Usuario");
+    assertThat(response.jsonPath().getString("status")).isEqualTo("ACTIVE");
+    assertThat(response.jsonPath().getList("roles", String.class)).containsExactly("OPERADOR");
+    assertThat(response.asString()).doesNotContain("$argon2");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/users/{id} de id inexistente responde 404 USER_NOT_FOUND")
+  void returnsNotFoundForUnknownId() {
+    Response response = getUserExpectingNotFound(UUID.randomUUID().toString());
+
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/user-not-found");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Usuário não encontrado");
+    assertThat(response.jsonPath().getInt("status")).isEqualTo(404);
+    assertThat(response.jsonPath().getString("code")).isEqualTo("USER_NOT_FOUND");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/users/{id} de usuário soft-deletado responde 404 USER_NOT_FOUND")
+  void hidesSoftDeletedUserFromDetail() throws SQLException {
+    String id = createUserWithRole("apagado." + SUFFIX, "Apagado", "OPERADOR");
+    softDeleteUser("apagado." + SUFFIX);
+
+    assertThat(getUserExpectingNotFound(id).jsonPath().getString("code"))
+        .isEqualTo("USER_NOT_FOUND");
+  }
+
   /**
    * O request HTTP commita, então os usuários criados aqui são removidos ao fim de cada teste: os
    * testes de repositório assumem a tabela como a encontraram. A FK de {@code user_roles} é {@code
@@ -284,8 +322,9 @@ class UsersResourceTest extends IntegrationTestBase {
         .statusCode(201);
   }
 
-  private static void createUserWithRole(String username, String displayName, String roleCode) {
-    given()
+  /** Cria o usuário com o papel informado e devolve o id gerado (para o GET por id). */
+  private static String createUserWithRole(String username, String displayName, String roleCode) {
+    return given()
         .contentType("application/json")
         .body(
             """
@@ -296,7 +335,10 @@ class UsersResourceTest extends IntegrationTestBase {
         .when()
         .post("/api/v1/users")
         .then()
-        .statusCode(201);
+        .statusCode(201)
+        .extract()
+        .jsonPath()
+        .getString("id");
   }
 
   /**
@@ -327,6 +369,14 @@ class UsersResourceTest extends IntegrationTestBase {
         .statusCode(400)
         .extract()
         .response();
+  }
+
+  private static Response getUser(String id) {
+    return given().when().get("/api/v1/users/{id}", id).then().statusCode(200).extract().response();
+  }
+
+  private static Response getUserExpectingNotFound(String id) {
+    return given().when().get("/api/v1/users/{id}", id).then().statusCode(404).extract().response();
   }
 
   /** Pares {@code nome, valor} viram query params. */

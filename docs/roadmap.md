@@ -157,7 +157,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste com 25 usuários: página 0/size 10 → 10 itens, `totalItems=25`; busca por nome parcial funciona; `size=500` é limitado a 100.
   **Commit:** `feat(users): lista usuarios com paginacao e busca`
 
-- [ ] **110 — API `GET /api/v1/users/{id}`**
+- [x] **110 — API `GET /api/v1/users/{id}`**
   **Objetivo:** detalhe do usuário. **Depende:** 108
   **Implementar:** resource + resposta com roles e status.
   **Testes/aceite:** 200 com dados corretos; 404 com `code=USER_NOT_FOUND`.
