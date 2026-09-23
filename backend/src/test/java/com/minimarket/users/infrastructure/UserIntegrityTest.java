@@ -15,6 +15,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import org.junit.jupiter.api.DisplayName;
@@ -89,8 +90,11 @@ class UserIntegrityTest extends IntegrationTestBase {
   @TestTransaction
   @DisplayName("created_at e updated_at são preenchidos no insert como timestamptz (UTC)")
   void fillsTimestampsInUtc() throws SQLException {
-    // O banco guarda timestamptz com precisão de microssegundos, mas o relógio da JVM no Windows
-    // tem 100 ns: truncar evita falso negativo quando o insert cai no mesmo microssegundo.
+    // O banco guarda timestamptz com precisão de microssegundos e **arredonda** o valor da JVM (100
+    // ns):
+    // truncar sozinho ainda dá falso negativo quando o insert cai na metade final de um
+    // microssegundo,
+    // então a comparação abre 1 µs de folga em cada borda.
     Instant before = Instant.now().truncatedTo(ChronoUnit.MICROS);
     UserEntity user = userRepository.insert(new UserEntity("diego.moura", "hash", "Diego Moura"));
     entityManager.flush();
@@ -98,9 +102,14 @@ class UserIntegrityTest extends IntegrationTestBase {
 
     UserEntity reloaded = userRepository.findById(user.getId()).orElseThrow();
     Instant after = Instant.now().truncatedTo(ChronoUnit.MICROS);
+    Duration slack = Duration.of(1, ChronoUnit.MICROS);
 
-    assertThat(reloaded.getCreatedAt()).isNotNull().isBetween(before, after);
-    assertThat(reloaded.getUpdatedAt()).isNotNull().isBetween(before, after);
+    assertThat(reloaded.getCreatedAt())
+        .isNotNull()
+        .isBetween(before.minus(slack), after.plus(slack));
+    assertThat(reloaded.getUpdatedAt())
+        .isNotNull()
+        .isBetween(before.minus(slack), after.plus(slack));
     assertThat(utcTimestampColumns()).isEqualTo(2);
   }
 
