@@ -408,9 +408,10 @@ JWT fica como opção futura apenas se surgirem consumidores externos stateless 
 - **Armazenamento:** apenas o **SHA-256 do token** em `auth_sessions.token_hash` (vazamento do banco não
   entrega sessões). Comparação em tempo constante.
 - **Senhas:** Argon2id (m=19 MiB, t=2, p=1 — OWASP), hash em formato PHC
-  (`$argon2id$v=19$m=19456,t=2,p=1$...`), via `de.mkammerer:argon2-jvm`. O formato PHC permite trocar
-  parâmetros/ algoritmo e re-hashear no próximo login bem-sucedido. Usuário inexistente verifica contra um
-  hash "dummy" (evita enumeração por timing).
+  (`$argon2id$v=19$m=19456,t=2,p=1$...`), via `com.password4j:password4j` (troca decidida no passo 104: a lib
+  lê m/t/p do próprio hash PHC, o que sustenta `verify` de hash antigo + `needsRehash`, sem binário nativo/JNI).
+  O formato PHC permite trocar parâmetros/ algoritmo e re-hashear no próximo login bem-sucedido. Usuário
+  inexistente verifica contra um hash "dummy" (evita enumeração por timing).
 - **Ciclo de vida:** `expires_at` absoluto (12 h, configurável) + idle timeout (`last_seen_at`, 30 min para
   WEB / 8 h para TUI — TUI fica em operação contínua). `last_seen_at` atualizado no máximo 1×/minuto por
   sessão (evita write por request).
