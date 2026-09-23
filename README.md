@@ -40,16 +40,22 @@ docs/                   plano técnico e roadmap
 docker-compose.yml      PostgreSQL (+ app) para desenvolvimento
 ```
 
-## Como rodar os testes
+## Subindo o ambiente (dev)
 
-Os testes de integração do backend usam PostgreSQL real via Dev Services: **Docker precisa estar
-rodando** — o container do banco sobe sozinho, não é preciso subir o `docker-compose` antes.
+Do zero ao PDV respondendo, em três comandos:
 
 ```bash
-cd backend
-./mvnw verify          # Linux/macOS
-.\mvnw.cmd verify      # Windows (PowerShell/cmd)
+docker compose up -d              # 1. banco PostgreSQL de desenvolvimento
+cd backend && ./mvnw quarkus:dev  # 2. API em http://localhost:8080
+cd backend && ./mvnw verify       # 3. build + testes
 ```
+
+No Windows (PowerShell/cmd), use `.\mvnw.cmd` no lugar de `./mvnw`. Ao subir, o Flyway aplica o schema
+e o seed de desenvolvimento (`backend/src/main/resources/db/seed-dev/R__seed_dev.sql`, idempotente);
+copie `.env.example` para `.env` se quiser trocar porta ou credenciais.
+
+Os testes de integração usam PostgreSQL real via **Dev Services**: o container do banco sobe sozinho,
+não é preciso subir o `docker-compose` antes — mas o **Docker precisa estar rodando**.
 
 ## Estado do projeto
 

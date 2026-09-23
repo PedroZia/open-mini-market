@@ -78,7 +78,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de API valida 200 e os campos vindos da loja `MATRIZ`.
   **Commit:** `feat(shared): expoe endpoint de metadados da aplicacao`
 
-- [ ] **010 — Seed de desenvolvimento e comandos no README**
+- [x] **010 — Seed de desenvolvimento e comandos no README**
   **Objetivo:** qualquer dev sobe o ambiente em 3 comandos. **Depende:** 004
   **Implementar:** `db/seed-dev/R__seed_dev.sql` (idempotente, carregado só no perfil `%dev`); README com subir banco, rodar app, rodar testes.
   **Testes/aceite:** em banco limpo, `%dev` aplica seed sem erro e reexecutar não duplica.
