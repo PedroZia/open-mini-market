@@ -60,7 +60,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** ArchUnit verde; teste falha se alguém violar a regra (validar com exemplo temporário).
   **Commit:** `chore(backend): define modulos e regras de dependencia com ArchUnit`
 
-- [ ] **007 — Erros padronizados (RFC 9457)**
+- [x] **007 — Erros padronizados (RFC 9457)**
   **Objetivo:** todo erro de API no mesmo formato. **Depende:** 002
   **Implementar:** `ProblemDetail` (type, title, status, detail, instance, code, traceId, errors[]), `ErrorCode` (enum de códigos estáveis), exception mappers para validação, 404, 405, 500 e exceções base `BusinessException`/`NotFoundException`/`ConflictException`.
   **Testes/aceite:** teste de API força 404 e 400 e valida `content-type: application/problem+json` + `code` + `traceId`.
