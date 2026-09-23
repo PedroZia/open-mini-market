@@ -94,6 +94,23 @@ class RoleRepositoryTest extends IntegrationTestBase {
         .containsExactly("FANTASMA", "OUTRO");
   }
 
+  @Test
+  @TestTransaction
+  @DisplayName("countActiveUsersWithRole conta só usuário vivo e ACTIVE com o papel")
+  void countsActiveUsersWithRole() {
+    UserEntity activeAdmin = insertUser("admin.ativo");
+    roleRepository.assignRoles(activeAdmin.getId(), List.of("ADMIN"));
+    UserEntity disabledAdmin = insertUser("admin.desativado");
+    roleRepository.assignRoles(disabledAdmin.getId(), List.of("ADMIN"));
+    userRepository.disable(disabledAdmin.getId());
+    UserEntity operator = insertUser("operador.ativo");
+    roleRepository.assignRoles(operator.getId(), List.of("OPERADOR"));
+
+    assertThat(roleRepository.countActiveUsersWithRole("ADMIN")).isEqualTo(1);
+    assertThat(roleRepository.countActiveUsersWithRole("OPERADOR")).isEqualTo(1);
+    assertThat(roleRepository.countActiveUsersWithRole("GERENTE")).isZero();
+  }
+
   private UserEntity insertUser(String username) {
     return userRepository.insert(new UserEntity(username, "hash", "Usuário " + username));
   }

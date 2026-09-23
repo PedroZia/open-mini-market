@@ -34,6 +34,21 @@ public interface UserStore {
   Optional<UserSummary> findSummaryById(UUID id);
 
   /**
+   * Desativa o usuário vivo (passo 112): grava {@code status = DISABLED} e {@code deleted_at} e
+   * devolve a projeção já atualizada. Vazio quando não existe usuário vivo com o id — quem já está
+   * desativado cai aqui, e o 404 é do caso de uso.
+   */
+  Optional<UserSummary> disable(UUID id);
+
+  /**
+   * Reativa o usuário (passo 112): grava {@code status = ACTIVE}, limpa {@code deleted_at} e
+   * devolve a projeção já atualizada. Diferente de {@link #findSummaryById}, enxerga o
+   * soft-deletado — é o registro que a reativação precisa alcançar. Usuário já ativo é no-op
+   * (mesmos valores, sem update) e id inexistente devolve vazio.
+   */
+  Optional<UserSummary> enable(UUID id);
+
+  /**
    * Página de usuários vivos (soft-deletado nunca aparece) com filtro textual em
    * username/display_name sem diferenciar maiúsculas ({@code search} em branco = sem filtro) e
    * filtro de status ({@code active} nulo = todos). {@code sort} é a whitelist já resolvida pelo

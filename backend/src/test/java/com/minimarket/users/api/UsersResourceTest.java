@@ -412,6 +412,113 @@ class UsersResourceTest extends IntegrationTestBase {
     assertThat(getUser(id).jsonPath().getString("displayName")).isEqualTo("Nome Antigo");
   }
 
+  @Test
+  @DisplayName(
+      "POST /api/v1/users/{id}/disable responde 200 DISABLED e tira o usuário da busca padrão")
+  void disablesUser() throws SQLException {
+    String id = createUserWithRole("desativa." + SUFFIX, "Desativa Usuario", "OPERADOR");
+
+    Response response = postUserAction(id, "disable", 200);
+
+    assertThat(response.jsonPath().getString("id")).isEqualTo(id);
+    assertThat(response.jsonPath().getString("username")).isEqualTo("desativa." + SUFFIX);
+    assertThat(response.jsonPath().getString("status")).isEqualTo("DISABLED");
+    assertThat(response.jsonPath().getList("roles", String.class)).containsExactly("OPERADOR");
+    assertThat(response.asString()).doesNotContain("$argon2");
+
+    // busca padrão (sem filtro de status) já não mostra o desativado
+    Response list = listUsers("search", SUFFIX);
+    assertThat(list.jsonPath().getList("items.id", String.class)).doesNotContain(id);
+    assertThat(list.jsonPath().getInt("totalItems")).isZero();
+    // detalhe some junto: desativado não existe para a API
+    assertThat(getUserExpectingNotFound(id).jsonPath().getString("code"))
+        .isEqualTo("USER_NOT_FOUND");
+    // histórico preservado no banco, acesso cortado
+    assertThat(statusOf(id)).isEqualTo("DISABLED");
+    assertThat(deletedAtOf(id)).isNotNull();
+  }
+
+  @Test
+  @DisplayName(
+      "POST /api/v1/users/{id}/enable responde 200 ACTIVE e devolve o usuário à busca padrão")
+  void enablesUser() throws SQLException {
+    String id = createUserWithRole("reativa." + SUFFIX, "Reativa Usuario", "OPERADOR");
+    postUserAction(id, "disable", 200);
+
+    Response response = postUserAction(id, "enable", 200);
+
+    assertThat(response.jsonPath().getString("id")).isEqualTo(id);
+    assertThat(response.jsonPath().getString("status")).isEqualTo("ACTIVE");
+    assertThat(response.jsonPath().getList("roles", String.class)).containsExactly("OPERADOR");
+
+    Response list = listUsers("search", SUFFIX);
+    assertThat(list.jsonPath().getList("items.id", String.class)).containsExactly(id);
+    assertThat(getUser(id).jsonPath().getString("status")).isEqualTo("ACTIVE");
+    assertThat(deletedAtOf(id)).isNull();
+  }
+
+  @Test
+  @DisplayName("POST /api/v1/users/{id}/disable do último ADMIN ativo responde 409 CONFLICT")
+  void rejectsDisablingLastActiveAdmin() throws SQLException {
+    String firstAdmin = createUserWithRole("admin.um." + SUFFIX, "Admin Um", "ADMIN");
+    String secondAdmin = createUserWithRole("admin.dois." + SUFFIX, "Admin Dois", "ADMIN");
+
+    // Com dois ADMINs ativos a desativação é permitida: ainda sobra um.
+    assertThat(postUserAction(secondAdmin, "disable", 200).jsonPath().getString("status"))
+        .isEqualTo("DISABLED");
+
+    Response response = postUserAction(firstAdmin, "disable", 409);
+
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/conflict");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Conflito de estado");
+    assertThat(response.jsonPath().getInt("status")).isEqualTo(409);
+    assertThat(response.jsonPath().getString("code")).isEqualTo("CONFLICT");
+    assertThat(response.jsonPath().getString("detail")).contains("último ADMIN ativo");
+
+    // nada foi gravado: o último ADMIN continua ativo
+    assertThat(getUser(firstAdmin).jsonPath().getString("status")).isEqualTo("ACTIVE");
+    assertThat(deletedAtOf(firstAdmin)).isNull();
+  }
+
+  @Test
+  @DisplayName("POST /api/v1/users/{id}/disable de id inexistente ou já desativado responde 404")
+  void returnsNotFoundWhenDisablingUnknownOrDisabledUser() throws SQLException {
+    assertThat(
+            postUserAction(UUID.randomUUID().toString(), "disable", 404)
+                .jsonPath()
+                .getString("code"))
+        .isEqualTo("USER_NOT_FOUND");
+
+    String id = createUserWithRole("ja.desativado." + SUFFIX, "Ja Desativado", "OPERADOR");
+    postUserAction(id, "disable", 200);
+
+    Response again = postUserAction(id, "disable", 404);
+
+    assertThat(again.contentType()).contains("application/problem+json");
+    assertThat(again.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/user-not-found");
+    assertThat(again.jsonPath().getString("code")).isEqualTo("USER_NOT_FOUND");
+  }
+
+  @Test
+  @DisplayName("POST /api/v1/users/{id}/enable de id inexistente responde 404; de ativo é no-op")
+  void returnsNotFoundWhenEnablingUnknownId() throws SQLException {
+    assertThat(
+            postUserAction(UUID.randomUUID().toString(), "enable", 404)
+                .jsonPath()
+                .getString("code"))
+        .isEqualTo("USER_NOT_FOUND");
+
+    String id = createUserWithRole("ja.ativo." + SUFFIX, "Ja Ativo", "OPERADOR");
+
+    assertThat(postUserAction(id, "enable", 200).jsonPath().getString("status"))
+        .isEqualTo("ACTIVE");
+    assertThat(getUser(id).jsonPath().getString("status")).isEqualTo("ACTIVE");
+    assertThat(deletedAtOf(id)).isNull();
+  }
+
   /**
    * O request HTTP commita, então os usuários criados aqui são removidos ao fim de cada teste: os
    * testes de repositório assumem a tabela como a encontraram. A FK de {@code user_roles} é {@code
@@ -525,6 +632,38 @@ class UsersResourceTest extends IntegrationTestBase {
       request = request.queryParam(queryParams[i], queryParams[i + 1]);
     }
     return request;
+  }
+
+  /** POST sem corpo nas ações de ciclo de vida ({@code disable}/{@code enable}) do usuário. */
+  private static Response postUserAction(String id, String action, int expectedStatus) {
+    return given()
+        .when()
+        .post("/api/v1/users/{id}/{action}", id, action)
+        .then()
+        .statusCode(expectedStatus)
+        .extract()
+        .response();
+  }
+
+  /** Status persistido, lido direto do banco para conferir o efeito do disable/enable. */
+  private String statusOf(String id) throws SQLException {
+    return columnOf(id, "status");
+  }
+
+  /** {@code deleted_at} persistido; {@code null} quando o usuário está vivo. */
+  private String deletedAtOf(String id) throws SQLException {
+    return columnOf(id, "deleted_at");
+  }
+
+  private String columnOf(String id, String column) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement("select " + column + " from users where id = ?::uuid")) {
+      statement.setString(1, id);
+      try (ResultSet resultSet = statement.executeQuery()) {
+        return resultSet.next() ? resultSet.getString(1) : null;
+      }
+    }
   }
 
   /** Soft delete direto no banco: a API de desativar usuário só chega no passo 112. */

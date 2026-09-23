@@ -169,6 +169,86 @@ class UserRepositoryTest extends IntegrationTestBase {
   @Test
   @TestTransaction
   @DisplayName(
+      "disable grava DISABLED + deleted_at e tira o usuário da busca, do detalhe e da checagem de username")
+  void disablesUser() {
+    UserEntity user = userRepository.insert(new UserEntity("desativado", "hash", "Desativado"));
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(userRepository.disable(user.getId()))
+        .hasValueSatisfying(
+            summary -> {
+              assertThat(summary.status()).isEqualTo(UserEntity.STATUS_DISABLED);
+              assertThat(summary.roles()).isEmpty();
+            });
+    entityManager.flush();
+    entityManager.clear();
+
+    // O registro continua no banco (histórico preservado), mas com o acesso cortado: é o que o
+    // login vai recusar quando existir (passo 204+).
+    UserEntity raw = userRepository.findById(user.getId()).orElseThrow();
+    assertThat(raw.getStatus()).isEqualTo(UserEntity.STATUS_DISABLED);
+    assertThat(raw.getDeletedAt()).isNotNull();
+    // As consultas que a aplicação usa hoje já não encontram o desativado.
+    assertThat(userRepository.findSummaryById(user.getId())).isEmpty();
+    assertThat(userRepository.existsByUsername("desativado")).isFalse();
+    assertThat(userRepository.search("desativado", null, UserSort.USERNAME, true, 0, 10)).isEmpty();
+    // Desativar de novo devolve vazio — o caso de uso traduz em 404.
+    assertThat(userRepository.disable(user.getId())).isEmpty();
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("enable reativa o usuário: ACTIVE, deleted_at nulo e de volta à busca")
+  void enablesUser() {
+    UserEntity user = userRepository.insert(new UserEntity("reativado", "hash", "Reativado"));
+    entityManager.flush();
+    entityManager.clear();
+    userRepository.disable(user.getId());
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(userRepository.enable(user.getId()))
+        .hasValueSatisfying(
+            summary -> assertThat(summary.status()).isEqualTo(UserEntity.STATUS_ACTIVE));
+    entityManager.flush();
+    entityManager.clear();
+
+    UserEntity raw = userRepository.findById(user.getId()).orElseThrow();
+    assertThat(raw.getStatus()).isEqualTo(UserEntity.STATUS_ACTIVE);
+    assertThat(raw.getDeletedAt()).isNull();
+    assertThat(userRepository.findSummaryById(user.getId())).isPresent();
+    assertThat(userRepository.existsByUsername("reativado")).isTrue();
+    assertThat(userRepository.search("reativado", null, UserSort.USERNAME, true, 0, 10))
+        .extracting(UserSummary::id)
+        .containsExactly(user.getId());
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName(
+      "enable em usuário já ativo é no-op; id desconhecido devolve vazio nos dois sentidos")
+  void keepsActiveUserOnEnableAndIgnoresUnknownId() {
+    UserEntity user = userRepository.insert(new UserEntity("ativo", "hash", "Ativo"));
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(userRepository.enable(user.getId()))
+        .hasValueSatisfying(
+            summary -> assertThat(summary.status()).isEqualTo(UserEntity.STATUS_ACTIVE));
+    assertThat(userRepository.enable(UUID.randomUUID())).isEmpty();
+    assertThat(userRepository.disable(UUID.randomUUID())).isEmpty();
+    entityManager.flush();
+    entityManager.clear();
+
+    UserEntity raw = userRepository.findById(user.getId()).orElseThrow();
+    assertThat(raw.getStatus()).isEqualTo(UserEntity.STATUS_ACTIVE);
+    assertThat(raw.getDeletedAt()).isNull();
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName(
       "search filtra por texto (sem diferenciar maiúsculas) e por status, ordenado por username")
   void searches() {
     userRepository.insert(new UserEntity("ana", "hash", "Ana Souza"));

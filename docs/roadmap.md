@@ -169,7 +169,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 altera nome e roles; 404 inexistente; roles inválidas → 400 com `code=UNKNOWN_ROLE`.
   **Commit:** `feat(users): permite atualizar usuario e papeis`
 
-- [ ] **112 — Desativar/reativar usuário**
+- [x] **112 — Desativar/reativar usuário**
   **Objetivo:** tirar acesso sem apagar histórico. **Depende:** 111
   **Implementar:** `POST /users/{id}/disable` e `/enable` (soft delete via `deleted_at`/`status`), com regra: não é possível desativar o último ADMIN ativo.
   **Testes/aceite:** desativado não aparece na busca padrão nem pode autenticar (teste antecipado com o serviço); 409 ao tentar desativar o último ADMIN.

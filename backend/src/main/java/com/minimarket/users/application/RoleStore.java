@@ -19,4 +19,11 @@ public interface RoleStore {
    * uso, antes de tocar no usuário — o 400 não sai de exceção do adaptador.
    */
   Set<String> findUnknownCodes(Collection<String> roleCodes);
+
+  /**
+   * Quantos usuários vivos ({@code deleted_at} nulo), com {@code status = ACTIVE} e com o papel
+   * informado existem hoje. É o insumo da regra "não desativar o último ADMIN ativo" (passo 112);
+   * consulta pura, sem gravar nada.
+   */
+  long countActiveUsersWithRole(String roleCode);
 }

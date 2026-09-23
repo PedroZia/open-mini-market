@@ -4,6 +4,8 @@ import com.minimarket.shared.api.PageResponse;
 import com.minimarket.users.application.CreateUserCommand;
 import com.minimarket.users.application.CreateUserResult;
 import com.minimarket.users.application.CreateUserUseCase;
+import com.minimarket.users.application.DisableUserUseCase;
+import com.minimarket.users.application.EnableUserUseCase;
 import com.minimarket.users.application.GetUserUseCase;
 import com.minimarket.users.application.ListUsersUseCase;
 import com.minimarket.users.application.UpdateUserUseCase;
@@ -43,6 +45,10 @@ public class UsersResource {
   @Inject GetUserUseCase getUserUseCase;
 
   @Inject UpdateUserUseCase updateUserUseCase;
+
+  @Inject DisableUserUseCase disableUserUseCase;
+
+  @Inject EnableUserUseCase enableUserUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -110,5 +116,25 @@ public class UsersResource {
   @Produces(MediaType.APPLICATION_JSON)
   public UserResponse update(@PathParam("id") UUID id, @Valid UpdateUserRequest request) {
     return toResponse(updateUserUseCase.execute(id, request.displayName(), request.roleCodes()));
+  }
+
+  /**
+   * Desativa o usuário sem apagar histórico (§9.3): devolve 200 com o {@code UserResponse} já
+   * {@code DISABLED}. Id inexistente ou já desativado → 404 {@code USER_NOT_FOUND}; último ADMIN
+   * ativo → 409 {@code CONFLICT} (a regra é do caso de uso).
+   */
+  @POST
+  @Path("/{id}/disable")
+  @Produces(MediaType.APPLICATION_JSON)
+  public UserResponse disable(@PathParam("id") UUID id) {
+    return toResponse(disableUserUseCase.execute(id));
+  }
+
+  /** Reativa o usuário desativado (§9.3); id inexistente → 404 {@code USER_NOT_FOUND}. */
+  @POST
+  @Path("/{id}/enable")
+  @Produces(MediaType.APPLICATION_JSON)
+  public UserResponse enable(@PathParam("id") UUID id) {
+    return toResponse(enableUserUseCase.execute(id));
   }
 }

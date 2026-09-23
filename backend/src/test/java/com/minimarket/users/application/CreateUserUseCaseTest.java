@@ -143,6 +143,16 @@ class CreateUserUseCaseTest {
     }
 
     @Override
+    public Optional<UserSummary> disable(UUID id) {
+      throw new UnsupportedOperationException("disable não é usado por CreateUser");
+    }
+
+    @Override
+    public Optional<UserSummary> enable(UUID id) {
+      throw new UnsupportedOperationException("enable não é usado por CreateUser");
+    }
+
+    @Override
     public List<UserSummary> search(
         String search, Boolean active, UserSort sort, boolean ascending, int page, int size) {
       throw new UnsupportedOperationException("search não é usado por CreateUser");
@@ -169,6 +179,12 @@ class CreateUserUseCaseTest {
     @Override
     public Set<String> findUnknownCodes(Collection<String> roleCodes) {
       throw new UnsupportedOperationException("findUnknownCodes não é usado por CreateUser");
+    }
+
+    @Override
+    public long countActiveUsersWithRole(String roleCode) {
+      throw new UnsupportedOperationException(
+          "countActiveUsersWithRole não é usado por CreateUser");
     }
   }
 

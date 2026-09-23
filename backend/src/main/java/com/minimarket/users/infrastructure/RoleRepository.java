@@ -75,6 +75,25 @@ public class RoleRepository implements RoleStore {
     return unknown;
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Um usuário só conta se o papel existir, ele estiver vivo e {@code ACTIVE} — desativado
+   * (passo 112) e soft-deletado ficam de fora, que é exatamente o que a regra do último ADMIN
+   * precisa.
+   */
+  @Override
+  public long countActiveUsersWithRole(String roleCode) {
+    return entityManager
+        .createQuery(
+            "select count(u) from UserEntity u join u.roles r"
+                + " where r.code = :code and u.status = :status and u.deletedAt is null",
+            Long.class)
+        .setParameter("code", roleCode)
+        .setParameter("status", UserEntity.STATUS_ACTIVE)
+        .getSingleResult();
+  }
+
   /** Carrega as roles dos códigos pedidos; qualquer código desconhecido derruba a operação. */
   private Set<RoleEntity> findRoles(Collection<String> roleCodes) {
     if (roleCodes.isEmpty()) {

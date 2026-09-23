@@ -149,6 +149,42 @@ public class UserRepository implements UserStore {
         .isEmpty();
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Só usuário vivo é desativado: o filtro de {@code deletedAt} devolve vazio para quem já está
+   * desativado — o 404 é do caso de uso. A projeção sai com o estado já alterado; o flush (e o
+   * avanço de {@code version}) fica com a transação do caso de uso.
+   */
+  @Override
+  public Optional<UserSummary> disable(UUID id) {
+    return findById(id)
+        .filter(user -> user.getDeletedAt() == null)
+        .map(
+            user -> {
+              user.setStatus(UserEntity.STATUS_DISABLED);
+              user.markDeleted(Instant.now());
+              return toSummaries(List.of(user)).getFirst();
+            });
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Enxerga o soft-deletado — é o registro que a reativação precisa alcançar; usuário já ativo
+   * recebe os mesmos valores (sem update, o JPA não vê diferença).
+   */
+  @Override
+  public Optional<UserSummary> enable(UUID id) {
+    return findById(id)
+        .map(
+            user -> {
+              user.setStatus(UserEntity.STATUS_ACTIVE);
+              user.markRestored();
+              return toSummaries(List.of(user)).getFirst();
+            });
+  }
+
   /** Grava o estado atual do usuário; a transação é do caso de uso. */
   public UserEntity update(UserEntity user) {
     user.assignUsername(normalize(user.getUsername()));

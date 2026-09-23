@@ -106,6 +106,11 @@ public class UserEntity {
     this.deletedAt = deletedAt;
   }
 
+  /** Reativação (passo 112): limpa o soft delete; o status é decisão do repositório. */
+  void markRestored() {
+    this.deletedAt = null;
+  }
+
   public UUID getId() {
     return id;
   }
