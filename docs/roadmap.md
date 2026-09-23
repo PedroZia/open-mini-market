@@ -127,7 +127,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** hash ≠ senha; `verify` true/false; dois hashes da mesma senha diferem (salt); `needsRehash` detecta parâmetros antigos; verificação contra hash dummy de usuário inexistente.
   **Commit:** `feat(users): adiciona hash de senha com Argon2id`
 
-- [ ] **105 — Migration de RBAC + catálogo de permissões**
+- [x] **105 — Migration de RBAC + catálogo de permissões**
   **Objetivo:** roles e permissões como dados. **Depende:** 101
   **Implementar:** `V3__rbac.sql` (`roles`, `permissions`, `role_permissions`, `user_roles`) + seed das 3 roles e do catálogo de permissões de §4.5, com o mapa inicial role→permissão.
   **Testes/aceite:** teste de integração conta roles e permissões esperadas; ADMIN possui todas as permissões.
