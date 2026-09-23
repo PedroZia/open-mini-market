@@ -1,0 +1,4 @@
+# Fim de linha: sempre LF no índice e na worktree, independente do core.autocrlf
+# da máquina (Windows/Git for Windows costuma vir com autocrlf=true).
+# Escopo deste repositório — não altera a configuração global nem outros projetos.
+* text=auto eol=lf
