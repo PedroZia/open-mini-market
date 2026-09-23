@@ -6,13 +6,17 @@ import static org.hamcrest.Matchers.equalTo;
 
 import com.minimarket.IntegrationTestBase;
 import com.minimarket.auth.domain.TokenHasher;
+import com.minimarket.users.infrastructure.UserRepository;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
+import jakarta.inject.Inject;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -43,8 +47,17 @@ class AuthResourceTest extends IntegrationTestBase {
   private static final String META_PATH = "/api/v1/meta";
   private static final String AUTHORIZATION = "Authorization";
 
+  /** Falhas que fecham o ciclo do lock (§6.3.1, passo 204b): o mesmo valor de configuração. */
+  private static final int LOCK_ATTEMPTS = 5;
+
   /** Domínio puro, sem estado e sem CDI (passo 203): o teste instancia o hash do token. */
   private final TokenHasher tokenHasher = new TokenHasher();
+
+  /**
+   * Repositório de usuários (passo 211): envelhece {@code locked_until} sem SQL de coluna na mão —
+   * mesmo caminho que o passo 209 usa para {@code last_seen_at}.
+   */
+  @Inject UserRepository userRepository;
 
   @Test
   @DisplayName(
@@ -246,9 +259,14 @@ class AuthResourceTest extends IntegrationTestBase {
     assertThat(wrongPassword.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
     assertThat(unknownUser.statusCode()).isEqualTo(401);
     assertThat(unknownUser.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+    // Corpo idêntico (type/status vêm do code); só o traceId difere, por ser de cada requisição.
+    assertThat(wrongPassword.jsonPath().getString("title"))
+        .isEqualTo(unknownUser.jsonPath().getString("title"));
     assertThat(wrongPassword.jsonPath().getString("detail"))
         .isEqualTo(unknownUser.jsonPath().getString("detail"))
         .doesNotContain(SUFFIX);
+    assertThat(wrongPassword.jsonPath().getString("instance"))
+        .isEqualTo(unknownUser.jsonPath().getString("instance"));
   }
 
   @Test
@@ -258,7 +276,7 @@ class AuthResourceTest extends IntegrationTestBase {
     String username = "login.lock." + SUFFIX;
     createUser(username, "Login Lock", null);
 
-    for (int attempt = 0; attempt < 5; attempt++) {
+    for (int attempt = 0; attempt < LOCK_ATTEMPTS; attempt++) {
       assertThat(login(username, "senha-errada", null, null).jsonPath().getString("code"))
           .isEqualTo("INVALID_CREDENTIALS");
     }
@@ -269,6 +287,53 @@ class AuthResourceTest extends IntegrationTestBase {
     assertThat(locked.contentType()).contains("application/problem+json");
     assertThat(locked.jsonPath().getString("code")).isEqualTo("ACCOUNT_LOCKED");
     assertThat(locked.jsonPath().getString("title")).isEqualTo("Conta bloqueada");
+  }
+
+  @Test
+  @DisplayName(
+      "lock vencido: envelhecer locked_until no banco libera o login correto, que zera contador e"
+          + " lock")
+  void releasesExpiredLockAndClearsFailures() throws SQLException {
+    String username = "login.expira." + SUFFIX;
+    String id = createUser(username, "Login Expira", null);
+    UUID userId = UUID.fromString(id);
+
+    for (int attempt = 0; attempt < LOCK_ATTEMPTS; attempt++) {
+      assertThat(login(username, "senha-errada", null, null).statusCode()).isEqualTo(401);
+    }
+    assertThat(login(username, PASSWORD, null, null).statusCode()).isEqualTo(423);
+
+    // O lock de 15 min é a verdade no banco: contador cheio e bloqueio gravado.
+    assertThat(userColumn(userId, "failed_login_attempts"))
+        .isEqualTo(String.valueOf(LOCK_ATTEMPTS));
+    assertThat(userColumn(userId, "locked_until")).isNotNull();
+
+    // Envelhece locked_until pelo repositório (passo 209 faz o mesmo com last_seen_at): o request
+    // HTTP commita de verdade, então o ajuste roda em transação própria.
+    ageLockUntil(userId, Instant.now().minus(Duration.ofMinutes(1)));
+
+    Response response = login(username, PASSWORD, null, null);
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    // O sucesso zera contador e lock no banco, não só na resposta.
+    assertThat(userColumn(userId, "failed_login_attempts")).isEqualTo("0");
+    assertThat(userColumn(userId, "locked_until")).isNull();
+    assertThat(sessionCount(userId)).isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("falha de credenciais espera o atraso fixo antes de responder 401 (passo 211)")
+  void delaysInvalidCredentialsResponse() {
+    String username = "login.atraso." + SUFFIX;
+    createUser(username, "Login Atraso", null);
+
+    long startedAt = System.nanoTime();
+    Response response = login(username, "senha-errada", null, null);
+    long elapsedMillis = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+
+    assertThat(response.statusCode()).isEqualTo(401);
+    // Asserção frouxa: só prova que o atraso de 400 ms existe; precisão de relógio não é medida.
+    assertThat(elapsedMillis).isGreaterThanOrEqualTo(350);
   }
 
   @Test
@@ -653,6 +718,29 @@ class AuthResourceTest extends IntegrationTestBase {
       try (ResultSet resultSet = statement.executeQuery()) {
         resultSet.next();
         return resultSet.getInt(1);
+      }
+    }
+  }
+
+  /**
+   * Envelhece {@code locked_until} pelo repositório de usuários (passo 211), em transação própria:
+   * o request HTTP commita de verdade, então o ajuste precisa ser visível para o servidor. O
+   * contador permanece cheio — é o estado que a passagem dos 15 min deixa no banco.
+   */
+  private void ageLockUntil(UUID userId, Instant lockedUntil) {
+    QuarkusTransaction.requiringNew()
+        .run(() -> userRepository.recordFailedLogin(userId, LOCK_ATTEMPTS, lockedUntil));
+  }
+
+  /** Coluna do usuário pelo id; {@code null} quando o valor for nulo. */
+  private String userColumn(UUID userId, String column) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement("select " + column + " from users where id = ?::uuid")) {
+      statement.setString(1, userId.toString());
+      try (ResultSet resultSet = statement.executeQuery()) {
+        assertThat(resultSet.next()).isTrue();
+        return resultSet.getString(1);
       }
     }
   }

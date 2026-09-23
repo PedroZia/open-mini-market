@@ -263,7 +263,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** sessão revogada por outro dispositivo deixa de autenticar; 404 para sessão de outro usuário sem permissão.
   **Commit:** `feat(auth): lista e revoga sessoes`
 
-- [ ] **211 — Proteção contra brute force**
+- [x] **211 — Proteção contra brute force**
   **Objetivo:** dificultar ataque de senha. **Depende:** 204
   **Implementar:** confirmação dos contadores no login + atraso fixo de 400 ms em falha + lock de 15 min + teste de que sucesso zera contador.
   **Testes/aceite:** 5 falhas → 6ª tentativa bloqueada mesmo com senha correta; após o tempo, volta a permitir.

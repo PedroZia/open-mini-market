@@ -35,6 +35,11 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * recusa antes mesmo de conferir a senha (423 {@code ACCOUNT_LOCKED}); bloqueio expirado é zerado e
  * a tentativa recomeça. A falha que atinge {@code minimarket.security.login.max-attempts} grava o
  * lock, mas ainda responde 401 — quem leva 423 é a tentativa seguinte, mesmo com a senha certa.
+ *
+ * <p>Atraso fixo (§6.3.2, passo 211): a recusa de credenciais espera {@code
+ * minimarket.security.login.failure-delay-ms} antes do 401, encarecendo a varredura de senhas além
+ * do custo do Argon2id. O 423 do bloqueio não espera: a conta já está fora do ar e o atraso só
+ * puniria o cliente legítimo.
  */
 @ApplicationScoped
 public class LoginUseCase {
@@ -91,6 +96,10 @@ public class LoginUseCase {
   @ConfigProperty(name = "minimarket.security.login.lock-minutes")
   int lockMinutes;
 
+  /** Atraso fixo antes da recusa de credenciais (§6.3.2): 400 ms por configuração. */
+  @ConfigProperty(name = "minimarket.security.login.failure-delay-ms")
+  long failureDelayMs;
+
   /**
    * Autentica e abre a sessão. Conta bloqueada lança 423 {@code ACCOUNT_LOCKED} antes de conferir a
    * senha; credenciais inválidas (senha errada ou usuário inexistente) lançam 401 {@code
@@ -122,11 +131,11 @@ public class LoginUseCase {
         passwordHasher.verify(
             command.password(), user == null ? DUMMY_PASSWORD_HASH : user.passwordHash());
     if (user == null || !isActive(user)) {
-      throw new BusinessException(ErrorCode.INVALID_CREDENTIALS, INVALID_CREDENTIALS_DETAIL);
+      rejectInvalidCredentials();
     }
     if (!passwordMatches) {
       registerFailedAttempt(user.id(), previousAttempts, now);
-      throw new BusinessException(ErrorCode.INVALID_CREDENTIALS, INVALID_CREDENTIALS_DETAIL);
+      rejectInvalidCredentials();
     }
     rehashIfNeeded(user, command.password());
 
@@ -166,6 +175,21 @@ public class LoginUseCase {
     Instant lockedUntil =
         attempts >= maxLoginAttempts ? now.plus(Duration.ofMinutes(lockMinutes)) : null;
     userStore.recordFailedLogin(userId, attempts, lockedUntil);
+  }
+
+  /**
+   * Recusa genérica de credenciais (§6.3.4) precedida do atraso fixo (§6.3.2, passo 211): a falha
+   * espera 400 ms antes do 401, sem mudar o resultado nem a transação — o contador e o lock que
+   * {@link #registerFailedAttempt} acabou de gravar continuam comitando pelo {@code dontRollbackOn}
+   * de {@link #execute}. Interrupção não vira erro: a flag é restaurada e a recusa segue.
+   */
+  private void rejectInvalidCredentials() {
+    try {
+      Thread.sleep(failureDelayMs);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
+    throw new BusinessException(ErrorCode.INVALID_CREDENTIALS, INVALID_CREDENTIALS_DETAIL);
   }
 
   /**

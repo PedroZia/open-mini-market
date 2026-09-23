@@ -71,6 +71,8 @@ class LoginUseCaseTest {
     useCase.absoluteExpiration = ABSOLUTE_EXPIRATION;
     useCase.maxLoginAttempts = MAX_ATTEMPTS;
     useCase.lockMinutes = LOCK_MINUTES;
+    // O atraso da falha (passo 211) é medido no teste de API; aqui não pode somar segundos à suíte.
+    useCase.failureDelayMs = 0;
     passwordHasher.passwordMatches = true;
     userStore.authState = authState("ACTIVE", null, false);
   }
