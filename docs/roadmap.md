@@ -24,7 +24,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 0 — Fundação
 
-- [ ] **001 — Estrutura do monorepo**
+- [x] **001 — Estrutura do monorepo**
   **Objetivo:** criar a árvore `backend/`, `terminal/`, `web/`, `packages/api-client/`, `docs/`, `docker-compose.yml`, `.gitignore`, `.gitattributes`, `README.md`. **Depende:** —
   **Implementar:** pastas vazias com `.gitkeep` onde necessário; `.gitignore` cobrindo Java/Maven, Node, IDE, `.env`; `.gitattributes` com `* text=auto eol=lf` (já presente no repositório — apenas confirme; neutraliza o `core.autocrlf=true` do Git for Windows sem alterar a configuração global da máquina); README com visão em 5 linhas e links para os docs.
   **Testes/aceite:** `git status` limpo após commit; árvore confere com §2.1 do plano.
