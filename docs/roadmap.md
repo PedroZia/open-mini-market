@@ -257,7 +257,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** sessão inativa além do limite → 401 `SESSION_IDLE_TIMEOUT`; uso renova `last_seen_at`; expiração absoluta nunca é estendida.
   **Commit:** `feat(auth): aplica expiracao absoluta e por inatividade`
 
-- [ ] **210 — Múltiplas sessões e revogação**
+- [x] **210 — Múltiplas sessões e revogação**
   **Objetivo:** ver e derrubar sessões. **Depende:** 206
   **Implementar:** `GET /auth/sessions` (lista as do usuário, com origem, IP e último uso) e `DELETE /auth/sessions/{id}` (revoga; só as próprias, ou qualquer uma com `user.session.revoke`).
   **Testes/aceite:** sessão revogada por outro dispositivo deixa de autenticar; 404 para sessão de outro usuário sem permissão.

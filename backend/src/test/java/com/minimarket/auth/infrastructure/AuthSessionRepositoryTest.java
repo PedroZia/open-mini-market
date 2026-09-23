@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.minimarket.IntegrationTestBase;
 import com.minimarket.auth.application.NewAuthSession;
+import com.minimarket.auth.application.UserSessionSummary;
 import com.minimarket.auth.domain.SessionClient;
 import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.users.application.NewUser;
@@ -321,7 +322,8 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
-  @DisplayName("listActiveByUser lista só as vivas do usuário, da mais recente para a mais antiga")
+  @DisplayName(
+      "listActiveByUser (porta) lista só as vivas do usuário, da mais recente para a mais antiga")
   void listsActiveByUser() throws Exception {
     UUID userId = newUser("sessao.list");
     UUID otherUserId = newUser("sessao.list-outro");
@@ -339,9 +341,20 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
     entityManager.flush();
     entityManager.clear();
 
+    // A projeção da lista carrega o cliente, o IP, o user agent e o ciclo de vida de cada sessão.
     assertThat(sessionRepository.listActiveByUser(userId))
-        .extracting(AuthSessionEntity::getId)
+        .extracting(UserSessionSummary::id)
         .containsExactly(newest, middle, oldest);
+    assertThat(sessionRepository.listActiveByUser(userId).getFirst())
+        .satisfies(
+            summary -> {
+              assertThat(summary.client()).isEqualTo(SessionClient.TUI);
+              assertThat(summary.ip()).isNull();
+              assertThat(summary.userAgent()).isNull();
+              assertThat(summary.createdAt()).isNotNull();
+              assertThat(summary.lastSeenAt()).isEqualTo(base);
+              assertThat(summary.expiresAt()).isNotNull();
+            });
     assertThat(sessionRepository.listActiveByUser(UUID.randomUUID())).isEmpty();
   }
 

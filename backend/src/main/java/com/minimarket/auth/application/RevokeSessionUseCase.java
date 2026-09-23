@@ -1,0 +1,67 @@
+package com.minimarket.auth.application;
+
+import com.minimarket.shared.domain.BusinessException;
+import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.shared.domain.NotFoundException;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.transaction.Transactional;
+import java.time.Clock;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * Revoga uma sessão a partir da lista de sessões (passo 210). Uma execução = uma transação (§2.2,
+ * regra 6): a sessão do token e a sessão alvo são lidas, o dono é conferido e a revogação grava com
+ * o instante do {@code Clock} injetado — nada de {@code now()} espalhado pelo código.
+ *
+ * <p>Só as próprias sessões são revogáveis: sessão ativa de outro usuário responde 404 {@code
+ * NOT_FOUND}, o mesmo "não existe" de um id desconhecido, para não vazar a existência da sessão
+ * alheia. A variante de ADMIN ({@code user.session.revoke}) é dos passos 305–307 e ainda não
+ * existe.
+ *
+ * <p>Revogar a sessão atual é permitido — o cliente cai junto — e revogar uma já revogada ou um id
+ * desconhecido é sucesso idempotente, como o logout (passo 208): o token alvo já não autentica e o
+ * cliente não tem o que fazer com um erro aqui.
+ */
+@ApplicationScoped
+public class RevokeSessionUseCase {
+
+  /** Motivo gravado em {@code revoked_reason} da sessão derrubada pela lista de sessões. */
+  public static final String SESSION_REVOKED_REASON = "SESSION_REVOKED";
+
+  /** Mensagem única de sessão alheia ou desconhecida: não revela qual das duas é (§6.3.4). */
+  static final String SESSION_NOT_FOUND_DETAIL = "sessão não encontrada";
+
+  @Inject AuthSessionStore sessionStore;
+
+  /** Relógio da aplicação: o instante da revogação é decisão do caso de uso, não do banco. */
+  @Inject Clock clock;
+
+  /**
+   * Revoga a sessão alvo se ela for do usuário autenticado. Sessão de outro usuário lança 404;
+   * sessão já revogada ou id desconhecido é no-op.
+   */
+  @Transactional
+  public void execute(UUID currentSessionId, UUID targetSessionId) {
+    AuthSessionSnapshot current =
+        sessionStore
+            .findActiveById(currentSessionId)
+            .orElseThrow(RevokeSessionUseCase::invalidToken);
+    Optional<AuthSessionSnapshot> target = sessionStore.findActiveById(targetSessionId);
+    if (target.isEmpty()) {
+      // Já revogada ou desconhecida: o token alvo já não autentica, então não há o que revogar.
+      return;
+    }
+    if (!target.get().userId().equals(current.userId())) {
+      throw new NotFoundException(SESSION_NOT_FOUND_DETAIL);
+    }
+    sessionStore.revoke(targetSessionId, SESSION_REVOKED_REASON, clock.instant());
+  }
+
+  /** Sessão revogada e token desconhecido são o mesmo 401 genérico do passo 206. */
+  private static BusinessException invalidToken() {
+    return new BusinessException(
+        ErrorCode.INVALID_CREDENTIALS, AuthenticateSessionUseCase.INVALID_TOKEN_DETAIL);
+  }
+}

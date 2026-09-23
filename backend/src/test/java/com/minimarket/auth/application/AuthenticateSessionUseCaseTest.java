@@ -266,6 +266,12 @@ class AuthenticateSessionUseCaseTest {
     }
 
     @Override
+    public List<UserSessionSummary> listActiveByUser(UUID userId) {
+      throw new UnsupportedOperationException(
+          "listActiveByUser não é usado por AuthenticateSession");
+    }
+
+    @Override
     public void touchLastSeen(UUID id, Instant lastSeenAt) {
       touches.add(lastSeenAt);
       session =

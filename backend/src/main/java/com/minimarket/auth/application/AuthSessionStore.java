@@ -1,6 +1,7 @@
 package com.minimarket.auth.application;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,6 +27,13 @@ public interface AuthSessionStore {
    * autenticação e a leitura não é encontrada — vira 401, como token desconhecido.
    */
   Optional<AuthSessionSnapshot> findActiveById(UUID id);
+
+  /**
+   * Sessões não revogadas do usuário, da atividade mais recente para a mais antiga (passo 210). A
+   * expiração não entra no filtro, como em {@link #findActiveById}: "ativa" aqui é só "não
+   * revogada" e o {@code expiresAt} viaja no resumo para o cliente decidir o que mostrar.
+   */
+  List<UserSessionSummary> listActiveByUser(UUID userId);
 
   /**
    * Grava o instante de atividade da sessão viva (idle timeout, §6.2) sem carregar a entidade: o

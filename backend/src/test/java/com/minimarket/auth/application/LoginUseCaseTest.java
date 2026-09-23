@@ -487,6 +487,11 @@ class LoginUseCaseTest {
     }
 
     @Override
+    public List<UserSessionSummary> listActiveByUser(UUID userId) {
+      throw new UnsupportedOperationException("listActiveByUser não é usado por Login");
+    }
+
+    @Override
     public void touchLastSeen(UUID id, Instant lastSeenAt) {
       throw new UnsupportedOperationException("touchLastSeen não é usado por Login");
     }

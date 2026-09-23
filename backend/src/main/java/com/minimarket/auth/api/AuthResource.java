@@ -3,10 +3,13 @@ package com.minimarket.auth.api;
 import com.minimarket.auth.application.AuthenticateSessionUseCase;
 import com.minimarket.auth.application.CurrentSession;
 import com.minimarket.auth.application.GetCurrentSessionUseCase;
+import com.minimarket.auth.application.ListUserSessionsUseCase;
 import com.minimarket.auth.application.LoginCommand;
 import com.minimarket.auth.application.LoginResult;
 import com.minimarket.auth.application.LoginUseCase;
 import com.minimarket.auth.application.LogoutUseCase;
+import com.minimarket.auth.application.RevokeSessionUseCase;
+import com.minimarket.auth.application.UserSessionSummary;
 import com.minimarket.auth.domain.SessionClient;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
@@ -17,22 +20,26 @@ import io.vertx.core.net.SocketAddress;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import java.net.InetAddress;
+import java.util.List;
 import java.util.UUID;
 
 /**
- * Login e sessão atual do PDV (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a
- * resposta — zero regra de negócio aqui. O login é público (exceção do passo 308): é por ele que o
- * cliente obtém o token. Falha de credenciais e conta bloqueada saem do {@code LoginUseCase} como
- * {@code problem+json} (401 {@code INVALID_CREDENTIALS} e 423 {@code ACCOUNT_LOCKED}).
+ * Login, sessão atual e sessões do PDV (§9.3 do plano). A API valida forma, delega ao caso de uso e
+ * mapeia a resposta — zero regra de negócio aqui. O login é público (exceção do passo 308): é por
+ * ele que o cliente obtém o token. Falha de credenciais e conta bloqueada saem do {@code
+ * LoginUseCase} como {@code problem+json} (401 {@code INVALID_CREDENTIALS} e 423 {@code
+ * ACCOUNT_LOCKED}).
  */
 @Path(AuthResource.PATH)
 public class AuthResource {
@@ -53,7 +60,11 @@ public class AuthResource {
 
   @Inject LogoutUseCase logoutUseCase;
 
-  /** Identidade montada pelo mecanismo bearer (passo 206); só o {@code /auth/me} a usa. */
+  @Inject ListUserSessionsUseCase listUserSessionsUseCase;
+
+  @Inject RevokeSessionUseCase revokeSessionUseCase;
+
+  /** Identidade montada pelo mecanismo bearer (passo 206); as rotas de sessão a usam. */
   @Inject SecurityIdentity identity;
 
   @POST
@@ -82,8 +93,9 @@ public class AuthResource {
   }
 
   /**
-   * Sessão atual (§9.3, passo 207): o cliente valida a sessão ao abrir. É a única rota real
-   * protegida até aqui — as demais seguem abertas até os passos 307/308. Sem token, ou com token
+   * Sessão atual (§9.3, passo 207): o cliente valida a sessão ao abrir. As rotas de sessão ({@code
+   * /auth/me}, {@code /auth/logout}, {@code /auth/sessions}) são as únicas protegidas até aqui — as
+   * demais seguem abertas até os passos 307/308. Sem token, ou com token
    * desconhecido/revogado/expirado, o challenge do mecanismo bearer (passo 206) responde 401 {@code
    * problem+json}.
    */
@@ -109,6 +121,37 @@ public class AuthResource {
     logoutUseCase.execute(currentSessionId());
   }
 
+  /**
+   * Sessões ativas do usuário autenticado (§6.2, passo 210): o cliente mostra de onde veio cada uma
+   * e qual é a atual. A lista é sempre do dono do token — não há como pedir a sessão de outro
+   * usuário. Sem token, a política da rota responde 401 {@code problem+json}, como no {@code
+   * /auth/me}.
+   */
+  @GET
+  @Path("/sessions")
+  @Authenticated
+  @Produces(MediaType.APPLICATION_JSON)
+  public List<UserSessionResponse> sessions() {
+    UUID currentSessionId = currentSessionId();
+    return listUserSessionsUseCase.execute(currentSessionId).stream()
+        .map(session -> toResponse(session, currentSessionId))
+        .toList();
+  }
+
+  /**
+   * Revoga uma sessão pela lista (§6.2, passo 210): só as do próprio usuário; sessão de outro
+   * usuário responde 404 pelo caso de uso, para não vazar a existência dela. Revogar a sessão atual
+   * é permitido — o cliente cai junto. Responde 204 sem corpo e é idempotente como o logout: sessão
+   * já revogada ou id desconhecido também é 204. Sem token, a política da rota responde 401 {@code
+   * problem+json}.
+   */
+  @DELETE
+  @Path("/sessions/{id}")
+  @Authenticated
+  public void revokeSession(@PathParam("id") UUID id) {
+    revokeSessionUseCase.execute(currentSessionId(), id);
+  }
+
   private static LoginResponse toResponse(LoginResult result) {
     return new LoginResponse(
         result.token(),
@@ -129,6 +172,19 @@ public class AuthResource {
         session.client(),
         session.expiresAt(),
         session.lastSeenAt());
+  }
+
+  /** Sessão da lista com o {@code current} marcado pela sessão que pediu a listagem (passo 210). */
+  private static UserSessionResponse toResponse(UserSessionSummary session, UUID currentSessionId) {
+    return new UserSessionResponse(
+        session.id(),
+        session.client(),
+        session.ip(),
+        session.userAgent(),
+        session.createdAt(),
+        session.lastSeenAt(),
+        session.expiresAt(),
+        session.id().equals(currentSessionId));
   }
 
   /**

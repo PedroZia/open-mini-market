@@ -4,6 +4,7 @@ import com.github.f4b6a3.uuid.UuidCreator;
 import com.minimarket.auth.application.AuthSessionSnapshot;
 import com.minimarket.auth.application.AuthSessionStore;
 import com.minimarket.auth.application.NewAuthSession;
+import com.minimarket.auth.application.UserSessionSummary;
 import com.minimarket.auth.domain.SessionClient;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -145,19 +146,42 @@ public class AuthSessionRepository implements AuthSessionStore {
   }
 
   /**
+   * {@inheritDoc}
+   *
+   * <p>Traduz cada entidade no resumo de aplicação (o IP vira o endereço sem máscara, como o
+   * cliente o apresentou); a ordem — último uso mais recente primeiro — vem do banco.
+   */
+  @Override
+  public List<UserSessionSummary> listActiveByUser(UUID userId) {
+    return activeEntitiesByUser(userId).stream().map(AuthSessionRepository::toSummary).toList();
+  }
+
+  /** Projeção da lista de sessões: nunca deixa JPA atravessar a porta (§2.2). */
+  private static UserSessionSummary toSummary(AuthSessionEntity entity) {
+    return new UserSessionSummary(
+        entity.getId(),
+        SessionClient.valueOf(entity.getClient()),
+        entity.getIp() == null ? null : entity.getIp().getHostAddress(),
+        entity.getUserAgent(),
+        entity.getCreatedAt(),
+        entity.getLastSeenAt(),
+        entity.getExpiresAt());
+  }
+
+  /**
    * Revoga todas as sessões vivas do usuário, com um motivo comum, e devolve quantas foram
    * revogadas — as já revogadas não contam. Carrega as sessões em vez de fazer update em massa para
    * o {@code @Version} de cada uma avançar; o volume por usuário é mínimo (logout de todos os
    * dispositivos, §6.2).
    */
   public int revokeAllByUser(UUID userId, String reason, Instant revokedAt) {
-    List<AuthSessionEntity> active = listActiveByUser(userId);
+    List<AuthSessionEntity> active = activeEntitiesByUser(userId);
     active.forEach(session -> session.revoke(reason, revokedAt));
     return active.size();
   }
 
   /** Sessões vivas do usuário, da atividade mais recente para a mais antiga. */
-  public List<AuthSessionEntity> listActiveByUser(UUID userId) {
+  private List<AuthSessionEntity> activeEntitiesByUser(UUID userId) {
     return entityManager
         .createQuery(
             "select s from AuthSessionEntity s where s.userId = :userId and s.revokedAt is null"

@@ -15,16 +15,19 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * API do {@code POST /api/v1/auth/login}, do {@code GET /api/v1/auth/me} e do {@code POST
- * /api/v1/auth/logout} contra PostgreSQL real (Dev Services). O request HTTP commita de verdade:
- * cada teste usa um sufixo único da execução e o {@link #removeUsersCreatedByThisRun()} apaga
- * sessões, papéis e usuários ao fim de cada um — as FKs de {@code auth_sessions} e {@code
+ * API do {@code POST /api/v1/auth/login}, do {@code GET /api/v1/auth/me}, do {@code POST
+ * /api/v1/auth/logout} e das sessões do usuário ({@code GET /api/v1/auth/sessions} e {@code DELETE
+ * /api/v1/auth/sessions/{id}}) contra PostgreSQL real (Dev Services). O request HTTP commita de
+ * verdade: cada teste usa um sufixo único da execução e o {@link #removeUsersCreatedByThisRun()}
+ * apaga sessões, papéis e usuários ao fim de cada um — as FKs de {@code auth_sessions} e {@code
  * user_roles} são {@code on delete restrict}.
  */
 @QuarkusTest
@@ -36,6 +39,7 @@ class AuthResourceTest extends IntegrationTestBase {
   private static final String LOGIN_PATH = "/api/v1/auth/login";
   private static final String LOGOUT_PATH = "/api/v1/auth/logout";
   private static final String ME_PATH = "/api/v1/auth/me";
+  private static final String SESSIONS_PATH = "/api/v1/auth/sessions";
   private static final String META_PATH = "/api/v1/meta";
   private static final String AUTHORIZATION = "Authorization";
 
@@ -338,6 +342,175 @@ class AuthResourceTest extends IntegrationTestBase {
     assertThat(response.jsonPath().getBoolean("mustChangePassword")).isTrue();
   }
 
+  @Test
+  @DisplayName(
+      "GET /api/v1/auth/sessions lista as sessões ativas do usuário e marca a atual (passo 210)")
+  void listsUserSessions() throws SQLException {
+    String username = "sessoes.lista." + SUFFIX;
+    String id = createUser(username, "Sessoes Lista", "OPERADOR");
+    String tuiToken = login(username, PASSWORD, "TUI", null).jsonPath().getString("token");
+    String webToken = login(username, PASSWORD, "WEB", null).jsonPath().getString("token");
+    UUID userId = UUID.fromString(id);
+
+    Response response =
+        given()
+            .header(AUTHORIZATION, "Bearer " + webToken)
+            .when()
+            .get(SESSIONS_PATH)
+            .then()
+            .extract()
+            .response();
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.contentType()).contains("application/json");
+    List<Map<String, Object>> sessions = response.jsonPath().getList("$");
+    assertThat(sessions).hasSize(2);
+
+    // Ordenação por último uso: o login da WEB veio depois, então a sessão atual vem primeiro.
+    Map<String, Object> current = sessions.getFirst();
+    assertThat(current.get("id")).isEqualTo(sessionId(userId, "WEB"));
+    assertThat(current.get("client")).isEqualTo("WEB");
+    assertThat(current.get("current")).isEqualTo(true);
+
+    // A outra sessão é a da TUI, com origem e ciclo de vida completos.
+    Map<String, Object> other = sessions.get(1);
+    assertThat(other.get("id")).isEqualTo(sessionId(userId, "TUI"));
+    assertThat(other.get("client")).isEqualTo("TUI");
+    assertThat(other.get("current")).isEqualTo(false);
+    assertThat(other.get("ip")).isNotNull();
+    assertThat(other.get("userAgent")).isEqualTo(USER_AGENT);
+    assertThat(other.get("createdAt")).isNotNull();
+    assertThat(other.get("lastSeenAt")).isNotNull();
+    assertThat(other.get("expiresAt")).isNotNull();
+
+    // Nem o token em claro nem hash de senha/token aparecem na listagem.
+    assertThat(response.asString())
+        .doesNotContain(tuiToken)
+        .doesNotContain(webToken)
+        .doesNotContain("$argon2");
+  }
+
+  @Test
+  @DisplayName(
+      "DELETE /api/v1/auth/sessions/{id} revoga a sessão de outro dispositivo e o token dela cai")
+  void revokesOtherSession() throws SQLException {
+    String username = "sessoes.revoga." + SUFFIX;
+    String id = createUser(username, "Sessoes Revoga", null);
+    String tuiToken = login(username, PASSWORD, "TUI", null).jsonPath().getString("token");
+    String webToken = login(username, PASSWORD, "WEB", null).jsonPath().getString("token");
+    UUID userId = UUID.fromString(id);
+    String tuiSessionId = sessionId(userId, "TUI");
+
+    Response revoke =
+        given()
+            .header(AUTHORIZATION, "Bearer " + webToken)
+            .when()
+            .delete(SESSIONS_PATH + "/" + tuiSessionId)
+            .then()
+            .extract()
+            .response();
+
+    assertThat(revoke.statusCode()).isEqualTo(204);
+    assertThat(revoke.asString()).isEmpty();
+
+    // A sessão alvo fica revogada com o motivo SESSION_REVOKED — não é apagada nem vira erro.
+    UUID target = UUID.fromString(tuiSessionId);
+    assertThat(sessionValue(target, "revoked_reason")).isEqualTo("SESSION_REVOKED");
+    assertThat(sessionValue(target, "revoked_at")).isNotNull();
+
+    // O token derrubado deixa de autenticar; o que pediu a revogação segue vivo.
+    assertThat(me(tuiToken).statusCode()).isEqualTo(401);
+    assertThat(me(webToken).statusCode()).isEqualTo(200);
+
+    // A lista já não mostra a sessão revogada.
+    Response list =
+        given()
+            .header(AUTHORIZATION, "Bearer " + webToken)
+            .when()
+            .get(SESSIONS_PATH)
+            .then()
+            .extract()
+            .response();
+    assertThat(list.jsonPath().getList("$")).hasSize(1);
+    assertThat(list.jsonPath().getString("[0].client")).isEqualTo("WEB");
+  }
+
+  @Test
+  @DisplayName(
+      "revogar a própria sessão atual derruba o token junto; repetir ou revogar id desconhecido é"
+          + " 204 idempotente")
+  void revokesCurrentSessionIdempotently() throws SQLException {
+    String username = "sessoes.atual." + SUFFIX;
+    String id = createUser(username, "Sessoes Atual", null);
+    String tuiToken = login(username, PASSWORD, "TUI", null).jsonPath().getString("token");
+    String webToken = login(username, PASSWORD, "WEB", null).jsonPath().getString("token");
+    UUID userId = UUID.fromString(id);
+
+    // Revogar a sessão atual (a da WEB) é permitido: o cliente cai junto.
+    assertThat(delete(SESSIONS_PATH + "/" + sessionId(userId, "WEB"), webToken).statusCode())
+        .isEqualTo(204);
+    assertThat(me(webToken).statusCode()).isEqualTo(401);
+    assertThat(sessionValue(UUID.fromString(sessionId(userId, "WEB")), "revoked_reason"))
+        .isEqualTo("SESSION_REVOKED");
+
+    // Com a TUI viva: revogar a já revogada e um id desconhecido é 204, sem derrubar mais nada.
+    assertThat(delete(SESSIONS_PATH + "/" + sessionId(userId, "WEB"), tuiToken).statusCode())
+        .isEqualTo(204);
+    assertThat(delete(SESSIONS_PATH + "/" + UUID.randomUUID(), tuiToken).statusCode())
+        .isEqualTo(204);
+    assertThat(me(tuiToken).statusCode()).isEqualTo(200);
+  }
+
+  @Test
+  @DisplayName("DELETE de sessão de outro usuário responde 404 e não derruba a sessão dele")
+  void rejectsRevokingAnotherUsersSession() throws SQLException {
+    String usernameA = "sessoes.dono-a." + SUFFIX;
+    String usernameB = "sessoes.dono-b." + SUFFIX;
+    createUser(usernameA, "Dono A", null);
+    String idB = createUser(usernameB, "Dono B", null);
+    String tokenA = login(usernameA, PASSWORD, "TUI", null).jsonPath().getString("token");
+    String tokenB = login(usernameB, PASSWORD, "WEB", null).jsonPath().getString("token");
+    UUID sessionB = UUID.fromString(sessionId(UUID.fromString(idB), "WEB"));
+
+    Response response =
+        given()
+            .header(AUTHORIZATION, "Bearer " + tokenA)
+            .when()
+            .delete(SESSIONS_PATH + "/" + sessionB)
+            .then()
+            .extract()
+            .response();
+
+    // 404 e não 403: a existência da sessão alheia não é revelada (§6.3.4).
+    assertThat(response.statusCode()).isEqualTo(404);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("NOT_FOUND");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Recurso não encontrado");
+
+    // A sessão do outro usuário segue viva e autenticando.
+    assertThat(sessionValue(sessionB, "revoked_at")).isNull();
+    assertThat(me(tokenB).statusCode()).isEqualTo(200);
+  }
+
+  @Test
+  @DisplayName("GET e DELETE /api/v1/auth/sessions sem token respondem 401 problem+json")
+  void rejectsSessionsWithoutToken() {
+    String target = SESSIONS_PATH + "/" + UUID.randomUUID();
+
+    Response list = given().when().get(SESSIONS_PATH).then().extract().response();
+    Response revoke = given().when().delete(target).then().extract().response();
+
+    assertThat(list.statusCode()).isEqualTo(401);
+    assertThat(list.contentType()).contains("application/problem+json");
+    assertThat(list.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+    assertThat(list.jsonPath().getString("instance")).isEqualTo(SESSIONS_PATH);
+
+    assertThat(revoke.statusCode()).isEqualTo(401);
+    assertThat(revoke.contentType()).contains("application/problem+json");
+    assertThat(revoke.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+    assertThat(revoke.jsonPath().getString("instance")).isEqualTo(target);
+  }
+
   /**
    * O request HTTP commita, então o que este teste cria é removido ao fim de cada teste: os testes
    * de repositório assumem as tabelas como as encontraram. As FKs são {@code on delete restrict},
@@ -405,6 +578,56 @@ class AuthResourceTest extends IntegrationTestBase {
       request = request.header(AuthResource.CLIENT_HEADER, client);
     }
     return request.when().post(LOGIN_PATH).then().extract().response();
+  }
+
+  /** GET no /auth/me com o token informado; cada teste confere o status esperado. */
+  private static Response me(String token) {
+    return given()
+        .header(AUTHORIZATION, "Bearer " + token)
+        .when()
+        .get(ME_PATH)
+        .then()
+        .extract()
+        .response();
+  }
+
+  /** DELETE da sessão com o token informado; cada teste confere o status esperado. */
+  private static Response delete(String path, String token) {
+    return given()
+        .header(AUTHORIZATION, "Bearer " + token)
+        .when()
+        .delete(path)
+        .then()
+        .extract()
+        .response();
+  }
+
+  /** Id da sessão mais recente do usuário com o cliente informado (TUI/WEB). */
+  private String sessionId(UUID userId, String client) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select id from auth_sessions where user_id = ?::uuid and client = ?"
+                    + " order by created_at desc limit 1")) {
+      statement.setString(1, userId.toString());
+      statement.setString(2, client);
+      try (ResultSet resultSet = statement.executeQuery()) {
+        return resultSet.next() ? resultSet.getString(1) : null;
+      }
+    }
+  }
+
+  /** Coluna da sessão pelo id; {@code null} quando a sessão não existe. */
+  private String sessionValue(UUID sessionId, String column) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select " + column + " from auth_sessions where id = ?::uuid")) {
+      statement.setString(1, sessionId.toString());
+      try (ResultSet resultSet = statement.executeQuery()) {
+        return resultSet.next() ? resultSet.getString(1) : null;
+      }
+    }
   }
 
   private String sessionColumn(UUID userId, String column) throws SQLException {
