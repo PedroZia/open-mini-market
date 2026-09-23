@@ -4,6 +4,9 @@ Este repositório implementa um **PDV para minimercado** (Quarkus + PostgreSQL n
 React Web como clientes). O plano está em [`docs/plano-tecnico.md`](docs/plano-tecnico.md) e a execução
 passo a passo em [`docs/roadmap.md`](docs/roadmap.md).
 
+O código nasce passo a passo: **não assuma que `backend/`, `terminal/` ou `web/` existem** — confira o
+checkbox do passo no roadmap e o diretório antes de rodar comandos que dependem deles.
+
 ## Como trabalhar (regra inegociável)
 
 1. **Um passo por vez, na ordem do roadmap.** Encontre o primeiro passo com checkbox vazio, execute apenas ele.
@@ -18,6 +21,19 @@ passo a passo em [`docs/roadmap.md`](docs/roadmap.md).
    para o último estado verde em vez de commitar meio caminho.
 6. **Ao final de cada módulo (fase), pare e reporte:** o que foi feito, quais testes rodaram, critérios de
    aceite atendidos, riscos/dúvidas e o próximo passo sugerido. Não emende módulos sem esse checkpoint.
+
+## Skills do projeto (`.opencode/skills/`)
+
+Carregue a skill correspondente **antes** de codar; cada uma tem o procedimento detalhado daquele tipo de passo:
+
+| Tarefa | Skill |
+| --- | --- |
+| Executar um passo do roadmap de ponta a ponta | `passo` |
+| Migration, tabela, coluna, índice, seed | `migration` |
+| Endpoint REST | `endpoint` |
+| Teste de concorrência, lock, disputa | `teste-concorrencia` |
+| Tela/componente da TUI em Ink (Fase 11) | `tui-tela` |
+| Feature da retaguarda React (Fase 12) | `web-feature` |
 
 ## Definition of Done de qualquer passo
 
@@ -79,10 +95,15 @@ Estão em §4.4 do plano (`BR-01` a `BR-14`). As mais fáceis de esquecer:
 ## Comandos úteis
 
 ```bash
-# backend
-docker compose up -d postgres          # banco de dev
+# pré-requisitos: JDK 25, Maven, Docker (testes de integração) e Node 22+ (Fases 11–12)
+
+# backend — só existe a partir do passo 002
 cd backend && mvn quarkus:dev          # API em modo dev (http://localhost:8080)
+cd backend && mvn spotless:apply       # formatação (a partir do passo 002)
 cd backend && mvn verify               # build + testes (obrigatório antes do commit)
+
+# banco de dev — só existe a partir do passo 003
+docker compose up -d
 
 # TUI (a partir da fase 11)
 cd terminal && npm test && npx tsc --noEmit && npm start
@@ -90,6 +111,8 @@ cd terminal && npm test && npx tsc --noEmit && npm start
 # web (a partir da fase 12)
 cd web && npm test && npx tsc --noEmit && npm run dev
 ```
+
+Testes de integração sobem PostgreSQL real via Dev Services: **Docker precisa estar rodando**.
 
 ## O que NÃO fazer
 
@@ -99,6 +122,8 @@ cd web && npm test && npx tsc --noEmit && npm run dev
 - Não silenciar exceção de auditoria; falha ao auditar derruba a transação (é intencional).
 - Não introduzir cache, fila, broker, Redis, native image ou microsserviço sem passo no roadmap.
 - Não alterar migration já aplicada nem o formato de `audit_events`.
+- Não alterar `.gitattributes` (força LF no índice e na worktree) nem mexer no `core.autocrlf` global: o
+  repositório neutraliza o autocrlf do Git for Windows de propósito.
 - Não commitar segredo, `.env` ou dump de banco.
 
 ## Quando estiver em dúvida
