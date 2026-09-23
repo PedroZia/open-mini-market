@@ -6,6 +6,7 @@ import com.minimarket.auth.application.GetCurrentSessionUseCase;
 import com.minimarket.auth.application.LoginCommand;
 import com.minimarket.auth.application.LoginResult;
 import com.minimarket.auth.application.LoginUseCase;
+import com.minimarket.auth.application.LogoutUseCase;
 import com.minimarket.auth.domain.SessionClient;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
@@ -50,6 +51,8 @@ public class AuthResource {
 
   @Inject GetCurrentSessionUseCase getCurrentSessionUseCase;
 
+  @Inject LogoutUseCase logoutUseCase;
+
   /** Identidade montada pelo mecanismo bearer (passo 206); só o {@code /auth/me} a usa. */
   @Inject SecurityIdentity identity;
 
@@ -90,6 +93,20 @@ public class AuthResource {
   @Produces(MediaType.APPLICATION_JSON)
   public CurrentSessionResponse me() {
     return toResponse(getCurrentSessionUseCase.execute(currentSessionId()));
+  }
+
+  /**
+   * Encerra a sessão atual (§9.3, passo 208): revoga o token apresentado com o motivo {@code
+   * LOGOUT} e responde 204 sem corpo (método {@code void}, como manda a especificação do JAX-RS). O
+   * mesmo token deixa de autenticar na requisição seguinte — o mecanismo bearer só enxerga sessão
+   * não revogada. Sem token, a política da rota responde 401 {@code problem+json}, igual ao {@code
+   * /auth/me}.
+   */
+  @POST
+  @Path("/logout")
+  @Authenticated
+  public void logout() {
+    logoutUseCase.execute(currentSessionId());
   }
 
   private static LoginResponse toResponse(LoginResult result) {

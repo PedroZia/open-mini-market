@@ -35,4 +35,11 @@ public interface AuthSessionStore {
    * no-op.
    */
   void touchLastSeen(UUID id, Instant lastSeenAt);
+
+  /**
+   * Revoga a sessão com o motivo e o instante informados (passo 208). É idempotente: sessão já
+   * revogada mantém instante e motivo originais e id desconhecido é no-op — quem chama não precisa
+   * saber se a sessão ainda existia, porque o token já deixou de autenticar de qualquer forma.
+   */
+  void revoke(UUID id, String reason, Instant revokedAt);
 }

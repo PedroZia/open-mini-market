@@ -134,9 +134,12 @@ public class AuthSessionRepository implements AuthSessionStore {
   }
 
   /**
-   * Revoga a sessão com o motivo informado. Já revogada é no-op (mantém instante e motivo
-   * originais); id desconhecido também não estoura.
+   * {@inheritDoc}
+   *
+   * <p>Já revogada é no-op (mantém instante e motivo originais); id desconhecido também não
+   * estoura.
    */
+  @Override
   public void revoke(UUID id, String reason, Instant revokedAt) {
     findById(id).ifPresent(s -> s.revoke(reason, revokedAt));
   }

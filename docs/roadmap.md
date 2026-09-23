@@ -245,7 +245,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 com dados; 401 sem token.
   **Commit:** `feat(auth): expoe dados da sessao atual`
 
-- [ ] **208 — `POST /api/v1/auth/logout`**
+- [x] **208 — `POST /api/v1/auth/logout`**
   **Objetivo:** encerrar sessão. **Depende:** 206
   **Implementar:** revoga a sessão atual (`revoked_reason=LOGOUT`) e responde 204; token deixa de funcionar imediatamente.
   **Testes/aceite:** após logout, `GET /auth/me` retorna 401.

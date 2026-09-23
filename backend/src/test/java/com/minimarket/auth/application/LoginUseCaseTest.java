@@ -490,6 +490,11 @@ class LoginUseCaseTest {
     public void touchLastSeen(UUID id, Instant lastSeenAt) {
       throw new UnsupportedOperationException("touchLastSeen não é usado por Login");
     }
+
+    @Override
+    public void revoke(UUID id, String reason, Instant revokedAt) {
+      throw new UnsupportedOperationException("revoke não é usado por Login");
+    }
   }
 
   /** Dublê de {@link PasswordHasher}: controla o resultado e registra o hash conferido. */

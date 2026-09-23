@@ -21,10 +21,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * API do {@code POST /api/v1/auth/login} e do {@code GET /api/v1/auth/me} contra PostgreSQL real
- * (Dev Services). O request HTTP commita de verdade: cada teste usa um sufixo único da execução e o
- * {@link #removeUsersCreatedByThisRun()} apaga sessões, papéis e usuários ao fim de cada um — as
- * FKs de {@code auth_sessions} e {@code user_roles} são {@code on delete restrict}.
+ * API do {@code POST /api/v1/auth/login}, do {@code GET /api/v1/auth/me} e do {@code POST
+ * /api/v1/auth/logout} contra PostgreSQL real (Dev Services). O request HTTP commita de verdade:
+ * cada teste usa um sufixo único da execução e o {@link #removeUsersCreatedByThisRun()} apaga
+ * sessões, papéis e usuários ao fim de cada um — as FKs de {@code auth_sessions} e {@code
+ * user_roles} são {@code on delete restrict}.
  */
 @QuarkusTest
 class AuthResourceTest extends IntegrationTestBase {
@@ -33,6 +34,7 @@ class AuthResourceTest extends IntegrationTestBase {
   private static final String PASSWORD = "senha-secreta";
   private static final String USER_AGENT = "pdv-test/1.0";
   private static final String LOGIN_PATH = "/api/v1/auth/login";
+  private static final String LOGOUT_PATH = "/api/v1/auth/logout";
   private static final String ME_PATH = "/api/v1/auth/me";
   private static final String META_PATH = "/api/v1/meta";
   private static final String AUTHORIZATION = "Authorization";
@@ -154,7 +156,57 @@ class AuthResourceTest extends IntegrationTestBase {
   }
 
   @Test
-  @DisplayName("GET /api/v1/meta continua 200 sem token: só o /auth/me foi protegido")
+  @DisplayName("POST /api/v1/auth/logout revoga a sessão atual e o token deixa de autenticar")
+  void logsOut() throws SQLException {
+    String username = "logout.ok." + SUFFIX;
+    String id = createUser(username, "Logout Ok", "OPERADOR");
+    String token = login(username, PASSWORD, null, null).jsonPath().getString("token");
+
+    Response logout =
+        given()
+            .header(AUTHORIZATION, "Bearer " + token)
+            .when()
+            .post(LOGOUT_PATH)
+            .then()
+            .extract()
+            .response();
+
+    assertThat(logout.statusCode()).isEqualTo(204);
+    assertThat(logout.asString()).isEmpty();
+
+    // A sessão fica revogada com o motivo LOGOUT — não é apagada nem vira erro.
+    UUID userId = UUID.fromString(id);
+    assertThat(sessionColumn(userId, "revoked_reason")).isEqualTo("LOGOUT");
+    assertThat(sessionColumn(userId, "revoked_at")).isNotNull();
+
+    // O mesmo token não autentica mais: 401 problem+json do mecanismo bearer (passo 206).
+    Response me =
+        given()
+            .header(AUTHORIZATION, "Bearer " + token)
+            .when()
+            .get(ME_PATH)
+            .then()
+            .extract()
+            .response();
+    assertThat(me.statusCode()).isEqualTo(401);
+    assertThat(me.contentType()).contains("application/problem+json");
+    assertThat(me.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+    assertThat(me.jsonPath().getString("instance")).isEqualTo(ME_PATH);
+  }
+
+  @Test
+  @DisplayName("POST /api/v1/auth/logout sem token responde 401 problem+json")
+  void rejectsLogoutWithoutToken() {
+    Response response = given().when().post(LOGOUT_PATH).then().extract().response();
+
+    assertThat(response.statusCode()).isEqualTo(401);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+    assertThat(response.jsonPath().getString("instance")).isEqualTo(LOGOUT_PATH);
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/meta continua 200 sem token: só as rotas de sessão foram protegidas")
   void keepsMetaPublic() {
     Response response = given().when().get(META_PATH).then().extract().response();
 
