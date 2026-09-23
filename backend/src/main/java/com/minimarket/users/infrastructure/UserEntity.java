@@ -184,6 +184,17 @@ public class UserEntity {
     this.passwordHash = passwordHash;
   }
 
+  /**
+   * Troca da própria senha (passo 214): grava o hash novo, limpa a exigência de troca e registra
+   * quando a senha mudou — a senha mudou de verdade, diferente do rehash de {@link
+   * #replacePasswordHash}.
+   */
+  void changePassword(String passwordHash) {
+    this.passwordHash = passwordHash;
+    this.mustChangePassword = false;
+    this.passwordChangedAt = Instant.now();
+  }
+
   public UUID getId() {
     return id;
   }

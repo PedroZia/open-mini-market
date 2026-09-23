@@ -1,6 +1,7 @@
 package com.minimarket.auth.api;
 
 import com.minimarket.auth.application.AuthenticateSessionUseCase;
+import com.minimarket.auth.application.ChangeOwnPasswordUseCase;
 import com.minimarket.auth.application.CurrentSession;
 import com.minimarket.auth.application.GetCurrentSessionUseCase;
 import com.minimarket.auth.application.ListUserSessionsUseCase;
@@ -64,6 +65,8 @@ public class AuthResource {
   @Inject ListUserSessionsUseCase listUserSessionsUseCase;
 
   @Inject RevokeSessionUseCase revokeSessionUseCase;
+
+  @Inject ChangeOwnPasswordUseCase changeOwnPasswordUseCase;
 
   /** Identidade montada pelo mecanismo bearer (passo 206); as rotas de sessão a usam. */
   @Inject SecurityIdentity identity;
@@ -151,6 +154,28 @@ public class AuthResource {
   @Authenticated
   public void revokeSession(@PathParam("id") UUID id) {
     revokeSessionUseCase.execute(currentSessionId(), id);
+  }
+
+  /**
+   * Troca a própria senha (§9.3, passo 214): exige a senha atual, aplica a política da nova, limpa
+   * {@code mustChangePassword} e derruba as outras sessões do usuário — a sessão que fez a troca
+   * segue viva. Responde 204 sem corpo. Senha atual incorreta responde 400 {@code
+   * INVALID_CURRENT_PASSWORD} e senha nova fora da política, 400 {@code VALIDATION_ERROR} (forma e
+   * caso de uso). Sem token, a política da rota responde 401 {@code problem+json}, como no {@code
+   * /auth/me}.
+   */
+  @POST
+  @Path("/password")
+  @Authenticated
+  @Consumes(MediaType.APPLICATION_JSON)
+  public void changePassword(@Valid ChangePasswordRequest request) {
+    if (request == null) {
+      // Sem corpo o leitor entrega null: é erro de forma (400), não erro interno.
+      throw new BusinessException(
+          ErrorCode.VALIDATION_ERROR, "corpo da troca de senha é obrigatório");
+    }
+    changeOwnPasswordUseCase.execute(
+        currentSessionId(), request.currentPassword(), request.newPassword());
   }
 
   private static LoginResponse toResponse(LoginResult result) {

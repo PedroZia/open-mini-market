@@ -57,4 +57,12 @@ public interface AuthSessionStore {
    * corte pelo ADMIN, disparado pelo evento {@code UserAccessChangedEvent}.
    */
   int revokeAllByUser(UUID userId, String reason, Instant revokedAt);
+
+  /**
+   * Revoga as sessões vivas do usuário <em>exceto</em> a informada, com um motivo comum, e devolve
+   * quantas foram revogadas (passo 214) — as já revogadas não contam. É o efeito da troca da
+   * própria senha: a sessão que fez a troca continua viva e as demais caem. Sessão de outro usuário
+   * nunca é tocada: o filtro é sempre pelo dono.
+   */
+  int revokeAllByUserExcept(UUID userId, UUID sessionId, String reason, Instant revokedAt);
 }

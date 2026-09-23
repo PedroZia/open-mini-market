@@ -422,6 +422,11 @@ class LoginUseCaseTest {
     }
 
     @Override
+    public void changeOwnPassword(UUID id, String passwordHash) {
+      throw new UnsupportedOperationException("changeOwnPassword não é usado por Login");
+    }
+
+    @Override
     public boolean existsByUsername(String username) {
       throw new UnsupportedOperationException("existsByUsername não é usado por Login");
     }
@@ -513,6 +518,12 @@ class LoginUseCaseTest {
     @Override
     public int revokeAllByUser(UUID userId, String reason, Instant revokedAt) {
       throw new UnsupportedOperationException("revokeAllByUser não é usado por Login");
+    }
+
+    @Override
+    public int revokeAllByUserExcept(
+        UUID userId, UUID sessionId, String reason, Instant revokedAt) {
+      throw new UnsupportedOperationException("revokeAllByUserExcept não é usado por Login");
     }
   }
 

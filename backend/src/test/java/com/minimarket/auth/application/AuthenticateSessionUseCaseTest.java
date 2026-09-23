@@ -295,6 +295,13 @@ class AuthenticateSessionUseCaseTest {
       throw new UnsupportedOperationException(
           "revokeAllByUser não é usado por AuthenticateSession");
     }
+
+    @Override
+    public int revokeAllByUserExcept(
+        UUID userId, UUID sessionId, String reason, Instant revokedAt) {
+      throw new UnsupportedOperationException(
+          "revokeAllByUserExcept não é usado por AuthenticateSession");
+    }
   }
 
   /** Dublê de {@link UserStore}: só o RBAC efetivo da autenticação por token é usado aqui. */
@@ -403,6 +410,12 @@ class AuthenticateSessionUseCaseTest {
     public void updatePasswordHash(UUID id, String passwordHash) {
       throw new UnsupportedOperationException(
           "updatePasswordHash não é usado por AuthenticateSession");
+    }
+
+    @Override
+    public void changeOwnPassword(UUID id, String passwordHash) {
+      throw new UnsupportedOperationException(
+          "changeOwnPassword não é usado por AuthenticateSession");
     }
   }
 }

@@ -203,6 +203,11 @@ class CreateUserUseCaseTest {
     public void updatePasswordHash(UUID id, String passwordHash) {
       throw new UnsupportedOperationException("updatePasswordHash não é usado por CreateUser");
     }
+
+    @Override
+    public void changeOwnPassword(UUID id, String passwordHash) {
+      throw new UnsupportedOperationException("changeOwnPassword não é usado por CreateUser");
+    }
   }
 
   /** Dublê de {@link RoleStore}: guarda o usuário e os papéis da última atribuição. */

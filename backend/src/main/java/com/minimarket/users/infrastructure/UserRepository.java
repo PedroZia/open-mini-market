@@ -153,6 +153,19 @@ public class UserRepository implements UserStore {
   /**
    * {@inheritDoc}
    *
+   * <p>Mesmo filtro de usuário vivo de {@link #updateDisplayName}; o flush fica com a transação do
+   * caso de uso.
+   */
+  @Override
+  public void changeOwnPassword(UUID id, String passwordHash) {
+    findById(id)
+        .filter(user -> user.getDeletedAt() == null)
+        .ifPresent(user -> user.changePassword(passwordHash));
+  }
+
+  /**
+   * {@inheritDoc}
+   *
    * <p>Mesmo filtro de usuário vivo de {@link #updateDisplayName}; contador e lock chegam decididos
    * pelo caso de uso e o flush fica com a transação dele.
    */

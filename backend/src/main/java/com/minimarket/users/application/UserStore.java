@@ -121,4 +121,12 @@ public interface UserStore {
    * no-op, como em {@link #updateDisplayName}.
    */
   void updatePasswordHash(UUID id, String passwordHash);
+
+  /**
+   * Troca da própria senha (passo 214): grava o hash da senha nova, limpa {@code
+   * mustChangePassword} e atualiza {@code password_changed_at} — a senha mudou de verdade,
+   * diferente do rehash de {@link #updatePasswordHash} e do reset de {@link #resetPassword}, que
+   * exige a troca no próximo login. Soft-deletado é no-op, como em {@link #updateDisplayName}.
+   */
+  void changeOwnPassword(UUID id, String passwordHash);
 }

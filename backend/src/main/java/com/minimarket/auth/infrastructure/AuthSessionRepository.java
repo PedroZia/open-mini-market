@@ -176,9 +176,28 @@ public class AuthSessionRepository implements AuthSessionStore {
    */
   @Override
   public int revokeAllByUser(UUID userId, String reason, Instant revokedAt) {
-    List<AuthSessionEntity> active = activeEntitiesByUser(userId);
-    active.forEach(session -> session.revoke(reason, revokedAt));
-    return active.size();
+    return revokeActive(userId, null, reason, revokedAt);
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Mesmo carregamento de {@link #revokeAllByUser}: a sessão que pediu a troca fica fora do
+   * filtro e segue viva; as demais caem com o motivo comum.
+   */
+  @Override
+  public int revokeAllByUserExcept(UUID userId, UUID sessionId, String reason, Instant revokedAt) {
+    return revokeActive(userId, sessionId, reason, revokedAt);
+  }
+
+  /** Revoga as sessões vivas do usuário, pulando a informada quando não nula. */
+  private int revokeActive(UUID userId, UUID keepSessionId, String reason, Instant revokedAt) {
+    List<AuthSessionEntity> toRevoke =
+        activeEntitiesByUser(userId).stream()
+            .filter(session -> keepSessionId == null || !keepSessionId.equals(session.getId()))
+            .toList();
+    toRevoke.forEach(session -> session.revoke(reason, revokedAt));
+    return toRevoke.size();
   }
 
   /** Sessões vivas do usuário, da atividade mais recente para a mais antiga. */

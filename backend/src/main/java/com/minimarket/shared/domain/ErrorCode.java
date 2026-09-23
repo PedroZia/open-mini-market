@@ -10,6 +10,7 @@ public enum ErrorCode {
   VALIDATION_ERROR(400, "Dados inválidos"),
   UNKNOWN_ROLE(400, "Papel desconhecido"),
   UNKNOWN_PERMISSION(400, "Permissão desconhecida"),
+  INVALID_CURRENT_PASSWORD(400, "Senha atual inválida"),
   INVALID_CREDENTIALS(401, "Credenciais inválidas"),
   SESSION_EXPIRED(401, "Sessão expirada"),
   SESSION_IDLE_TIMEOUT(401, "Sessão expirada por inatividade"),

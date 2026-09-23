@@ -281,7 +281,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** usuário desativado perde acesso na requisição seguinte; reset de senha derruba sessões antigas.
   **Commit:** `feat(auth): revoga sessoes ao desativar usuario ou trocar senha`
 
-- [ ] **214 — Troca da própria senha**
+- [x] **214 — Troca da própria senha**
   **Objetivo:** usuário troca senha com segurança. **Depende:** 206
   **Implementar:** `POST /auth/password` exigindo senha atual, validando política, re-hasheando, revogando **as outras** sessões e limpando `mustChangePassword`.
   **Testes/aceite:** senha atual errada → 400/403; sucesso derruba as demais sessões e mantém a atual; `mustChangePassword` vira false.
