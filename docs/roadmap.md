@@ -103,7 +103,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 > ⚠️ Janela temporária: os endpoints desta fase ficam **sem autenticação** até a Fase 3, quando o passo 307/308
 > aplica e testa as permissões. Isso é intencional e não pode vazar para produção.
 
-- [ ] **101 — Migration `users`**
+- [x] **101 — Migration `users`**
   **Objetivo:** tabela de usuários conforme §5.3. **Depende:** 004
   **Implementar:** `V2__users.sql` (username único, `password_hash`, `status`, contadores de falha, `deleted_at`, `version`).
   **Testes/aceite:** migration aplica do zero; constraint de `status` rejeita valor inválido (teste de integração).
