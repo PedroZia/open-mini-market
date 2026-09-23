@@ -12,6 +12,7 @@ import com.minimarket.users.application.UserStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
+import java.net.InetAddress;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -40,6 +41,11 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * minimarket.security.login.failure-delay-ms} antes do 401, encarecendo a varredura de senhas além
  * do custo do Argon2id. O 423 do bloqueio não espera: a conta já está fora do ar e o atraso só
  * puniria o cliente legítimo.
+ *
+ * <p>Rate limit por IP (§6.3.5, passo 212): antes de qualquer processamento o {@link
+ * LoginRateLimiter} decide o 429 — teto de falhas por IP na janela em memória — e cada recusa (401
+ * ou 423) conta para o IP; o login bem-sucedido limpa a contagem. É um paliativo de uma instância;
+ * o limite definitivo é do proxy reverso (passo 1305 da Fase 13, citado como 1402 no passo 212).
  */
 @ApplicationScoped
 public class LoginUseCase {
@@ -67,6 +73,9 @@ public class LoginUseCase {
   @Inject AuthSessionStore sessionStore;
 
   @Inject PasswordHasher passwordHasher;
+
+  /** Rate limit por IP (passo 212): o teto é decidido antes de a senha sequer ser conferida. */
+  @Inject LoginRateLimiter rateLimiter;
 
   /**
    * Gerador e hash do token são domínio puro, sem estado e sem CDI (passo 203): o caso de uso
@@ -109,14 +118,19 @@ public class LoginUseCase {
    * <p>{@code dontRollbackOn}: a falha de credenciais é resultado esperado, mas o contador e o lock
    * que ela acabou de gravar precisam sobreviver ao 401 — sem isso o interceptor desfaria a
    * contagem e o bloqueio do §6.3.1 nunca aconteceria (coberto pelo teste de API do passo 205).
+   *
+   * <p>O rate limit do passo 212 vem primeiro: IP com o teto estourado recebe 429 {@code
+   * RATE_LIMITED} sem que a senha seja conferida nem o contador do usuário mude.
    */
   @Transactional(dontRollbackOn = BusinessException.class)
   public LoginResult execute(LoginCommand command) {
+    rateLimiter.check(command.ip());
     Instant now = clock.instant();
     UserAuthState user = userStore.findAuthStateByUsername(command.username()).orElse(null);
     int previousAttempts = 0;
     if (user != null) {
       if (user.lockedUntil() != null && user.lockedUntil().isAfter(now)) {
+        rateLimiter.recordFailure(command.ip());
         throw new BusinessException(ErrorCode.ACCOUNT_LOCKED, ACCOUNT_LOCKED_DETAIL);
       }
       if (user.lockedUntil() != null) {
@@ -131,11 +145,11 @@ public class LoginUseCase {
         passwordHasher.verify(
             command.password(), user == null ? DUMMY_PASSWORD_HASH : user.passwordHash());
     if (user == null || !isActive(user)) {
-      rejectInvalidCredentials();
+      rejectInvalidCredentials(command.ip());
     }
     if (!passwordMatches) {
       registerFailedAttempt(user.id(), previousAttempts, now);
-      rejectInvalidCredentials();
+      rejectInvalidCredentials(command.ip());
     }
     rehashIfNeeded(user, command.password());
 
@@ -154,6 +168,8 @@ public class LoginUseCase {
             now,
             expiresAt));
     userStore.recordSuccessfulLogin(user.id(), now);
+    // Sucesso limpa a contagem do IP (passo 212): NAT compartilhado não carrega falha de ninguém.
+    rateLimiter.recordSuccess(command.ip());
 
     return new LoginResult(
         token,
@@ -181,9 +197,11 @@ public class LoginUseCase {
    * Recusa genérica de credenciais (§6.3.4) precedida do atraso fixo (§6.3.2, passo 211): a falha
    * espera 400 ms antes do 401, sem mudar o resultado nem a transação — o contador e o lock que
    * {@link #registerFailedAttempt} acabou de gravar continuam comitando pelo {@code dontRollbackOn}
-   * de {@link #execute}. Interrupção não vira erro: a flag é restaurada e a recusa segue.
+   * de {@link #execute}. Interrupção não vira erro: a flag é restaurada e a recusa segue. A falha
+   * também conta para o rate limit do IP (passo 212), antes de pagar o atraso.
    */
-  private void rejectInvalidCredentials() {
+  private void rejectInvalidCredentials(InetAddress ip) {
+    rateLimiter.recordFailure(ip);
     try {
       Thread.sleep(failureDelayMs);
     } catch (InterruptedException interrupted) {

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 
 import com.minimarket.IntegrationTestBase;
+import com.minimarket.auth.application.LoginRateLimiter;
 import com.minimarket.auth.domain.TokenHasher;
 import com.minimarket.users.infrastructure.UserRepository;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -12,6 +13,8 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.core.HttpHeaders;
+import java.net.InetAddress;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -50,8 +53,24 @@ class AuthResourceTest extends IntegrationTestBase {
   /** Falhas que fecham o ciclo do lock (§6.3.1, passo 204b): o mesmo valor de configuração. */
   private static final int LOCK_ATTEMPTS = 5;
 
+  /** Teto de falhas por IP antes do 429 (passo 212): o mesmo default de configuração. */
+  private static final int RATE_LIMIT_ATTEMPTS = 20;
+
+  /**
+   * Endereços de onde o RestAssured chega (o {@code localhost} da URL de teste pode resolver para
+   * IPv4 ou IPv6): limpar os dois devolve o limitador ao estado inicial entre testes.
+   */
+  private static final InetAddress LOOPBACK_V4 = InetAddress.ofLiteral("127.0.0.1");
+
+  private static final InetAddress LOOPBACK_V6 = InetAddress.ofLiteral("::1");
+
   /** Domínio puro, sem estado e sem CDI (passo 203): o teste instancia o hash do token. */
   private final TokenHasher tokenHasher = new TokenHasher();
+
+  /**
+   * Estado global do processo (passo 212): cada teste desta classe começa e termina sem contagem.
+   */
+  @Inject LoginRateLimiter loginRateLimiter;
 
   /**
    * Repositório de usuários (passo 211): envelhece {@code locked_until} sem SQL de coluna na mão —
@@ -337,6 +356,34 @@ class AuthResourceTest extends IntegrationTestBase {
   }
 
   @Test
+  @DisplayName("a 21ª falha do mesmo IP responde 429 RATE_LIMITED com Retry-After de até 5 min")
+  void rateLimitsLoginByAddress() {
+    String username = "login.limite." + SUFFIX;
+    createUser(username, "Login Limite", null);
+    // O limitador é estado global da suíte: esta classe começa a contagem do zero.
+    clearLoginRateLimit();
+
+    for (int attempt = 0; attempt < RATE_LIMIT_ATTEMPTS; attempt++) {
+      // 401 até a conta travar (5 falhas) e 423 depois: as duas contam como falha do IP.
+      Response failure = login(username, "senha-errada", null, null);
+      assertThat(failure.statusCode()).isIn(401, 423);
+    }
+
+    // A 21ª tentativa é barrada antes de processar — mesmo com a senha correta.
+    Response limited = login(username, PASSWORD, null, null);
+
+    assertThat(limited.statusCode()).isEqualTo(429);
+    assertThat(limited.contentType()).contains("application/problem+json");
+    assertThat(limited.jsonPath().getString("code")).isEqualTo("RATE_LIMITED");
+    assertThat(limited.jsonPath().getString("title")).isEqualTo("Muitas requisições");
+    assertThat(limited.jsonPath().getString("instance")).isEqualTo(LOGIN_PATH);
+    String retryAfter = limited.header(HttpHeaders.RETRY_AFTER);
+    assertThat(retryAfter).isNotNull();
+    // Segundos inteiros até o fim da janela de 5 min: nunca mais que ela, nunca zero.
+    assertThat(Integer.parseInt(retryAfter)).isBetween(1, 300);
+  }
+
+  @Test
   @DisplayName("X-Client fora de TUI/WEB responde 400 e não abre sessão")
   void rejectsInvalidClientHeader() throws SQLException {
     String username = "login.client." + SUFFIX;
@@ -583,6 +630,9 @@ class AuthResourceTest extends IntegrationTestBase {
    */
   @AfterEach
   void removeUsersCreatedByThisRun() throws SQLException {
+    // O limitador de login é estado global do processo (passo 212): sem isso as falhas de um teste
+    // chegariam aos seguintes e os 401 esperados virariam 429.
+    clearLoginRateLimit();
     try (Connection connection = dataSource.getConnection()) {
       try (PreparedStatement statement =
           connection.prepareStatement(
@@ -603,6 +653,12 @@ class AuthResourceTest extends IntegrationTestBase {
         statement.executeUpdate();
       }
     }
+  }
+
+  /** Devolve o limitador de login ao estado inicial: o estado global não vaza entre testes. */
+  private void clearLoginRateLimit() {
+    loginRateLimiter.recordSuccess(LOOPBACK_V4);
+    loginRateLimiter.recordSuccess(LOOPBACK_V6);
   }
 
   /** Cria o usuário pelo caminho que já existe ({@code POST /api/v1/users}) e devolve o id. */

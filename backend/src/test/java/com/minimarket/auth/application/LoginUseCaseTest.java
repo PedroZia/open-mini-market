@@ -42,6 +42,8 @@ class LoginUseCaseTest {
   private static final Duration ABSOLUTE_EXPIRATION = Duration.ofHours(12);
   private static final int MAX_ATTEMPTS = 5;
   private static final int LOCK_MINUTES = 15;
+  private static final int RATE_LIMIT_ATTEMPTS = 20;
+  private static final Duration RATE_LIMIT_WINDOW = Duration.ofMinutes(5);
   private static final String USERNAME = "ana.souza";
   private static final String PASSWORD = "senha-secreta";
   private static final String STORED_HASH = "$argon2id$v=19$m=19456,t=2,p=1$hash-antigo";
@@ -73,6 +75,11 @@ class LoginUseCaseTest {
     useCase.lockMinutes = LOCK_MINUTES;
     // O atraso da falha (passo 211) é medido no teste de API; aqui não pode somar segundos à suíte.
     useCase.failureDelayMs = 0;
+    // Rate limit por IP (passo 212): mesmo default de produção, com o relógio fixo do teste.
+    useCase.rateLimiter = new LoginRateLimiter();
+    useCase.rateLimiter.maxAttempts = RATE_LIMIT_ATTEMPTS;
+    useCase.rateLimiter.window = RATE_LIMIT_WINDOW;
+    useCase.rateLimiter.clock = Clock.fixed(NOW, ZoneOffset.UTC);
     passwordHasher.passwordMatches = true;
     userStore.authState = authState("ACTIVE", null, false);
   }

@@ -21,6 +21,7 @@ public enum ErrorCode {
   USERNAME_ALREADY_EXISTS(409, "Username já está em uso"),
   BUSINESS_ERROR(422, "Regra de negócio violada"),
   ACCOUNT_LOCKED(423, "Conta bloqueada"),
+  RATE_LIMITED(429, "Muitas requisições"),
   INTERNAL_ERROR(500, "Erro interno");
 
   private static final String TYPE_BASE = "https://minimarket.local/problems/";

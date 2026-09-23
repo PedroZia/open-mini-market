@@ -39,7 +39,8 @@ import java.util.UUID;
  * mapeia a resposta — zero regra de negócio aqui. O login é público (exceção do passo 308): é por
  * ele que o cliente obtém o token. Falha de credenciais e conta bloqueada saem do {@code
  * LoginUseCase} como {@code problem+json} (401 {@code INVALID_CREDENTIALS} e 423 {@code
- * ACCOUNT_LOCKED}).
+ * ACCOUNT_LOCKED}), assim como o rate limit por IP (429 {@code RATE_LIMITED} com {@code
+ * Retry-After}, passo 212).
  */
 @Path(AuthResource.PATH)
 public class AuthResource {

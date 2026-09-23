@@ -269,7 +269,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 5 falhas → 6ª tentativa bloqueada mesmo com senha correta; após o tempo, volta a permitir.
   **Commit:** `feat(auth): protege login contra forca bruta`
 
-- [ ] **212 — Rate limit básico no login por IP**
+- [x] **212 — Rate limit básico no login por IP**
   **Objetivo:** conter varredura de usuários. **Depende:** 205
   **Implementar:** contador em memória por IP (ex.: 20 tentativas/5 min) com resposta `429` e `Retry-After`; documentar que o limite definitivo será no proxy reverso (passo 1402).
   **Testes/aceite:** 21ª tentativa do mesmo IP → 429; IPs distintos não se afetam.
