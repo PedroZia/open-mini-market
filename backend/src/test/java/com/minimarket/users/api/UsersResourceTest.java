@@ -443,6 +443,62 @@ class UsersResourceTest extends IntegrationTestBase {
 
   @Test
   @DisplayName(
+      "PUT /api/v1/users/{id} que remove o ADMIN do último ADMIN ativo responde 409 e não altera nada")
+  void rejectsRemovingRoleFromLastActiveAdmin() throws SQLException {
+    String id = createUserWithRole("ultimo.admin." + SUFFIX, "Nome Antigo", "ADMIN");
+    // O ADMIN da fixture sai da contagem, como no disable do último ativo: sem isso ele seria o
+    // ADMIN que "sobra" e o 409 nunca chegaria. O soft delete não derruba a sessão de quem chama.
+    softDeleteUser(TestAdmin.USERNAME);
+
+    Response response =
+        putUser(
+            id,
+            """
+            {"displayName": "Nome Novo", "roleCodes": ["OPERADOR"]}
+            """,
+            409);
+
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/conflict");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Conflito de estado");
+    assertThat(response.jsonPath().getInt("status")).isEqualTo(409);
+    assertThat(response.jsonPath().getString("code")).isEqualTo("CONFLICT");
+    assertThat(response.jsonPath().getString("detail")).contains("último ADMIN ativo");
+
+    // papel e nome intactos: o conflito acontece antes de qualquer gravação
+    Response persisted = getUser(id);
+    assertThat(persisted.jsonPath().getString("displayName")).isEqualTo("Nome Antigo");
+    assertThat(persisted.jsonPath().getList("roles", String.class)).containsExactly("ADMIN");
+  }
+
+  @Test
+  @DisplayName(
+      "PUT /api/v1/users/{id} com dois ADMINs ativos remove o papel de um e mantém o outro")
+  void allowsRemovingRoleWhenAnotherActiveAdminRemains() throws SQLException {
+    String firstAdmin = createUserWithRole("admin.um." + SUFFIX, "Admin Um", "ADMIN");
+    String secondAdmin = createUserWithRole("admin.dois." + SUFFIX, "Admin Dois", "ADMIN");
+    // A fixture sai da conta para o cenário ter exatamente dois ADMINs ativos.
+    softDeleteUser(TestAdmin.USERNAME);
+
+    Response response =
+        putUser(
+            firstAdmin,
+            """
+            {"displayName": "Admin Um", "roleCodes": ["OPERADOR"]}
+            """,
+            200);
+
+    assertThat(response.jsonPath().getList("roles", String.class)).containsExactly("OPERADOR");
+    assertThat(getUser(firstAdmin).jsonPath().getList("roles", String.class))
+        .containsExactly("OPERADOR");
+    assertThat(getUser(secondAdmin).jsonPath().getList("roles", String.class))
+        .as("o outro ADMIN ativo segue como ADMIN")
+        .containsExactly("ADMIN");
+  }
+
+  @Test
+  @DisplayName(
       "POST /api/v1/users/{id}/disable responde 200 DISABLED e tira o usuário da busca padrão")
   void disablesUser() throws SQLException {
     String id = createUserWithRole("desativa." + SUFFIX, "Desativa Usuario", "OPERADOR");

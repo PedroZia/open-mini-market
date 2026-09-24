@@ -139,7 +139,8 @@ public class UsersResource {
   /**
    * PUT substitui o nome de exibição e o conjunto de papéis; username e senha não mudam por aqui.
    * Id inexistente → 404 {@code USER_NOT_FOUND}; papel desconhecido → 400 {@code UNKNOWN_ROLE} sem
-   * gravar nada.
+   * gravar nada; remover o papel ADMIN do último ADMIN ativo → 409 {@code CONFLICT} (a regra é do
+   * caso de uso).
    */
   @PUT
   @Path("/{id}")
