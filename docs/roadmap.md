@@ -659,11 +659,11 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** cria com sucesso; sem caixa aberto → 409 `CASH_SESSION_REQUIRED`; sem vínculo de caixa → 403.
   **Commit:** `feat(sales): implementa abertura de venda`
 
-- [ ] **806 — Idempotência na API**
+- [x] **806 — Idempotência na API**
   **Objetivo:** retry não duplica operação. **Depende:** 801, 607a
   **Implementar:** reutiliza o mecanismo do **607a** nos endpoints de dinheiro/estoque — `idempotency_keys` (V14), `IdempotencyService` e `IdempotencyGuard`: hash do corpo, replay da resposta, 409 se mesma chave com corpo diferente. A `V17__idempotency_keys.sql` que o passo citava não existe mais; sem migration nova.
   **Testes/aceite:** duas chamadas com a mesma chave → mesma resposta e um único efeito; corpo diferente → 409 `IDEMPOTENCY_KEY_REUSED`; sem header em endpoint obrigatório → 400.
-  **Commit:** `feat(shared): adiciona idempotencia de requisicoes`
+  **Commit:** `docs(shared): registra verificacao da idempotencia na API` (mecanismo veio no 607a)
 
 - [ ] **807 — API `POST /api/v1/sales`**
   **Objetivo:** abrir venda pela API/TUI. **Depende:** 805, 806
