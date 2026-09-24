@@ -7,6 +7,8 @@ import com.minimarket.cash.application.NewCashMovement;
 import com.minimarket.cash.application.NewCashSession;
 import com.minimarket.cash.domain.CashMovementType;
 import com.minimarket.cash.domain.CashSessionStatus;
+import com.minimarket.shared.domain.ConflictException;
+import com.minimarket.shared.domain.ErrorCode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -17,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.hibernate.exception.ConstraintViolationException;
 
 /**
  * Adaptador JPA das tabelas {@code cash_sessions} e {@code cash_movements}. Sem
@@ -29,9 +32,20 @@ import java.util.UUID;
 @ApplicationScoped
 public class CashSessionRepository implements CashSessionStore {
 
+  /** SQLState de violação de unique constraint no PostgreSQL. */
+  private static final String UNIQUE_VIOLATION = "23505";
+
   @Inject EntityManager entityManager;
 
-  /** Gera o id (UUIDv7, §5.1) na aplicação e persiste; a transação é do caso de uso. */
+  /**
+   * Gera o id (UUIDv7, §5.1) na aplicação e persiste; a transação é do caso de uso.
+   *
+   * <p>O flush antecipado é o backstop da checagem de sessão aberta do caso de uso: se outro
+   * operador abrir o mesmo caixa entre a checagem e este flush, a violação do índice único parcial
+   * {@code ux_cash_session_open} vira o mesmo 409 do caminho comum, nunca 500 — e deixa os defaults
+   * do banco ({@code created_at}, {@code updated_at} e {@code version}) visíveis na releitura que o
+   * caso de uso faz em seguida.
+   */
   @Override
   public UUID insert(NewCashSession session) {
     CashSessionEntity entity =
@@ -43,6 +57,7 @@ public class CashSessionRepository implements CashSessionStore {
             session.openingAmount());
     entity.assignId(UuidCreator.getTimeOrderedEpoch());
     entityManager.persist(entity);
+    flushTranslatingOpenSessionConflict();
     return entity.getId();
   }
 
@@ -82,7 +97,8 @@ public class CashSessionRepository implements CashSessionStore {
             movement.referenceType(),
             movement.referenceId(),
             movement.reason(),
-            movement.createdByUserId());
+            movement.createdByUserId(),
+            movement.createdAt());
     entity.assignId(UuidCreator.getTimeOrderedEpoch());
     entityManager.persist(entity);
     return entity.getId();
@@ -127,6 +143,25 @@ public class CashSessionRepository implements CashSessionStore {
 
   private static Optional<CashSessionSummary> firstSummary(List<CashSessionEntity> found) {
     return found.isEmpty() ? Optional.empty() : Optional.of(toSummary(found.getFirst()));
+  }
+
+  /**
+   * O {@code findOpenByRegister} do caso de uso não é atômico: entre a checagem e a escrita, outro
+   * operador pode abrir o mesmo caixa. O flush antecipado faz a violação do índice único parcial
+   * {@code ux_cash_session_open} aparecer aqui e virar {@link ConflictException} com o mesmo código
+   * do caminho comum — o backstop do banco nunca responde 500. {@code cash_sessions} só tem esse
+   * índice único além da chave primária (o id é UUIDv7 gerado na aplicação), então SQLState 23505
+   * aqui só pode ser sessão aberta duplicada; qualquer outra falha de persistência sobe como está.
+   */
+  private void flushTranslatingOpenSessionConflict() {
+    try {
+      entityManager.flush();
+    } catch (ConstraintViolationException exception) {
+      if (!UNIQUE_VIOLATION.equals(exception.getSQLState())) {
+        throw exception;
+      }
+      throw new ConflictException(ErrorCode.CASH_REGISTER_ALREADY_OPEN, "caixa já está aberto");
+    }
   }
 
   /** Projeção da sessão para a porta: nada de entidade JPA na saída. */

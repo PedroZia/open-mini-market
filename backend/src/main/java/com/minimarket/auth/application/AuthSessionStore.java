@@ -45,6 +45,14 @@ public interface AuthSessionStore {
   void touchLastSeen(UUID id, Instant lastSeenAt);
 
   /**
+   * Grava o caixa da sessão viva (passo 606): é o vínculo entre a sessão autenticada que abriu o
+   * caixa e o caixa físico, para as operações seguintes saberem de onde vieram (§7.2). Update
+   * condicional como o {@link #touchLastSeen}: sessão desconhecida ou revogada é no-op — token
+   * morto não ganha caixa, e quem chama não precisa saber se a sessão ainda existia.
+   */
+  void bindCashRegister(UUID id, UUID cashRegisterId);
+
+  /**
    * Revoga a sessão com o motivo e o instante informados (passo 208). É idempotente: sessão já
    * revogada mantém instante e motivo originais e id desconhecido é no-op — quem chama não precisa
    * saber se a sessão ainda existia, porque o token já deixou de autenticar de qualquer forma.

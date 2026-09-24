@@ -60,7 +60,7 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
   void insertsOpenSession() throws SQLException {
     UUID userId = newUser("caixa.repo.abertura");
     UUID register = registerId();
-    Instant openedAt = openedAt();
+    Instant openedAt = now();
     UUID id = insertSession(userId, openedAt, "150.00");
 
     assertThat(id.version()).as("UUIDv7").isEqualTo(7);
@@ -96,7 +96,7 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
   void findsClosedSessionByIdOnly() throws SQLException {
     UUID userId = newUser("caixa.repo.historico");
     UUID register = registerId();
-    UUID id = insertSession(userId, openedAt(), "100.00");
+    UUID id = insertSession(userId, now(), "100.00");
     closeSession(id);
 
     assertThat(sessionRepository.findById(id))
@@ -115,8 +115,9 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
   @DisplayName("insertMovement grava os campos e sumByType soma os valores assinados por tipo")
   void insertsMovementsAndSumsByType() throws SQLException {
     UUID userId = newUser("caixa.repo.movimentos");
-    UUID sessionId = insertSession(userId, openedAt(), "100.00");
+    UUID sessionId = insertSession(userId, now(), "100.00");
     UUID saleReference = UUID.randomUUID();
+    Instant saleCreatedAt = now();
     UUID saleId =
         insertMovement(
             new NewCashMovement(
@@ -128,7 +129,8 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
                 "SALE",
                 saleReference,
                 null,
-                userId));
+                userId,
+                saleCreatedAt));
     insertMovement(
         new NewCashMovement(
             storeId(),
@@ -139,7 +141,8 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
             null,
             null,
             "fundo de troco",
-            userId));
+            userId,
+            now()));
     insertMovement(
         new NewCashMovement(
             storeId(),
@@ -150,7 +153,8 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
             "SALE",
             UUID.randomUUID(),
             null,
-            userId));
+            userId,
+            now()));
     insertMovement(
         new NewCashMovement(
             storeId(),
@@ -161,7 +165,8 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
             null,
             null,
             "reforço de troco",
-            userId));
+            userId,
+            now()));
     insertMovement(
         new NewCashMovement(
             storeId(),
@@ -172,7 +177,8 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
             null,
             null,
             "sangria",
-            userId));
+            userId,
+            now()));
 
     assertThat(saleId.version()).as("UUIDv7").isEqualTo(7);
     Map<CashMovementType, BigDecimal> totals = sessionRepository.sumByType(sessionId);
@@ -195,7 +201,9 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
     assertThat(stored.getReferenceId()).isEqualTo(saleReference);
     assertThat(stored.getReason()).isNull();
     assertThat(stored.getCreatedByUserId()).isEqualTo(userId);
-    assertThat(stored.getCreatedAt()).isNotNull();
+    assertThat(stored.getCreatedAt())
+        .as("o instante vem do caso de uso, não do now() do JPA")
+        .isEqualTo(saleCreatedAt);
   }
 
   /** Insere a sessão pelo repositório e limpa o contexto: o que o teste lê depois vem do banco. */
@@ -228,7 +236,7 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
             "update CashSessionEntity s set s.status = :status, s.closedAt = :closedAt"
                 + " where s.id = :id")
         .setParameter("status", CashSessionStatus.CLOSED)
-        .setParameter("closedAt", openedAt())
+        .setParameter("closedAt", now())
         .setParameter("id", id)
         .executeUpdate();
     entityManager.flush();
@@ -240,7 +248,7 @@ class CashSessionRepositoryTest extends IntegrationTestBase {
   }
 
   /** Instante truncado ao microssegundo que o {@code timestamptz} guarda. */
-  private static Instant openedAt() {
+  private static Instant now() {
     return Instant.now().truncatedTo(ChronoUnit.MICROS);
   }
 

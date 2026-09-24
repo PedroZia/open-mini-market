@@ -277,6 +277,12 @@ class AuthenticateSessionUseCaseTest {
     }
 
     @Override
+    public void bindCashRegister(UUID id, UUID cashRegisterId) {
+      throw new UnsupportedOperationException(
+          "bindCashRegister não é usado por AuthenticateSession");
+    }
+
+    @Override
     public void touchLastSeen(UUID id, Instant lastSeenAt) {
       touches.add(lastSeenAt);
       session =

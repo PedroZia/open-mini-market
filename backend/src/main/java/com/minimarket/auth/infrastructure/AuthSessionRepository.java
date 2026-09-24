@@ -137,6 +137,25 @@ public class AuthSessionRepository implements AuthSessionStore {
   /**
    * {@inheritDoc}
    *
+   * <p>Como o {@link #touchLastSeen}: um {@code update} condicional, sem carregar a entidade — o
+   * caixa é um vínculo do dono do token e a sessão não passa pelo lock otimista por causa dele. O
+   * {@code versioned} mantém o comportamento da entidade (o update conta como modificação). Sessão
+   * revogada não é atualizada e id desconhecido é no-op.
+   */
+  @Override
+  public void bindCashRegister(UUID id, UUID cashRegisterId) {
+    entityManager
+        .createQuery(
+            "update versioned AuthSessionEntity s set s.cashRegisterId = :cashRegisterId"
+                + " where s.id = :id and s.revokedAt is null")
+        .setParameter("cashRegisterId", cashRegisterId)
+        .setParameter("id", id)
+        .executeUpdate();
+  }
+
+  /**
+   * {@inheritDoc}
+   *
    * <p>Já revogada é no-op (mantém instante e motivo originais); id desconhecido também não
    * estoura.
    */

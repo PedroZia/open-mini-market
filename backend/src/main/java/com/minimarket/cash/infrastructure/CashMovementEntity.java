@@ -71,7 +71,8 @@ public class CashMovementEntity {
       String referenceType,
       UUID referenceId,
       String reason,
-      UUID createdByUserId) {
+      UUID createdByUserId,
+      Instant createdAt) {
     this.storeId = storeId;
     this.cashSessionId = cashSessionId;
     this.movementType = movementType;
@@ -81,11 +82,19 @@ public class CashMovementEntity {
     this.referenceId = referenceId;
     this.reason = reason;
     this.createdByUserId = createdByUserId;
+    this.createdAt = createdAt;
   }
 
+  /**
+   * O instante do movimento vem do relógio do caso de uso; o preenchimento aqui espelha o {@code
+   * default now()} da coluna para quem construir a entidade sem instante — o caminho da aplicação
+   * passa pela porta com o valor já resolvido (passo 606).
+   */
   @PrePersist
   void markCreated() {
-    createdAt = Instant.now();
+    if (createdAt == null) {
+      createdAt = Instant.now();
+    }
   }
 
   void assignId(UUID id) {

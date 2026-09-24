@@ -1,6 +1,7 @@
 package com.minimarket.cash.application;
 
 import com.minimarket.cash.domain.CashMovementType;
+import com.minimarket.shared.domain.ConflictException;
 import java.math.BigDecimal;
 import java.util.Map;
 import java.util.Optional;
@@ -12,7 +13,12 @@ import java.util.UUID;
  */
 public interface CashSessionStore {
 
-  /** Insere a sessão (nasce {@code OPEN}) e devolve o id gerado (UUIDv7) pelo adaptador. */
+  /**
+   * Insere a sessão (nasce {@code OPEN}) e devolve o id gerado (UUIDv7) pelo adaptador. Se o caixa
+   * já tiver sessão aberta, o índice único parcial {@code ux_cash_session_open} estoura e vira
+   * {@link ConflictException} com {@code CASH_REGISTER_ALREADY_OPEN} — é o backstop do banco para a
+   * corrida entre dois operadores (passo 606, §8), com o mesmo 409 do caminho comum.
+   */
   UUID insert(NewCashSession session);
 
   /**

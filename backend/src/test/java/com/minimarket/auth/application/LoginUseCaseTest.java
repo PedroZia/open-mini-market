@@ -612,6 +612,11 @@ class LoginUseCaseTest {
     }
 
     @Override
+    public void bindCashRegister(UUID id, UUID cashRegisterId) {
+      throw new UnsupportedOperationException("bindCashRegister não é usado por Login");
+    }
+
+    @Override
     public void touchLastSeen(UUID id, Instant lastSeenAt) {
       throw new UnsupportedOperationException("touchLastSeen não é usado por Login");
     }

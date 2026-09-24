@@ -513,7 +513,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 6+ testes unitários de cálculo e invariantes, sem Quarkus.
   **Commit:** `feat(cash): adiciona modelo de dominio da sessao de caixa`
 
-- [ ] **606 — Caso de uso `OpenCashSession`**
+- [x] **606 — Caso de uso `OpenCashSession`**
   **Objetivo:** abrir caixa. **Depende:** 605, 302
   **Implementar:** valida caixa ativo, ausência de sessão aberta, `openingAmount` ≥ 0; cria sessão + movimento `OPENING`; auditoria `CASH_SESSION_OPENED`; permissão `cash.open`.
   **Testes/aceite:** unitário/integração: abre com sucesso; segunda abertura → `409 CASH_REGISTER_ALREADY_OPEN`; auditoria registrada.

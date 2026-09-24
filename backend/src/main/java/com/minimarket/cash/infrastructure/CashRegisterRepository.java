@@ -6,6 +6,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Adaptador JPA da tabela {@code cash_registers}. Sem {@code @Transactional}: leitura pura — a
@@ -30,6 +32,25 @@ public class CashRegisterRepository implements CashRegisterStore {
         .stream()
         .map(CashRegisterRepository::toSummary)
         .toList();
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>O filtro de ativo vai na consulta, não no Java: caixa desativado não é encontrado, como se
+   * não existisse.
+   */
+  @Override
+  public Optional<CashRegisterSummary> findActiveById(UUID id) {
+    List<CashRegisterEntity> found =
+        entityManager
+            .createQuery(
+                "select r from CashRegisterEntity r where r.id = :id and r.active = true",
+                CashRegisterEntity.class)
+            .setParameter("id", id)
+            .setMaxResults(1)
+            .getResultList();
+    return found.isEmpty() ? Optional.empty() : Optional.of(toSummary(found.getFirst()));
   }
 
   /** Projeção do caixa para a porta: nada de entidade JPA na saída. */
