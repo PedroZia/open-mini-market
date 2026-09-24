@@ -1,0 +1,238 @@
+import { Box, Text, useInput, type Key } from 'ink';
+import { useState, type Dispatch } from 'react';
+
+import type { CashRegisterOption, TerminalApi } from '../api/terminalApi';
+import type { Action } from '../core/reducer';
+import type { LoginState, Operator } from '../core/state';
+
+/**
+ * Entrada do operador (passo 1106, §11.2): usuário/senha com a senha mascarada e, aceito o login, a
+ * escolha do caixa ativo (`GET /api/v1/cash-registers`). O login **não** manda `cashRegisterId` — a
+ * vinculação da sessão ao caixa é da abertura (607/1107).
+ *
+ * A tela não decide o destino: relata os fatos ao reducer (1103) e ele troca de estado —
+ * `loginSucceeded` leva para a abertura de caixa, `loginRejected` **fica aqui** com a mensagem do
+ * servidor e `apiFailed` vai para a tela de erro com volta. Nada de conta, total ou parse (BR-12).
+ *
+ * O token fica só na sessão em memória (`src/api/session.ts`), nunca no estado da tela nem na
+ * saída — a senha também é descartada assim que o login termina.
+ */
+
+export type LoginScreenProps = {
+  /** Estado do reducer: `failure` é a mensagem do último login recusado pelo servidor. */
+  state: LoginState;
+  /** Camada de API injetada: dublê no teste, instância única no app. */
+  api: TerminalApi;
+  /** Despacho do shell; toda transição nasce no reducer. */
+  dispatch: Dispatch<Action>;
+};
+
+/** Etapa da tela: credenciais e, com o login aceito, a escolha do caixa. */
+type Stage =
+  | { kind: 'credentials' }
+  | {
+      kind: 'registers';
+      operator: Operator;
+      /** `null` enquanto a lista não chegou: a tela mostra o carregamento. */
+      registers: CashRegisterOption[] | null;
+      selected: number;
+    };
+
+export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
+  const [stage, setStage] = useState<Stage>({ kind: 'credentials' });
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [focus, setFocus] = useState<'username' | 'password'>('username');
+  const [busy, setBusy] = useState(false);
+  /** Aviso local do formulário (campo vazio); a recusa do servidor vem em `state.failure`. */
+  const [hint, setHint] = useState<string | null>(null);
+
+  useInput((input, key) => {
+    if (stage.kind === 'credentials') {
+      handleCredentials(input, key);
+    } else {
+      handleRegisters(key);
+    }
+  });
+
+  function handleCredentials(input: string, key: Key): void {
+    // requisição em andamento: ENTER repetido não dispara dois logins
+    if (busy || key.ctrl || key.meta) {
+      return;
+    }
+
+    if (key.return) {
+      void submit();
+      return;
+    }
+
+    if (key.tab || key.upArrow || key.downArrow) {
+      setFocus((current) => (current === 'username' ? 'password' : 'username'));
+      return;
+    }
+
+    if (key.backspace || key.delete) {
+      setHint(null);
+      editField((value) => value.slice(0, -1));
+      return;
+    }
+
+    if (input === '') {
+      return; // ESC, setas, F* e demais controles não são texto do campo
+    }
+
+    setHint(null);
+    editField((value) => value + input);
+  }
+
+  function handleRegisters(key: Key): void {
+    if (key.upArrow) {
+      move(-1);
+      return;
+    }
+
+    if (key.downArrow) {
+      move(1);
+      return;
+    }
+
+    if (key.return) {
+      confirm();
+    }
+  }
+
+  function editField(change: (value: string) => string): void {
+    if (focus === 'username') {
+      setUsername(change);
+    } else {
+      setPassword(change);
+    }
+  }
+
+  async function submit(): Promise<void> {
+    if (username.trim() === '' || password === '') {
+      setHint('informe usuário e senha');
+      return;
+    }
+
+    setHint(null);
+    setBusy(true);
+
+    const outcome = await api.login(username, password);
+    setBusy(false);
+
+    if (outcome.ok) {
+      setPassword(''); // a senha sai da memória da tela assim que o login termina
+      await loadRegisters(outcome.operator);
+      return;
+    }
+
+    if (outcome.kind === 'rejected') {
+      setPassword(''); // a senha recusada não fica no campo: o operador digita de novo
+      dispatch({ type: 'loginRejected', message: outcome.message });
+      return;
+    }
+
+    dispatch({ type: 'apiFailed', problem: outcome.problem });
+  }
+
+  /** Login aceito: busca os caixas ativos; a escolha do operador é a etapa seguinte. */
+  async function loadRegisters(operator: Operator): Promise<void> {
+    setStage({ kind: 'registers', operator, registers: null, selected: 0 });
+
+    const outcome = await api.listCashRegisters();
+    if (!outcome.ok) {
+      dispatch({ type: 'apiFailed', problem: outcome.problem });
+      return;
+    }
+
+    setStage((current) =>
+      current.kind === 'registers' ? { ...current, registers: outcome.registers } : current,
+    );
+  }
+
+  /** Anda na lista em ciclo: com poucos caixas, a seta não trava na ponta. */
+  function move(step: number): void {
+    setStage((current) => {
+      if (
+        current.kind !== 'registers' ||
+        current.registers === null ||
+        current.registers.length === 0
+      ) {
+        return current;
+      }
+
+      const count = current.registers.length;
+      return { ...current, selected: (current.selected + step + count) % count };
+    });
+  }
+
+  function confirm(): void {
+    if (stage.kind !== 'registers' || stage.registers === null) {
+      return;
+    }
+
+    const chosen = stage.registers[stage.selected];
+    if (chosen === undefined) {
+      return;
+    }
+
+    dispatch({
+      type: 'loginSucceeded',
+      operator: stage.operator,
+      register: { id: chosen.id, name: chosen.name === '' ? chosen.code : chosen.name },
+    });
+  }
+
+  const message = state.failure ?? hint;
+
+  if (stage.kind === 'registers') {
+    return (
+      <Box flexDirection="column">
+        <Text bold>Escolha o caixa</Text>
+        <Text>Operador: {stage.operator.name}</Text>
+        <Text> </Text>
+        {stage.registers === null ? (
+          <Text dimColor>carregando caixas...</Text>
+        ) : stage.registers.length === 0 ? (
+          <Text color="yellow">nenhum caixa ativo — procure o suporte antes de abrir o PDV</Text>
+        ) : (
+          stage.registers.map((register, index) => (
+            <Text key={register.id} color={index === stage.selected ? 'cyan' : undefined}>
+              {index === stage.selected ? '›' : ' '} {register.code} {register.name} —{' '}
+              {describeSession(register)}
+            </Text>
+          ))
+        )}
+        <Text> </Text>
+        <Text dimColor>↑↓ escolhe · ENTER confirma</Text>
+      </Box>
+    );
+  }
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>PDV minimercado — entrada do operador</Text>
+      <Text> </Text>
+      <Text>
+        {focus === 'username' ? '›' : ' '} Usuário: {username}
+      </Text>
+      <Text>
+        {focus === 'password' ? '›' : ' '} Senha: {'•'.repeat(password.length)}
+      </Text>
+      {message === null ? null : <Text color="red">{message}</Text>}
+      {busy ? <Text dimColor>entrando...</Text> : null}
+      <Text> </Text>
+      <Text dimColor>TAB alterna os campos · ENTER entra</Text>
+    </Box>
+  );
+}
+
+/** Como a lista descreve a sessão do caixa: quem está nele, ou livre. */
+function describeSession(register: CashRegisterOption): string {
+  if (!register.open) {
+    return 'livre';
+  }
+
+  return register.operatorName === null ? 'aberto' : `aberto com ${register.operatorName}`;
+}

@@ -931,7 +931,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** cada atalho resolve a ação esperada no contexto correto; ESC fecha modal antes de sair da tela.
   **Commit:** `feat(tui): mapeia atalhos de teclado`
 
-- [ ] **1106 — Tela de login e seleção de caixa**
+- [x] **1106 — Tela de login e seleção de caixa**
   **Objetivo:** operador entra no PDV. **Depende:** 1102, 1103
   **Implementar:** formulário usuário/senha (senha mascarada), seleção do caixa (`GET /cash-registers`), tratamento de erro de credencial e de bloqueio; guarda token apenas em memória.
   **Testes/aceite:** `ink-testing-library`: login OK navega para venda; credencial inválida mostra erro sem sair da tela.

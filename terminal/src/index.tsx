@@ -1,5 +1,6 @@
 import { render } from 'ink';
 
-import { App } from './app';
+import { terminalApi } from './api';
+import { App } from './ui/App';
 
-render(<App />);
+render(<App api={terminalApi} />);

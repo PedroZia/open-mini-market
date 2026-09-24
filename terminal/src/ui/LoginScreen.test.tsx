@@ -1,0 +1,140 @@
+import { render } from 'ink-testing-library';
+import { describe, expect, test, vi } from 'vitest';
+
+import type {
+  CashRegisterOption,
+  CashRegistersOutcome,
+  LoginOutcome,
+  TerminalApi,
+} from '../api/terminalApi';
+import { LoginScreen } from './LoginScreen';
+
+/**
+ * Contrato da tela de login com o reducer (1103): a tela não troca de estado sozinha — ela relata o
+ * fato e o shell decide. Aqui o `dispatch` é um espião, então dá para conferir exatamente o que sai
+ * da tela (o `loginSucceeded` que o 1107 vai consumir) e os casos em que não sai nada.
+ */
+
+const OPERADOR = { id: 'u1', name: 'Ana Souza' };
+
+const CAIXA_01: CashRegisterOption = {
+  id: 'r1',
+  code: '01',
+  name: 'Caixa principal',
+  open: false,
+  operatorName: null,
+};
+const CAIXA_02: CashRegisterOption = {
+  id: 'r2',
+  code: '02',
+  name: 'Caixa do fundo',
+  open: true,
+  operatorName: 'Maria',
+};
+
+function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
+  return {
+    login: vi.fn(async (): Promise<LoginOutcome> => ({ ok: true, operator: OPERADOR })),
+    listCashRegisters: vi.fn(
+      async (): Promise<CashRegistersOutcome> => ({ ok: true, registers: [CAIXA_01, CAIXA_02] }),
+    ),
+    ...overrides,
+  };
+}
+
+function renderScreen(api: TerminalApi, dispatch = vi.fn()) {
+  return render(
+    <LoginScreen state={{ kind: 'login', failure: null }} api={api} dispatch={dispatch} />,
+  );
+}
+
+async function expectFrame(lastFrame: () => string | undefined, text: string): Promise<void> {
+  await vi.waitFor(() => {
+    expect(lastFrame()).toContain(text);
+  });
+}
+
+/**
+ * Digita as credenciais esperando o frame entre as teclas: o `useInput` do Ink só re-registra o
+ * callback (com o estado do último render) no efeito seguinte, e no teste as escritas aconteceriam
+ * todas no mesmo tick.
+ */
+async function signIn(
+  lastFrame: () => string | undefined,
+  stdin: { write: (data: string) => void },
+): Promise<void> {
+  stdin.write('ana');
+  await expectFrame(lastFrame, 'Usuário: ana');
+  stdin.write('\t');
+  await expectFrame(lastFrame, '› Senha:');
+  stdin.write('segredo');
+  await expectFrame(lastFrame, 'Senha: •••••••');
+  stdin.write('\r');
+}
+
+describe('LoginScreen', () => {
+  test('ENTER no caixa escolhido despacha loginSucceeded com operador e caixa', async () => {
+    const dispatch = vi.fn();
+    const { lastFrame, stdin } = renderScreen(apiStub(), dispatch);
+
+    await signIn(lastFrame, stdin);
+    await expectFrame(lastFrame, 'Escolha o caixa');
+
+    stdin.write('\u001b[B'); // desce para o segundo caixa
+    await expectFrame(lastFrame, '› 02');
+
+    stdin.write('\r');
+
+    await vi.waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith({
+        type: 'loginSucceeded',
+        operator: OPERADOR,
+        register: { id: 'r2', name: 'Caixa do fundo' },
+      });
+    });
+  });
+
+  test('lista vazia avisa e ENTER não navega', async () => {
+    const dispatch = vi.fn();
+    const api = apiStub({
+      listCashRegisters: vi.fn(
+        async (): Promise<CashRegistersOutcome> => ({ ok: true, registers: [] }),
+      ),
+    });
+    const { lastFrame, stdin } = renderScreen(api, dispatch);
+
+    await signIn(lastFrame, stdin);
+    await expectFrame(lastFrame, 'nenhum caixa ativo');
+
+    stdin.write('\r');
+
+    expect(lastFrame()).toContain('Escolha o caixa');
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  test('a lista pendente mostra o carregamento', async () => {
+    const api = apiStub({
+      listCashRegisters: vi.fn(
+        () =>
+          new Promise<CashRegistersOutcome>(() => {
+            // fica pendente de propósito: é o estado de carregando que o teste quer ver
+          }),
+      ),
+    });
+    const { lastFrame, stdin } = renderScreen(api);
+
+    await signIn(lastFrame, stdin);
+
+    await expectFrame(lastFrame, 'carregando caixas...');
+  });
+
+  test('campo vazio não chama a API e avisa o operador', async () => {
+    const login = vi.fn(async (): Promise<LoginOutcome> => ({ ok: true, operator: OPERADOR }));
+    const { lastFrame, stdin } = renderScreen(apiStub({ login }));
+
+    stdin.write('\r');
+
+    await expectFrame(lastFrame, 'informe usuário e senha');
+    expect(login).not.toHaveBeenCalled();
+  });
+});
