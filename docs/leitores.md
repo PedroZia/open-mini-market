@@ -41,9 +41,26 @@ dígitos saem iguais, mas os símbolos não. O padrão do PDV é US nas duas pon
 
 ## Etiqueta de balança (produto pesável)
 
-O que a balança imprime tem de bater com a configuração da loja (tabela `stores`, colunas
-`internal_barcode_prefix`, `internal_code_length`, `scale_embedded_field` e
-`scale_embedded_decimals`; no MVP valem os defaults da MATRIZ). Com os defaults, a etiqueta é:
+O que o servidor entende tem de bater com o que a balança imprime. O formato é **premissa do
+parser** — não há dígito verificador conferido nem leitura do manual do equipamento:
+
+- **13 dígitos** no total (EAN-13): `prefixo` + `código interno` + `valor embutido`.
+- O `prefixo` (`internal_barcode_prefix`) abre o namespace da etiqueta: código de 13 dígitos que
+  começa com ele **é** tentativa de etiqueta — se não couber no formato configurado, o PDV responde
+  `422 INVALID_INTERNAL_BARCODE` em vez de "produto não encontrado".
+- O `código interno` tem **exatamente** `internal_code_length` dígitos, logo depois do prefixo.
+- O resto é o `valor embutido`: um inteiro cru escalado por `scale_embedded_decimals` (com 3 casas,
+  `0001234` = 1,234 kg). `scale_embedded_field` diz o que ele significa: `WEIGHT` é peso em kg (vai
+  direto para a quantidade do item) e `PRICE` é o total em reais (o servidor divide pelo preço do
+  produto para achar o peso).
+- **O dígito verificador do EAN-13 não é conferido** pelo sistema. Se as balanças da loja o
+  imprimirem no meio do código, o formato acima não descreve a etiqueta — confira com uma etiqueta
+  real da loja antes de fechar a configuração (e ajuste a balança ou este guia).
+- Valor embutido zero ou negativo é recusado: `422 INVALID_INTERNAL_BARCODE`.
+- O ajuste é dos dois lados: ou a balança imprime no formato da configuração da loja, ou a
+  configuração da loja passa a descrever o formato da balança.
+
+Com os defaults da MATRIZ, a etiqueta é:
 
 ```text
 2 00042 0001234
@@ -52,17 +69,40 @@ O que a balança imprime tem de bater com a configuração da loja (tabela `stor
 `--------------- prefixo da etiqueta: 2
 ```
 
-- **13 dígitos** no total (EAN-13): prefixo + código interno + valor embutido.
-- `scale_embedded_field` decide o que o valor embutido significa: `WEIGHT` é peso em kg (vai direto
-  para a quantidade do item) e `PRICE` é o total em reais (o servidor divide pelo preço do produto
-  para achar o peso).
-- O código interno gravado no produto (`products.internal_code`) tem de ser **exatamente** os dígitos
-  que a balança imprime, com os zeros à esquerda: `00042`, não `42`.
-- Valor embutido zero ou negativo é recusado: `422 INVALID_INTERNAL_BARCODE`.
-- **O dígito verificador do EAN-13 não é conferido** pelo sistema: o formato é prefixo + PLU + valor,
-  como acima. Se o leitor tiver conferência de DV ligada, tudo bem — mas não é o PDV que a faz.
-- O ajuste é dos dois lados: ou a balança imprime no formato da configuração da loja, ou a
-  configuração da loja passa a descrever o formato da balança.
+### Como configurar a loja (SQL)
+
+**Não existe endpoint nem permissão para configurar a balança**: os parâmetros são colunas da tabela
+`stores` e mudam por SQL, no banco de dev/produção (é configuração de instalação, não operação de
+PDV). Com os defaults da MATRIZ:
+
+```sql
+update stores
+   set internal_barcode_prefix  = '2',      -- prefixo da etiqueta (namespace do parser)
+       internal_code_length     = 5,        -- dígitos do código interno (PLU), logo após o prefixo
+       scale_embedded_field     = 'WEIGHT', -- WEIGHT = peso em kg; PRICE = total em reais
+       scale_embedded_decimals  = 3         -- casas decimais do valor embutido
+ where code = 'MATRIZ';
+```
+
+`internal_barcode_prefix` e `internal_code_length` descrevem a etiqueta; mudá-los depois de os
+produtos estarem cadastrados exige reconferir os códigos internos já gravados (a etiqueta passa a ser
+lida com o tamanho novo e os códigos antigos não casam mais).
+
+### Como gravar o código interno no produto
+
+O `internalCode` entra pelo cadastro (`POST /api/v1/products`) e pela edição
+(`PUT /api/v1/products/{id}`, com `If-Match`) — os dois exigem a permissão `product.write`
+(OPERADOR não tem). No `PUT` o campo nulo (ou ausente) **limpa** o código, como descrição e
+quantidade mínima.
+
+- Só **dígitos**: `trim`, sem espaços internos; vazio é produto sem código interno.
+- O servidor completa com **zeros à esquerda** até `internal_code_length`: digitar `42` grava
+  `00042`. É o que mantém o mesmo produto resolvendo pela etiqueta (`2` + `00042` + valor) e pelo
+  código interno digitado no bipe (`42` ou `00042`).
+- Mais dígitos que o configurado ou caractere não numérico → `400 VALIDATION_ERROR` apontando
+  `internalCode` em `errors[]`.
+- Código já usado por produto vivo → `409 INTERNAL_CODE_ALREADY_EXISTS` (desativar o produto libera
+  o código, como acontece com o barcode).
 
 ## Autoteste do leitor (`F11`)
 
@@ -109,4 +149,6 @@ Checklist, em ordem:
 - `terminal/src/ui/ReaderSelfTestScreen.tsx` — a tela do `F11`.
 - `catalog/domain/ScaleLabel.java` e `catalog/application/BarcodeResolver.java` — a interpretação do
   código, que é sempre do servidor (BR-14).
+- `catalog/application/InternalCodeNormalizer.java` — a regra do código interno (só dígitos, zeros à
+  esquerda até `internal_code_length`), a mesma no cadastro e no bipe.
 - `docs/plano-tecnico.md` §11.3 — UX de teclado e leitor.
