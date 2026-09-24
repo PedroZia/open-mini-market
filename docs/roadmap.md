@@ -543,7 +543,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** valores conferem após abrir + sangria + suprimento.
   **Commit:** `feat(cash): consulta sessao de caixa atual`
 
-- [ ] **609 — Caso de uso de sangria**
+- [x] **609 — Caso de uso de sangria**
   **Objetivo:** retirar dinheiro com rastro. **Depende:** 605
   **Implementar:** valida sessão aberta, valor > 0, motivo obrigatório; permissão `cash.withdrawal`; movimento negativo; auditoria `CASH_WITHDRAWAL` (valor, motivo, saldo esperado antes/depois); alerta (não bloqueio) se valor > saldo esperado.
   **Testes/aceite:** sucesso registra movimento e auditoria; OPERADOR sem permissão → 403; motivo vazio → 400.
