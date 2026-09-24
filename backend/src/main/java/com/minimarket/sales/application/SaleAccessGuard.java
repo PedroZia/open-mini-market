@@ -17,7 +17,9 @@ import java.util.UUID;
  * pela API a partir do {@code OperationContext} — nunca do corpo da requisição — e é comparado com
  * o caixa que abriu a venda; sessão sem vínculo de caixa ou vinculada a outro caixa é 403 {@code
  * ACCESS_DENIED}. A consulta de venda (passo 812) usa a mesma posse na variante {@link
- * #requireVisible(UUID, UUID, boolean)}, que abre exceção só para quem tem {@code report.read}.
+ * #requireVisible(UUID, UUID, boolean)}, que abre exceção só para quem tem {@code report.read}, e a
+ * conclusão (passo 906) na variante estática {@link #requireOwned(Sale, UUID)}, sobre o agregado
+ * que o lock pessimista já trouxe.
  *
  * <p>A ordem das checagens é deliberada: venda inexistente é 404 {@code SALE_NOT_FOUND} para
  * qualquer sessão, e só depois a posse é conferida — quem não é dono não descobre status nem itens
@@ -44,9 +46,19 @@ public class SaleAccessGuard {
                 () ->
                     new NotFoundException(
                         ErrorCode.SALE_NOT_FOUND, "venda %s não encontrada".formatted(saleId)));
+    return requireOwned(sale, cashRegisterId);
+  }
+
+  /**
+   * A mesma posse de {@link #requireOwned(UUID, UUID)} para a venda que já está em mãos: a
+   * conclusão (passo 906) trava a linha com {@code lockById} e reler por {@code findById} perderia
+   * o lock, mas a regra é uma só. 403 {@code ACCESS_DENIED} quando o caixa da sessão é nulo ou não
+   * é o caixa que abriu a venda.
+   */
+  public static Sale requireOwned(Sale sale, UUID cashRegisterId) {
     if (cashRegisterId == null || !cashRegisterId.equals(sale.cashRegisterId())) {
       throw new ForbiddenException(
-          "venda %s não pertence ao caixa da sessão autenticada".formatted(saleId));
+          "venda %s não pertence ao caixa da sessão autenticada".formatted(sale.id()));
     }
     return sale;
   }

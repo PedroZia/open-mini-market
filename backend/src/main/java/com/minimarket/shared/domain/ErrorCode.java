@@ -48,6 +48,7 @@ public enum ErrorCode {
   DISCOUNT_LIMIT_EXCEEDED(422, "Desconto acima do limite da loja"),
   PAYMENT_EXCEEDS_TOTAL(422, "Pagamento acima do restante da venda"),
   INVALID_TENDERED_AMOUNT(422, "Valor entregue inválido"),
+  PAYMENT_INSUFFICIENT(422, "Pagamento insuficiente"),
   ACCOUNT_LOCKED(423, "Conta bloqueada"),
   IF_MATCH_REQUIRED(428, "Cabeçalho If-Match obrigatório"),
   RATE_LIMITED(429, "Muitas requisições"),

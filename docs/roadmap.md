@@ -765,7 +765,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 201 com troco; replay idempotente não duplica; cancelamento recalcula `paidAmount`.
   **Commit:** `feat(sales): expoe pagamentos da venda`
 
-- [ ] **906 — Caso de uso `CompleteSale`** ⭐ núcleo do sistema
+- [x] **906 — Caso de uso `CompleteSale`** ⭐ núcleo do sistema
   **Objetivo:** concluir venda movendo estoque, caixa e auditoria na mesma transação. **Depende:** 905, 703, 611
   **Implementar:** valida `paidAmount ≥ total` (BR-05); obtém lock das linhas de estoque **ordenadas por `product_id`**; grava `SALE_OUT` por item via `StockService`; grava movimento `SALE` no caixa para pagamentos em dinheiro; status `COMPLETED` + `completed_at`; auditoria `SALE_COMPLETED` com totais e formas de pagamento; idempotente por estado e por chave.
   **Testes/aceite:** conclusão move estoque e caixa corretamente; pagamento insuficiente → 422 `PAYMENT_INSUFFICIENT`; concluir duas vezes → 409/replay; rollback total quando qualquer item falha.
