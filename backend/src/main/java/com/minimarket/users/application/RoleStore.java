@@ -1,6 +1,7 @@
 package com.minimarket.users.application;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -26,4 +27,14 @@ public interface RoleStore {
    * consulta pura, sem gravar nada.
    */
   long countActiveUsersWithRole(String roleCode);
+
+  /**
+   * Ids dos usuários vivos ({@code deleted_at} nulo), com {@code status = ACTIVE} e com o papel
+   * informado, travados para escrita ({@code select ... for update} nas linhas de {@code users})
+   * até o fim da transação do caso de uso. É o insumo da regra "não desativar o último ADMIN ativo"
+   * sob concorrência (passo 1008): dois disables simultâneos disputam o mesmo lock e o segundo
+   * reavalia a lista já sem o ADMIN que o vencedor desativou — o lock morre com a transação. Lista
+   * vazia quando não há ninguém.
+   */
+  List<UUID> lockActiveUserIdsWithRole(String roleCode);
 }

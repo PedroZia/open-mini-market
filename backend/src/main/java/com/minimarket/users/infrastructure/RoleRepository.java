@@ -5,6 +5,7 @@ import com.minimarket.users.application.RoleStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -92,6 +93,32 @@ public class RoleRepository implements RoleStore {
         .setParameter("code", roleCode)
         .setParameter("status", UserEntity.STATUS_ACTIVE)
         .getSingleResult();
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Mesmo filtro de {@link #countActiveUsersWithRole}, com {@code for update} nas linhas de
+   * {@code users}: a consulta trava os ADMINs ativos até o fim da transação do caso de uso, e dois
+   * disables simultâneos disputam o mesmo lock em vez de decidir sobre o mesmo conjunto
+   * desatualizado (passo 1008). A ordenação por id mantém a ordem de trava igual entre transações
+   * concorrentes.
+   */
+  @Override
+  public List<UUID> lockActiveUserIdsWithRole(String roleCode) {
+    return entityManager
+        .createQuery(
+            "select u from UserEntity u join u.roles r"
+                + " where r.code = :code and u.status = :status and u.deletedAt is null"
+                + " order by u.id",
+            UserEntity.class)
+        .setParameter("code", roleCode)
+        .setParameter("status", UserEntity.STATUS_ACTIVE)
+        .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+        .getResultList()
+        .stream()
+        .map(UserEntity::getId)
+        .toList();
   }
 
   /** Carrega as roles dos códigos pedidos; qualquer código desconhecido derruba a operação. */

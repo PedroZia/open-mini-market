@@ -258,6 +258,12 @@ class CreateUserUseCaseTest {
       throw new UnsupportedOperationException(
           "countActiveUsersWithRole não é usado por CreateUser");
     }
+
+    @Override
+    public List<UUID> lockActiveUserIdsWithRole(String roleCode) {
+      throw new UnsupportedOperationException(
+          "lockActiveUserIdsWithRole não é usado por CreateUser");
+    }
   }
 
   /** Dublê de {@link PasswordHasher}: devolve hash fixo e registra a senha crua recebida. */

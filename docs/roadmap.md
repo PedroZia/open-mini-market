@@ -843,7 +843,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `GET /users?active=abc` → 400 (não 404); `GET /sales?from=abc` e `?status=xyz` → 400; filtros válidos inalterados; regressões verdes.
   **Commit:** `fix(shared): responde 400 para filtros invalidos nas listagens`
 
-- [ ] **1008 — Último ADMIN sob concorrência**
+- [x] **1008 — Último ADMIN sob concorrência**
   **Objetivo:** impedir zerar os ADMINS em dois disables simultâneos. **Depende:** 112
   **Implementar:** `DisableUserUseCase.requireNotLastActiveAdmin` hoje é read-then-write (`countActiveUsersWithRole`); fechar com lock pessimista nos ADMINS ativos antes da checagem (ex.: novo método na `RoleStore` que carrega os ids dos ADMINs ativos com `PESSIMISTIC_WRITE`; a contagem revalida sob o lock); o perdedor recebe o 409 já existente (READ COMMITTED + lock: a segunda transação reavalia e vê 1).
   **Testes/aceite:** dois `disable` concorrentes de ADMINS distintos → exatamente um sucesso e um 409, sobra 1 ADMIN ativo (ExecutorService + latch, sem sleep; skill `teste-concorrencia`); o teste sequencial do 112 continua verde.

@@ -71,11 +71,17 @@ public class DisableUserUseCase {
   }
 
   /**
-   * Conta os ADMINs ativos antes de desativar: a partir do segundo a operação é permitida, porque
-   * ainda sobra um ADMIN para administrar o sistema.
+   * Trava os ADMINs ativos e decide sobre a lista travada (passo 1008): a checagem deixa de ser
+   * read-then-write — dois disables simultâneos não enxergam o mesmo "ainda há dois" e o perdedor,
+   * depois do commit do vencedor, reavalia e vê só o ADMIN que sobrou, recebendo o 409. A partir de
+   * dois ADMINs ativos a operação é permitida, porque ainda sobra um ADMIN para administrar o
+   * sistema.
    */
   private void requireNotLastActiveAdmin(UserSummary user) {
-    if (user.roles().contains(ADMIN_ROLE) && roleStore.countActiveUsersWithRole(ADMIN_ROLE) <= 1) {
+    if (!user.roles().contains(ADMIN_ROLE)) {
+      return;
+    }
+    if (roleStore.lockActiveUserIdsWithRole(ADMIN_ROLE).size() <= 1) {
       throw new ConflictException(
           ErrorCode.CONFLICT, "não é possível desativar o último ADMIN ativo");
     }
