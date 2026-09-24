@@ -619,7 +619,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** saldo sobe; custo atualizado quando informado; auditoria registrada.
   **Commit:** `feat(inventory): registra entrada de mercadoria`
 
-- [ ] **707 — Testes de concorrência de estoque**
+- [x] **707 — Testes de concorrência de estoque**
   **Objetivo:** provar consistência sob disputa. **Depende:** 703
   **Implementar:** testes: 20 ajustes simultâneos de −1 em saldo 20 → saldo final 0 e 20 movimentos coerentes; dois produtos em ordem invertida não geram deadlock (ordenação).
   **Testes/aceite:** testes verdes e determinísticos; nenhum deadlock detectado.
