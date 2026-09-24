@@ -741,7 +741,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** migration aplica; `amount > 0` garantido por check.
   **Commit:** `feat(sales): cria tabela de pagamentos`
 
-- [ ] **902 — Domínio de pagamento**
+- [x] **902 — Domínio de pagamento**
   **Objetivo:** regras de pagamento puras. **Depende:** 901
   **Implementar:** `Payment` + regras: soma de aprovados, troco apenas para `CASH` (`tendered − amount`), métodos válidos, `paidAmount`/`changeAmount` da venda, `isFullyPaid`.
   **Testes/aceite:** 8+ testes unitários (pagamento único, múltiplos, troco, insuficiente, pagamento maior que o total em cartão → recusado ou registrado conforme regra definida).
