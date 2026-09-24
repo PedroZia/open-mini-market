@@ -919,7 +919,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** etiqueta de peso gera item em kg com total correto; etiqueta de preço gera total igual ao embutido (tolerância R$ 0,01); código inválido → 422 `INVALID_INTERNAL_BARCODE`; testes com etiquetas reais das balanças da loja.
   **Commit:** `feat(sales): vende etiqueta de balanca no item da venda`
 
-- [ ] **1104c — Autoteste do leitor (F11)**
+- [x] **1104c — Autoteste do leitor (F11)**
   **Objetivo:** diagnosticar o leitor sem chamar suporte técnico. **Depende:** 1104a
   **Implementar:** tela `F11` com último código lido, intervalo entre caracteres, interpretação aplicada (GTIN/código interno/balança) e instruções de configuração do equipamento (sufixo `ENTER`, prefixo, simbologias, layout de teclado).
   **Testes/aceite:** tela exibe leitura e timing; `docs/leitores.md` com o guia de configuração dos modelos usados na loja.
