@@ -2,6 +2,7 @@ package com.minimarket.auth.api;
 
 import com.minimarket.auth.application.AuthenticateSessionUseCase;
 import com.minimarket.auth.application.AuthenticatedSession;
+import com.minimarket.auth.application.AuthorizationService;
 import com.minimarket.auth.domain.SessionClient;
 import com.minimarket.auth.domain.TokenHasher;
 import com.minimarket.shared.application.OperationContext;
@@ -41,8 +42,12 @@ import java.util.UUID;
 @ApplicationScoped
 public class BearerTokenIdentityProvider implements IdentityProvider<TokenAuthenticationRequest> {
 
-  /** Atributo da identidade com as permissões efetivas do usuário ({@code Set<String>}). */
-  public static final String PERMISSIONS_ATTRIBUTE = "permissions";
+  /**
+   * Atributo da identidade com as permissões efetivas do usuário ({@code Set<String>}). O nome mora
+   * em {@link AuthorizationService#PERMISSIONS_ATTRIBUTE} (auth/application) — este alias mantém as
+   * leituras existentes.
+   */
+  public static final String PERMISSIONS_ATTRIBUTE = AuthorizationService.PERMISSIONS_ATTRIBUTE;
 
   /**
    * Atributo da identidade com o id da sessão autenticada ({@code String}, UUID). O nome mora em

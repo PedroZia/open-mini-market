@@ -14,6 +14,7 @@ public enum ErrorCode {
   INVALID_CREDENTIALS(401, "Credenciais inválidas"),
   SESSION_EXPIRED(401, "Sessão expirada"),
   SESSION_IDLE_TIMEOUT(401, "Sessão expirada por inatividade"),
+  ACCESS_DENIED(403, "Acesso negado"),
   NOT_FOUND(404, "Recurso não encontrado"),
   USER_NOT_FOUND(404, "Usuário não encontrado"),
   ROLE_NOT_FOUND(404, "Papel não encontrado"),

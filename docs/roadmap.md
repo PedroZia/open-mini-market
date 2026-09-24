@@ -315,7 +315,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** cada evento gerado no cenário correspondente, com IP e `authSessionId`.
   **Commit:** `feat(audit): audita eventos de autenticacao`
 
-- [ ] **305 — `AuthorizationService` (deny by default)**
+- [x] **305 — `AuthorizationService` (deny by default)**
   **Objetivo:** um único ponto de checagem de permissão. **Depende:** 206
   **Implementar:** enum `Permission` com os códigos de §4.5; `AuthorizationService.require(permission)` e `has(permission)`; exceção `ForbiddenException` → 403 `ACCESS_DENIED`.
   **Testes/aceite:** unitário com identidade fake: permissão presente passa, ausente lança 403.
