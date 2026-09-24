@@ -451,11 +451,11 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** suíte de catálogo verde cobrindo permissões e auditoria.
   **Commit:** `test(catalog): cobre permissoes e auditoria do catalogo`
 
-- [ ] **414 — Índice trigram para busca por nome (se necessário)**
+- [x] **414 — Índice trigram para busca por nome (se necessário)**
   **Objetivo:** busca textual rápida em catálogo grande. **Depende:** 407
-  **Implementar:** `V8__products_search_index.sql` com `pg_trgm` + índice GIN em `name`; usar apenas se a busca atual (`ILIKE %x%`) mostrar custo alto em `EXPLAIN` com dados de teste (10 k produtos).
-  **Testes/aceite:** `EXPLAIN` deixa de fazer seq scan; busca continua correta.
-  **Commit:** `perf(catalog): adiciona indice trigram para busca de produtos`
+  **Implementar:** `V9__products_search_index.sql` com `pg_trgm` + índice GIN; usar apenas se a busca atual (`lower(name) like '%x%'`) mostrar custo alto em `EXPLAIN` com dados de teste (10 k produtos).
+  **Testes/aceite:** medição em 10 000 produtos (`analyze products`) → índice **não justificado**: busca `%leite%` (1000/10 000 linhas) = `Limit → Sort → Seq Scan`, 1,7 ms, 154 shared buffers (contagem idem; termos raros/largos 1,5–1,9 ms); fim a fim busca + contagem 5–7 ms no orçamento de 50 ms. GIN hipotético em `lower(name)`: 0,46 ms — economia não paga o custo de escrita/manutenção. Sem migration; se um dia for criada, será `V9__products_search_index.sql` indexando `lower(name)` (a query do 407 é `lower(p.name) like`, que não usa índice em `name` puro).
+  **Commit:** `perf(catalog): mede busca por nome e dispensa indice trigram`
 
 ---
 
