@@ -16,7 +16,8 @@ import org.hibernate.type.SqlTypes;
 /**
  * Mapeamento da tabela {@code audit_events} (§5.3). JPA explícito, sem Panache; a entidade não sai
  * do módulo — o que atravessa a porta {@link com.minimarket.audit.application.AuditEventStore} é o
- * record {@code NewAuditEvent} (§2.2).
+ * record {@code NewAuditEvent} e o que a consulta (passo 1001) devolve é o record {@code
+ * AuditEventSummary} (§2.2).
  *
  * <p>Sem FK e sem associação de propósito (a migration explica): o log não bloqueia nem é bloqueado
  * pela operação de negócio, e os ids guardados são históricos. {@code cash_session_id} fica nula
@@ -120,5 +121,70 @@ public class AuditEventEntity {
     this.reason = reason;
     this.details = details;
     this.ip = ip;
+  }
+
+  /** Identity do banco, visível à consulta de auditoria (passo 1001) para o desempate da ordem. */
+  public Long getId() {
+    return id;
+  }
+
+  public Instant getOccurredAt() {
+    return occurredAt;
+  }
+
+  public UUID getStoreId() {
+    return storeId;
+  }
+
+  public UUID getActorUserId() {
+    return actorUserId;
+  }
+
+  public String getActorUsername() {
+    return actorUsername;
+  }
+
+  public UUID getAuthSessionId() {
+    return authSessionId;
+  }
+
+  public UUID getCashSessionId() {
+    return cashSessionId;
+  }
+
+  public UUID getCashRegisterId() {
+    return cashRegisterId;
+  }
+
+  public String getAction() {
+    return action;
+  }
+
+  public String getEntityType() {
+    return entityType;
+  }
+
+  public UUID getEntityId() {
+    return entityId;
+  }
+
+  public String getSource() {
+    return source;
+  }
+
+  public String getRequestId() {
+    return requestId;
+  }
+
+  public String getReason() {
+    return reason;
+  }
+
+  public Map<String, Object> getDetails() {
+    return details;
+  }
+
+  public InetAddress getIp() {
+    return ip;
   }
 }

@@ -799,7 +799,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 10 — Auditoria (consulta e garantias)
 
-- [ ] **1001 — Consulta de auditoria**
+- [x] **1001 — Consulta de auditoria**
   **Objetivo:** investigar operações. **Depende:** 303
   **Implementar:** `GET /api/v1/audit-events` com filtros (`entityType`, `entityId`, `actorUserId`, `action`, `cashSessionId`, `from`, `to`) + paginação; permissão `audit.read`.
   **Testes/aceite:** filtros combinados funcionam; OPERADOR → 403; ordenação decrescente por `occurred_at`.
