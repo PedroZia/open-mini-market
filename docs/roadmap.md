@@ -719,10 +719,16 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200; venda concluída → 409 `SALE_ALREADY_COMPLETED`; motivo obrigatório; auditoria.
   **Commit:** `feat(sales): cancela venda aberta`
 
-- [ ] **814 — Concorrência e auditoria de vendas**
-  **Objetivo:** fechar o módulo com garantias. **Depende:** 808–813
-  **Implementar:** teste de dois `addItem` simultâneos na mesma venda (lock otimista → um recebe 409 `CONCURRENT_MODIFICATION`); suíte de auditoria dos eventos de venda.
-  **Testes/aceite:** testes verdes; nenhum item perdido.
+- [ ] **814a — Concorrência de vendas**
+  **Objetivo:** provar o lock otimista da venda sob disputa. **Depende:** 808–813
+  **Implementar:** `SaleConcurrencyTest` (PostgreSQL real, `ExecutorService` + `CountDownLatch`, sem `sleep`): determinístico — thread com transação própria lê a venda e segura enquanto o vencedor comita; a inclusão vencida, na mesma transação da leitura, vira 409 `CONCURRENT_MODIFICATION` sem escrita parcial (item do vencedor intacto, item do perdedor ausente); corrida real de K rodadas de dois `addItem` simultâneos na mesma venda e no mesmo produto — nunca os dois falham, toda falha é `CONCURRENT_MODIFICATION`, quantidade final = quantidade × sucessos, um `SALE_ITEM_ADDED` por sucesso e nenhum item perdido. Passo dividido do 814 original (diff estimado acima de ~300 linhas); a auditoria é o 814b.
+  **Testes/aceite:** testes verdes e repetidos 5×; nenhum item perdido.
+  **Commit:** `test(sales): cobre concorrencia de vendas`
+
+- [ ] **814b — Auditoria de vendas**
+  **Objetivo:** fechar o módulo com o rastro completo. **Depende:** 814a
+  **Implementar:** suíte de auditoria do fluxo real da API — `SALE_CREATED`, `SALE_ITEM_ADDED`, `SALE_ITEM_QUANTITY_CHANGED`, `SALE_ITEM_REMOVED`, `SALE_DISCOUNT_APPLIED`, `SALE_DISCOUNT_REMOVED`, `SALE_CUSTOMER_LINKED`, `SALE_CUSTOMER_UNLINKED` e `SALE_CANCELLED` — conferindo `action` + `entity_id` + `details` essenciais, um evento por operação, nunca contagem global (padrão do `CashPermissionsAuditTest`).
+  **Testes/aceite:** um evento por operação do fluxo, no alvo e com os details essenciais; sem evento nas tentativas barradas.
   **Commit:** `test(sales): cobre concorrencia e auditoria de vendas`
 
 ---
