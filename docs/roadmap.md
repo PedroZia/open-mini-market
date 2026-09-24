@@ -501,7 +501,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** dois `INSERT` de sessão aberta no mesmo caixa → o segundo falha por violação de índice único.
   **Commit:** `feat(cash): cria sessoes e movimentos de caixa`
 
-- [ ] **604 — Entidades e repositórios de caixa**
+- [x] **604 — Entidades e repositórios de caixa**
   **Objetivo:** persistir sessão e movimentos. **Depende:** 603
   **Implementar:** `CashSessionEntity`, `CashMovementEntity` + repos (`findOpenByRegister`, `findById`, `insert`, `insertMovement`, `sumByType`, `lockById`).
   **Testes/aceite:** teste de integração das operações; `lockById` bloqueia concorrente (teste com duas threads).
