@@ -789,7 +789,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** valores batem com a soma dos movimentos; venda em cartão não afeta dinheiro esperado.
   **Commit:** `feat(cash): considera vendas no fechamento do caixa`
 
-- [ ] **910 — Teste de fluxo completo (API)**
+- [x] **910 — Teste de fluxo completo (API)**
   **Objetivo:** provar o MVP ponta a ponta no backend. **Depende:** 907, 909
   **Implementar:** teste de integração único: login → abrir caixa → criar venda → 3 itens (barcode) → desconto → 2 pagamentos → conclusão → conferir estoque, movimento de caixa e trilha de auditoria completa.
   **Testes/aceite:** teste verde e legível (documenta o fluxo real); serve de referência para TUI e Web.
