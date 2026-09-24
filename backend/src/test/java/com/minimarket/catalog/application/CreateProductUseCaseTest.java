@@ -270,6 +270,11 @@ class CreateProductUseCaseTest {
     }
 
     @Override
+    public long count(String search, UUID categoryId, Boolean active) {
+      throw new UnsupportedOperationException("count não é usado por CreateProduct");
+    }
+
+    @Override
     public Optional<ProductSummary> update(
         UUID id,
         String name,

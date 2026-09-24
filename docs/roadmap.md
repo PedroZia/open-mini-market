@@ -409,7 +409,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 201; 409 `BARCODE_ALREADY_EXISTS`; 400 validações; 403 OPERADOR.
   **Commit:** `feat(catalog): expoe criacao de produto`
 
-- [ ] **407 — API `GET /api/v1/products`**
+- [x] **407 — API `GET /api/v1/products`**
   **Objetivo:** listar/buscar produtos. **Depende:** 404
   **Implementar:** paginação + filtros `search`, `categoryId`, `active`, `sort`; permissão `product.read`.
   **Testes/aceite:** busca por trecho do nome; filtro por categoria; paginação correta.

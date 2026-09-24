@@ -2,19 +2,26 @@ package com.minimarket.catalog.api;
 
 import com.minimarket.catalog.application.CreateProductCommand;
 import com.minimarket.catalog.application.CreateProductUseCase;
+import com.minimarket.catalog.application.ListProductsUseCase;
+import com.minimarket.catalog.application.ProductPage;
 import com.minimarket.catalog.application.ProductSummary;
+import com.minimarket.shared.api.PageResponse;
 import com.minimarket.shared.api.RequirePermission;
 import com.minimarket.shared.domain.Permission;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import java.util.UUID;
 
 /**
  * Produtos (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a resposta — zero
@@ -33,6 +40,8 @@ public class ProductsResource {
   public static final String PATH = "/api/v1/products";
 
   @Inject CreateProductUseCase createProductUseCase;
+
+  @Inject ListProductsUseCase listProductsUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -62,6 +71,32 @@ public class ProductsResource {
     return Response.created(uriInfo.getAbsolutePathBuilder().path(created.id().toString()).build())
         .entity(toResponse(created))
         .build();
+  }
+
+  /**
+   * Lista paginada com busca no nome, filtro de categoria e de status (§9.1 e §9.3). {@code sort}
+   * aceita {@code name}, {@code price} ou {@code createdAt}, com {@code ,asc|desc} opcional
+   * (default {@code name,asc}); {@code size} acima de 100 é limitado. Parâmetro fora da regra → 400
+   * {@code VALIDATION_ERROR} do caso de uso.
+   */
+  @GET
+  @RequirePermission(Permission.PRODUCT_READ)
+  @Produces(MediaType.APPLICATION_JSON)
+  public PageResponse<ProductResponse> list(
+      @QueryParam("search") String search,
+      @QueryParam("categoryId") UUID categoryId,
+      @QueryParam("active") Boolean active,
+      @QueryParam("sort") String sort,
+      @QueryParam("page") @DefaultValue("0") int page,
+      @QueryParam("size") @DefaultValue("20") int size) {
+    ProductPage products =
+        listProductsUseCase.execute(search, categoryId, active, sort, page, size);
+    return new PageResponse<>(
+        products.items().stream().map(ProductsResource::toResponse).toList(),
+        products.page(),
+        products.size(),
+        products.totalItems(),
+        products.totalPages());
   }
 
   private static ProductResponse toResponse(ProductSummary product) {

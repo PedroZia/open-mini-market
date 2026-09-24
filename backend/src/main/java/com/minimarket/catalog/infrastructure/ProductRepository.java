@@ -146,10 +146,8 @@ public class ProductRepository implements ProductStore {
     TypedQuery<ProductEntity> query =
         entityManager
             .createQuery(
-                "select p from ProductEntity p where p.deletedAt is null"
-                    + categoryClause(categoryId)
-                    + statusClause(active)
-                    + termClause(hasTerm)
+                "select p from ProductEntity p where "
+                    + liveFilters(categoryId, active, hasTerm)
                     + " order by "
                     + orderBy(sort, ascending)
                     + ", p.id",
@@ -158,6 +156,24 @@ public class ProductRepository implements ProductStore {
             .setMaxResults(size);
     applyFilters(query, search, categoryId, active, hasTerm);
     return query.getResultList().stream().map(ProductRepository::toSummary).toList();
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Conta com as mesmas cláusulas da busca ({@link #liveFilters}): o {@code totalItems} não pode
+   * divergir do que {@link #search} devolve para os mesmos filtros.
+   */
+  @Override
+  public long count(String search, UUID categoryId, Boolean active) {
+    boolean hasTerm = hasTerm(search);
+    TypedQuery<Long> query =
+        entityManager.createQuery(
+            "select count(p) from ProductEntity p where "
+                + liveFilters(categoryId, active, hasTerm),
+            Long.class);
+    applyFilters(query, search, categoryId, active, hasTerm);
+    return query.getSingleResult();
   }
 
   /**
@@ -202,6 +218,17 @@ public class ProductRepository implements ProductStore {
 
   private static boolean hasTerm(String search) {
     return search != null && !search.isBlank();
+  }
+
+  /**
+   * Cláusulas comuns da busca e da contagem: produto vivo e os filtros opcionais. Fonte única para
+   * a contagem não divergir da lista.
+   */
+  private static String liveFilters(UUID categoryId, Boolean active, boolean hasTerm) {
+    return "p.deletedAt is null"
+        + categoryClause(categoryId)
+        + statusClause(active)
+        + termClause(hasTerm);
   }
 
   private static String categoryClause(UUID categoryId) {

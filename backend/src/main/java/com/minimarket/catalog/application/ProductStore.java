@@ -44,6 +44,12 @@ public interface ProductStore {
       int size);
 
   /**
+   * Total de produtos não deletados que casam com os filtros de {@link #search} (sem ordenação nem
+   * paginação), para o {@code totalItems} e o {@code totalPages} da página.
+   */
+  long count(String search, UUID categoryId, Boolean active);
+
+  /**
    * Grava nome, categoria, unidade, descrição e quantidade mínima do produto não deletado — preço
    * (passo 411), barcode (imutável) e status (passo 412) não passam por aqui. Devolve a projeção já
    * atualizada, com o {@code version} novo para o {@code If-Match} seguinte; vazio quando não

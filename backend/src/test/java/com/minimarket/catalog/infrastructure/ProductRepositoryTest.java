@@ -162,6 +162,35 @@ class ProductRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
+  @DisplayName("count conta com os mesmos filtros da busca, sem ordenação nem paginação")
+  void countsWithTheSameFiltersAsSearch() {
+    UUID bebidas = category("Bebidas");
+    UUID limpeza = category("Limpeza");
+    insert("Arroz 5kg", "7891000000017", "24.90", bebidas);
+    insert("Feijão 1kg", "7891000000024", "8.49", bebidas);
+    UUID detergente = insert("Detergente 500ml", "7891000000031", "3.79", limpeza);
+    setActive(detergente, false);
+
+    assertThat(productRepository.count(null, bebidas, null)).isEqualTo(2);
+    assertThat(productRepository.count("arroz", bebidas, null)).isEqualTo(1);
+    assertThat(productRepository.count(null, bebidas, true)).isEqualTo(2);
+    assertThat(productRepository.count(null, bebidas, false)).isZero();
+    assertThat(productRepository.count(null, limpeza, false)).isEqualTo(1);
+    assertThat(productRepository.count("sabão", bebidas, null)).isZero();
+
+    // A contagem não pode divergir da lista para os mesmos filtros: é o totalItems da página.
+    assertThat(productRepository.count("arroz", bebidas, null))
+        .isEqualTo(search("arroz", bebidas, null, ProductSort.NAME, true).size());
+
+    // Soft-deletado nunca conta, como também não aparece na busca.
+    productRepository.softDelete(detergente);
+    entityManager.flush();
+    entityManager.clear();
+    assertThat(productRepository.count(null, limpeza, null)).isZero();
+  }
+
+  @Test
+  @TestTransaction
   @DisplayName("search ordena por nome, preço e criação, nas duas direções")
   void ordersByPriceNameAndCreation() {
     UUID arroz = insert("Arroz 5kg", null, "24.90", null);
