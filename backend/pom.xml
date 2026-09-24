@@ -87,6 +87,15 @@
       <artifactId>quarkus-security</artifactId>
     </dependency>
 
+    <!--
+      Job diário da limpeza de idempotência (passo 1004): extensão oficial do Quarkus com o
+      @Scheduled e o agendador em memória (o Quartz é para tarefa persistente/clusterizada).
+    -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-scheduler</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>com.github.f4b6a3</groupId>
       <artifactId>uuid-creator</artifactId>

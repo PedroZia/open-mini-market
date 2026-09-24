@@ -25,4 +25,11 @@ public interface IdempotencyKeyStore {
    * duas chamadas simultâneas, que quem chamou resolve relendo.
    */
   void insert(NewIdempotencyRecord record, Instant expiresAt);
+
+  /**
+   * Apaga as chaves vencidas até o instante informado e devolve quantas linhas saíram — a limpeza
+   * diária do passo 1004 usa a contagem só para o log. O corte é inclusivo ({@code expires_at <=
+   * instant}): a chave que venceu exatamente no instante do corte também sai.
+   */
+  int deleteExpiredBefore(Instant instant);
 }

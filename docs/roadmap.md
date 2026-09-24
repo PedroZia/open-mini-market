@@ -817,7 +817,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** consultas por entidade e por período usam índice (sem seq scan).
   **Commit:** `perf(audit): valida indices da consulta de auditoria`
 
-- [ ] **1004 — Limpeza de chaves de idempotência**
+- [x] **1004 — Limpeza de chaves de idempotência**
   **Objetivo:** evitar crescimento infinito. **Depende:** 806
   **Implementar:** job agendado (`@Scheduled`) diário removendo `idempotency_keys` expiradas (24 h) + teste com relógio controlado.
   **Testes/aceite:** chave expirada é removida; chave válida permanece.

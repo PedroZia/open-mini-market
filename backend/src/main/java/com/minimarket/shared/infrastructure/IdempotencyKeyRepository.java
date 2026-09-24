@@ -53,6 +53,21 @@ public class IdempotencyKeyRepository implements IdempotencyKeyStore {
   }
 
   /**
+   * {@inheritDoc}
+   *
+   * <p>Bulk delete em JPQL: apaga por {@code expires_at} sem carregar entidade nenhuma — a
+   * varredura usa o índice {@code ix_idempotency_keys_expires_at} da V14. A transação é de quem
+   * chama (o caso de uso da limpeza), como no resto da porta.
+   */
+  @Override
+  public int deleteExpiredBefore(Instant instant) {
+    return entityManager
+        .createQuery("delete from IdempotencyKeyEntity k where k.expiresAt <= :instant")
+        .setParameter("instant", instant)
+        .executeUpdate();
+  }
+
+  /**
    * A leitura do guard não é atômica: entre ela e este INSERT, outra chamada da mesma chave pode
    * gravar. O flush antecipado faz a violação da PK aparecer aqui e virar o 409 do caminho comum; a
    * releitura de quem chamou (fora da transação que morreu) enxerga o vencedor já comitado.

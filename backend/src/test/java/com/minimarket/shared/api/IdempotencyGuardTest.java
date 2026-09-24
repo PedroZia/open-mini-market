@@ -311,5 +311,11 @@ class IdempotencyGuardTest {
               record.path(),
               record.userId()));
     }
+
+    /** O guard não limpa chaves: a limpeza é do passo 1004, com dublê próprio. */
+    @Override
+    public int deleteExpiredBefore(Instant instant) {
+      throw new UnsupportedOperationException("o dublê do guard não limpa chaves");
+    }
   }
 }

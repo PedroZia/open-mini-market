@@ -23,6 +23,7 @@ versões seguem a estável do momento da instalação). Links verificados em 202
 | --- | --- |
 | [Guia do Quarkus 3.33 (versionado)](https://quarkus.io/version/3.33/guides/) | ponto de entrada; **sempre prefira esta URL à versão sem versão** |
 | [Quarkus — Hibernate ORM](https://quarkus.io/guides/hibernate-orm) | mapeamento JPA, `@Transactional`, persistência |
+| [Quarkus — Scheduler](https://quarkus.io/version/3.33/guides/scheduler) | `@Scheduled`, cron (Quartz por padrão), `quarkus.scheduler.enabled` |
 | [Quarkus — Flyway](https://quarkus.io/guides/flyway) | configuração de migration, `migrate-at-start`, perfis |
 | [Quarkus — REST](https://quarkus.io/guides/rest) | endpoints, Jakarta REST, serialização |
 | [Quarkus — testes](https://quarkus.io/guides/getting-started-testing) | `@QuarkusTest`, injeção em teste, Dev Services |
