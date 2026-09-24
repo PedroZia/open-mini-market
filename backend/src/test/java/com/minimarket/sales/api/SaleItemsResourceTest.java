@@ -126,6 +126,9 @@ class SaleItemsResourceTest extends IntegrationTestBase {
             "operatorUserId",
             "customerId",
             "subtotal",
+            "discountType",
+            "discountValue",
+            "discountReason",
             "discountAmount",
             "total",
             "itemCount",
@@ -134,8 +137,11 @@ class SaleItemsResourceTest extends IntegrationTestBase {
             "items");
     assertThat(body.get("id")).isEqualTo(saleId.toString());
     assertThat(body.get("status")).isEqualTo("OPEN");
-    assertThat(body.get("customerId")).as("cliente é do passo 811").isNull();
+    assertThat(body.get("customerId")).as("venda sem cliente vinculado").isNull();
     assertThat(body.get("completedAt")).isNull();
+    assertThat(body.get("discountType")).as("venda sem desconto").isNull();
+    assertThat(body.get("discountValue")).isNull();
+    assertThat(body.get("discountReason")).isNull();
     assertThat(decimal(body, "subtotal")).isEqualByComparingTo("19.80");
     assertThat(decimal(body, "discountAmount")).isEqualByComparingTo("0.00");
     assertThat(decimal(body, "total")).isEqualByComparingTo("19.80");

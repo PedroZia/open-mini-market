@@ -2,12 +2,20 @@ package com.minimarket.sales.api;
 
 import com.minimarket.sales.application.AddSaleItemCommand;
 import com.minimarket.sales.application.AddSaleItemUseCase;
+import com.minimarket.sales.application.ApplyDiscountCommand;
+import com.minimarket.sales.application.ApplyDiscountUseCase;
 import com.minimarket.sales.application.ChangeSaleItemQuantityCommand;
 import com.minimarket.sales.application.ChangeSaleItemQuantityUseCase;
 import com.minimarket.sales.application.CreateSaleCommand;
 import com.minimarket.sales.application.CreateSaleUseCase;
+import com.minimarket.sales.application.LinkCustomerCommand;
+import com.minimarket.sales.application.LinkCustomerUseCase;
+import com.minimarket.sales.application.RemoveDiscountCommand;
+import com.minimarket.sales.application.RemoveDiscountUseCase;
 import com.minimarket.sales.application.RemoveSaleItemCommand;
 import com.minimarket.sales.application.RemoveSaleItemUseCase;
+import com.minimarket.sales.application.UnlinkCustomerCommand;
+import com.minimarket.sales.application.UnlinkCustomerUseCase;
 import com.minimarket.sales.domain.Sale;
 import com.minimarket.sales.domain.SaleItem;
 import com.minimarket.shared.api.IdempotencyGuard;
@@ -22,6 +30,7 @@ import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.HttpMethod;
 import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -64,6 +73,15 @@ import java.util.UUID;
  * CASH_SESSION_REQUIRED}, ambos do caso de uso. O 201 da abertura é <em>sem</em> {@code Location}:
  * a rota de leitura da venda só nasce no passo 812, e o corpo já traz o id — apontar para uma rota
  * inexistente seria um contrato falso.
+ *
+ * <p>O desconto e o cliente (passo 811b) seguem o mesmo desenho: {@code PUT} aplica e {@code
+ * DELETE} tira, e os quatro respondem 200 com a {@link SaleDetailResponse} recalculada (BR-02,
+ * BR-12). As rotas de desconto exigem {@code sale.discount.apply} (BR-04) — desfazer um desconto é
+ * tão sensível quanto concedê-lo, a mesma escolha do caso de uso do 810 — e as de cliente, {@code
+ * sale.create}: vincular cliente é operar a venda, como incluir item. Nenhuma das quatro pede
+ * {@code Idempotency-Key} (§8 só a exige em {@code POST /sales}, pagamentos, conclusão,
+ * cancelamento e dinheiro): repetir o gesto é do operador, e o {@code DELETE} sem o que tirar é
+ * no-op (200, sem evento).
  */
 @Path(SalesResource.PATH)
 public class SalesResource {
@@ -81,6 +99,18 @@ public class SalesResource {
 
   /** Remoção de item (passo 809a): a rota que a expõe nasce neste passo. */
   @Inject RemoveSaleItemUseCase removeSaleItemUseCase;
+
+  /** Desconto da venda (passo 810): a rota que o expõe nasce no 811b. */
+  @Inject ApplyDiscountUseCase applyDiscountUseCase;
+
+  /** Remoção do desconto (passo 810): a rota que a expõe nasce no 811b. */
+  @Inject RemoveDiscountUseCase removeDiscountUseCase;
+
+  /** Vínculo de cliente (passo 811a): a rota que o expõe nasce neste passo. */
+  @Inject LinkCustomerUseCase linkCustomerUseCase;
+
+  /** Desvínculo de cliente (passo 811a): a rota que o expõe nasce neste passo. */
+  @Inject UnlinkCustomerUseCase unlinkCustomerUseCase;
 
   /** Idempotência da abertura (§8, passo 807): a chave identifica o gesto de abrir a venda. */
   @Inject IdempotencyGuard idempotencyGuard;
@@ -184,6 +214,97 @@ public class SalesResource {
     return toDetailResponse(sale);
   }
 
+  /**
+   * Aplica o desconto na venda aberta (passo 811b) e devolve 200 com a venda inteira e o total
+   * recalculado. O tipo e o valor chegam como o operador os digitou e quem calcula o desconto e o
+   * total é o servidor (BR-03, BR-12); o motivo é obrigatório (BR-04).
+   *
+   * <p>Sem {@code sale.discount.apply} o interceptor do {@code RequirePermission} responde 403
+   * {@code ACCESS_DENIED} antes de o corpo do método rodar — é o que separa o OPERADOR (que opera a
+   * venda, mas não desconta) do GERENTE. Venda inexistente é 404 {@code SALE_NOT_FOUND}; venda de
+   * outro caixa é 403 {@code ACCESS_DENIED}; venda fora de {@code OPEN} é 409 {@code
+   * SALE_NOT_OPEN}; acima do limite da loja é 422 {@code DISCOUNT_LIMIT_EXCEEDED}. Tipo, valor ou
+   * motivo ausentes são 400 {@code VALIDATION_ERROR} da forma, validada antes do caso de uso — que
+   * repete as três checagens como backstop.
+   */
+  @PUT
+  @Path("/{id}/discount")
+  @RequirePermission(Permission.SALE_DISCOUNT_APPLY)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public SaleDetailResponse applyDiscount(
+      @PathParam("id") UUID id, @Valid SaleDiscountRequest request) {
+    Sale sale =
+        applyDiscountUseCase.execute(
+            new ApplyDiscountCommand(
+                id,
+                operationContext.cashRegisterId(),
+                request.type(),
+                request.value(),
+                request.reason()));
+    return toDetailResponse(sale);
+  }
+
+  /**
+   * Tira o desconto da venda aberta (passo 811b) e devolve 200 com a venda inteira e o total de
+   * volta ao subtotal (BR-02/BR-03). Exige a mesma permissão de quem aplica, {@code
+   * sale.discount.apply}: desfazer um desconto é tão sensível quanto concedê-lo.
+   *
+   * <p>Venda sem desconto é no-op (200, sem evento), então repetir o {@code DELETE} é inofensivo.
+   * Venda inexistente é 404 {@code SALE_NOT_FOUND}; venda de outro caixa é 403 {@code
+   * ACCESS_DENIED}; venda fora de {@code OPEN} é 409 {@code SALE_NOT_OPEN} — todos do caso de uso.
+   */
+  @DELETE
+  @Path("/{id}/discount")
+  @RequirePermission(Permission.SALE_DISCOUNT_APPLY)
+  @Produces(MediaType.APPLICATION_JSON)
+  public SaleDetailResponse removeDiscount(@PathParam("id") UUID id) {
+    Sale sale =
+        removeDiscountUseCase.execute(
+            new RemoveDiscountCommand(id, operationContext.cashRegisterId()));
+    return toDetailResponse(sale);
+  }
+
+  /**
+   * Vincula o cliente à venda aberta (passo 811b) e devolve 200 com a venda inteira. A venda guarda
+   * um cliente por vez — vincular outro substitui o anterior — e o cliente precisa estar ativo.
+   *
+   * <p>Venda inexistente é 404 {@code SALE_NOT_FOUND}; venda de outro caixa é 403 {@code
+   * ACCESS_DENIED}; venda fora de {@code OPEN} é 409 {@code SALE_NOT_OPEN} — do caso de uso; {@code
+   * customerId} ausente é 400 {@code VALIDATION_ERROR} da forma; cliente inexistente é 404 {@code
+   * CUSTOMER_NOT_FOUND} e desativado, 422 {@code CUSTOMER_INACTIVE}.
+   */
+  @PUT
+  @Path("/{id}/customer")
+  @RequirePermission(Permission.SALE_CREATE)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public SaleDetailResponse linkCustomer(
+      @PathParam("id") UUID id, @Valid SaleCustomerRequest request) {
+    Sale sale =
+        linkCustomerUseCase.execute(
+            new LinkCustomerCommand(id, operationContext.cashRegisterId(), request.customerId()));
+    return toDetailResponse(sale);
+  }
+
+  /**
+   * Desvincula o cliente da venda aberta (passo 811b) e devolve 200 com a venda anônima. Venda sem
+   * cliente vinculado é no-op (200, sem evento), então repetir o {@code DELETE} é inofensivo.
+   *
+   * <p>Venda inexistente é 404 {@code SALE_NOT_FOUND}; venda de outro caixa é 403 {@code
+   * ACCESS_DENIED}; venda fora de {@code OPEN} é 409 {@code SALE_NOT_OPEN} — todos do caso de uso.
+   */
+  @DELETE
+  @Path("/{id}/customer")
+  @RequirePermission(Permission.SALE_CREATE)
+  @Produces(MediaType.APPLICATION_JSON)
+  public SaleDetailResponse unlinkCustomer(@PathParam("id") UUID id) {
+    Sale sale =
+        unlinkCustomerUseCase.execute(
+            new UnlinkCustomerCommand(id, operationContext.cashRegisterId()));
+    return toDetailResponse(sale);
+  }
+
   private static SaleResponse toResponse(Sale sale) {
     return new SaleResponse(
         sale.id(),
@@ -199,7 +320,10 @@ public class SalesResource {
         sale.createdAt());
   }
 
-  /** A venda inteira como as rotas de item a devolvem; os itens vêm na ordem de inclusão. */
+  /**
+   * A venda inteira como as rotas de item, desconto e cliente a devolvem; itens na ordem de
+   * inclusão.
+   */
   private static SaleDetailResponse toDetailResponse(Sale sale) {
     return new SaleDetailResponse(
         sale.id(),
@@ -210,6 +334,9 @@ public class SalesResource {
         sale.operatorUserId(),
         sale.customerId(),
         sale.subtotal(),
+        sale.discountType(),
+        sale.discountValue(),
+        sale.discountReason(),
         sale.discountAmount(),
         sale.total(),
         sale.itemCount(),

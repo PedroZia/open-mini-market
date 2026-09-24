@@ -701,7 +701,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitários de link/unlink (404/422/409/403, no-op sem vínculo, auditoria) e do domínio (`linkCustomer`/`unlinkCustomer`, imutável após concluída); integração: link grava `customer_id` e o round-trip `findById` restaura o cliente.
   **Commit:** `feat(sales): vincula cliente a venda`
 
-- [ ] **811b — API de desconto e cliente**
+- [x] **811b — API de desconto e cliente**
   **Objetivo:** expor desconto e vínculo de cliente. **Depende:** 811a
   **Implementar:** `PUT/DELETE /sales/{id}/discount` (`sale.discount.apply`) e `PUT/DELETE /sales/{id}/customer` (`sale.create`), os quatro com 200 e o `SaleDetailResponse`, que ganha `discountType`, `discountValue` e `discountReason`; 4 rotas novas em `API_ROUTES`.
   **Testes/aceite:** 200 nos quatro endpoints; cliente inativo → 422; cliente inexistente → 404; OPERADOR → 403 nos dois de desconto (matriz real); venda de outro caixa → 403; venda concluída → 409; forma inválida → 400.
