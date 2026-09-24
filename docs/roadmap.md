@@ -635,7 +635,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** migrations aplicam; unique `(store_id, number)`; `line_number` único por venda.
   **Commit:** `feat(sales): cria tabelas de vendas e itens`
 
-- [ ] **802 — Domínio `Sale`/`SaleItem`**
+- [x] **802 — Domínio `Sale`/`SaleItem`**
   **Objetivo:** regras de venda em código puro. **Depende:** 801
   **Implementar:** agregado com `addItem`, `changeQuantity`, `removeItem`, `applyDiscount`, `recalculate`, `isPaidBy(payments)`, `complete()`; snapshot de preço/nome/unidade; arredondamento HALF_UP (BR-01/02/03).
   **Testes/aceite:** 12+ testes unitários: totais, desconto percentual e por valor, desconto não deixa total negativo, alteração de preço do produto não afeta item existente, venda imutável após concluir.
