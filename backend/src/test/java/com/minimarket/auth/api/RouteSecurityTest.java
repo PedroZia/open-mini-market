@@ -51,9 +51,10 @@ import org.junit.jupiter.api.Test;
  * <p><strong>Limites.</strong> A enumeração só enxerga rotas de resources JAX-RS que são beans CDI,
  * e só as de {@code /api/v1} (o prefixo da API, §9.1): os erros do {@link
  * com.minimarket.shared.api.ErrorTestResource} em {@code /test/errors} ficam fora do contrato, os
- * {@code /q/health} também (o SmallRye Health não é resource JAX-RS) e sub-resource locators
- * (método sem verbo, que devolve o recurso filho) não são rota e não aparecem. Este teste prova
- * <em>autenticação</em>; qual permissão cada rota exige é do {@code PermissionMatrixTest}.
+ * {@code /q/health} também (o SmallRye Health não é resource JAX-RS — o permit dele, que a
+ * enumeração não vê, tem teste próprio em {@link #healthAnswersWithoutToken()}) e sub-resource
+ * locators (método sem verbo, que devolve o recurso filho) não são rota e não aparecem. Este teste
+ * prova <em>autenticação</em>; qual permissão cada rota exige é do {@code PermissionMatrixTest}.
  *
  * <p><strong>Como conferir que ele quebra de propósito.</strong> Tire uma rota da lista (por
  * exemplo o {@code new Route("POST", "/api/v1/auth/logout")}) ou renomeie o {@code @Path} de um
@@ -86,6 +87,13 @@ class RouteSecurityTest {
   private static final Route LOGIN_ROUTE = new Route("POST", "/api/v1/auth/login");
 
   private static final Route META_ROUTE = new Route("GET", "/api/v1/meta");
+
+  /**
+   * Endpoint de saúde do operador da infraestrutura: fora de {@code /api/v1}, por isso não entra na
+   * enumeração (o SmallRye Health não é resource JAX-RS), mas está no permit da política global
+   * (passo 307a) — o 200 sem token é o contrato que {@link #healthAnswersWithoutToken()} tranca.
+   */
+  private static final String HEALTH_PATH = "/q/health";
 
   /**
    * As duas exceções públicas de {@code /api/v1}, com a justificativa de cada uma. Elas existem
@@ -255,6 +263,23 @@ class RouteSecurityTest {
     assertThat(login.statusCode()).as("POST /api/v1/auth/login é público").isEqualTo(400);
     assertThat(login.contentType()).contains("application/problem+json");
     assertThat(login.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+  }
+
+  @Test
+  @DisplayName(
+      "/q/health responde 200 sem token: o permit da política global cobre os endpoints de saúde")
+  void healthAnswersWithoutToken() {
+    // A enumeração acima não vê esta rota (não é resource JAX-RS): sem este teste, tirar /q/health
+    // do permit quebraria o monitoramento sem nenhum teste vermelho.
+    Response response = given().when().get(HEALTH_PATH).then().extract().response();
+
+    assertThat(response.statusCode())
+        .as("GET %s é público (o permit do passo 307a)", HEALTH_PATH)
+        .isEqualTo(200);
+    assertThat(response.contentType()).contains("application/json");
+    assertThat(response.jsonPath().getString("status"))
+        .as("a aplicação responde saudável no teste")
+        .isEqualTo("UP");
   }
 
   /**

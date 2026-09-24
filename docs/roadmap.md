@@ -861,7 +861,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste unitário de precisão (nanos múltiplos de 1000) + pelo menos um teste de integração em que o instante da resposta de uma operação (ex.: concluir venda) bate exatamente com o persistido, sem tolerância; suíte existente verde.
   **Commit:** `fix(shared): alinha o relogio ao microssegundo do banco`
 
-- [ ] **1011 — Cobertura pendente de segurança**
+- [x] **1011 — Cobertura pendente de segurança**
   **Objetivo:** fechar buracos de teste de autenticação/autorização. **Depende:** 307a, 907
   **Implementar:** `/q/health` responde 200 sem token (está no permit do 307a e não tinha teste) e um papel sem `sale.complete`/`payment.add` recebe 403 nas rotas correspondentes (criar o papel no teste pelos repositórios e limpar).
   **Testes/aceite:** os dois testes verdes.
