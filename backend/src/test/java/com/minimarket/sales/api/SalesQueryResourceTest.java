@@ -427,6 +427,31 @@ class SalesQueryResourceTest extends IntegrationTestBase {
   }
 
   @Test
+  @DisplayName(
+      "GET /sales: filtro tipado inválido responde 400 citando o campo, não 404 do conversor")
+  void rejectsInvalidTypedFilters() {
+    for (String[] invalid :
+        List.of(
+            new String[] {"from", "abc"},
+            new String[] {"to", "31/12/2026"},
+            new String[] {"status", "xyz"},
+            new String[] {"cashSessionId", "nao-e-uuid"},
+            new String[] {"operatorUserId", "nao-e-uuid"},
+            new String[] {"page", "primeira"})) {
+      Response response = history(managerToken, params(invalid[0], invalid[1]));
+
+      assertThat(response.statusCode())
+          .as("filtro %s não pode virar 404 do conversor implícito", invalid[0])
+          .isEqualTo(400);
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+      assertThat(response.jsonPath().getList("errors.field", String.class))
+          .as("o 400 cita o campo %s", invalid[0])
+          .containsExactly(invalid[0]);
+    }
+  }
+
+  @Test
   @DisplayName("GET /sales sem report.read: 403 ACCESS_DENIED do porteiro da rota")
   void deniesHistoryWithoutReportRead() {
     Response response = history(operatorToken, params("cashSessionId", sessionId.toString()));

@@ -14,6 +14,7 @@ import com.minimarket.catalog.application.ProductSummary;
 import com.minimarket.catalog.application.UpdateProductCommand;
 import com.minimarket.catalog.application.UpdateProductUseCase;
 import com.minimarket.shared.api.PageResponse;
+import com.minimarket.shared.api.QueryParams;
 import com.minimarket.shared.api.RequirePermission;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
@@ -106,20 +107,28 @@ public class ProductsResource {
    * Lista paginada com busca no nome, filtro de categoria e de status (§9.1 e §9.3). {@code sort}
    * aceita {@code name}, {@code price} ou {@code createdAt}, com {@code ,asc|desc} opcional
    * (default {@code name,asc}); {@code size} acima de 100 é limitado. Parâmetro fora da regra → 400
-   * {@code VALIDATION_ERROR} do caso de uso.
+   * {@code VALIDATION_ERROR} do caso de uso. Filtro tipado inválido ({@code categoryId}, {@code
+   * active}, {@code page}, {@code size}) → 400 {@code VALIDATION_ERROR} com {@code errors[]}, nunca
+   * o 404 do conversor implícito (passo 1007).
    */
   @GET
   @RequirePermission(Permission.PRODUCT_READ)
   @Produces(MediaType.APPLICATION_JSON)
   public PageResponse<ProductResponse> list(
       @QueryParam("search") String search,
-      @QueryParam("categoryId") UUID categoryId,
-      @QueryParam("active") Boolean active,
+      @QueryParam("categoryId") String categoryId,
+      @QueryParam("active") String active,
       @QueryParam("sort") String sort,
-      @QueryParam("page") @DefaultValue("0") int page,
-      @QueryParam("size") @DefaultValue("20") int size) {
+      @QueryParam("page") @DefaultValue("0") String page,
+      @QueryParam("size") @DefaultValue("20") String size) {
     ProductPage products =
-        listProductsUseCase.execute(search, categoryId, active, sort, page, size);
+        listProductsUseCase.execute(
+            search,
+            QueryParams.uuidOf(categoryId, "categoryId"),
+            QueryParams.booleanOf(active, "active"),
+            sort,
+            QueryParams.intOf(page, "page"),
+            QueryParams.intOf(size, "size"));
     return new PageResponse<>(
         products.items().stream().map(ProductsResource::toResponse).toList(),
         products.page(),

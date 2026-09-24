@@ -1,6 +1,7 @@
 package com.minimarket.users.api;
 
 import com.minimarket.shared.api.PageResponse;
+import com.minimarket.shared.api.QueryParams;
 import com.minimarket.shared.api.RequirePermission;
 import com.minimarket.shared.domain.Permission;
 import com.minimarket.users.application.CreateUserCommand;
@@ -87,17 +88,27 @@ public class UsersResource {
         .build();
   }
 
-  /** Lista paginada com busca em username/display_name e filtro de status (§9.1 e §9.3). */
+  /**
+   * Lista paginada com busca em username/display_name e filtro de status (§9.1 e §9.3). Filtro
+   * tipado inválido ({@code active}, {@code page}, {@code size}) → 400 {@code VALIDATION_ERROR} com
+   * {@code errors[]}, nunca o 404 do conversor implícito (passo 1007).
+   */
   @GET
   @RequirePermission(Permission.USER_READ)
   @Produces(MediaType.APPLICATION_JSON)
   public PageResponse<UserResponse> list(
       @QueryParam("search") String search,
-      @QueryParam("active") Boolean active,
+      @QueryParam("active") String active,
       @QueryParam("sort") String sort,
-      @QueryParam("page") @DefaultValue("0") int page,
-      @QueryParam("size") @DefaultValue("20") int size) {
-    UserPage users = listUsersUseCase.execute(search, active, sort, page, size);
+      @QueryParam("page") @DefaultValue("0") String page,
+      @QueryParam("size") @DefaultValue("20") String size) {
+    UserPage users =
+        listUsersUseCase.execute(
+            search,
+            QueryParams.booleanOf(active, "active"),
+            sort,
+            QueryParams.intOf(page, "page"),
+            QueryParams.intOf(size, "size"));
     return new PageResponse<>(
         users.items().stream().map(UsersResource::toResponse).toList(),
         users.page(),

@@ -10,6 +10,7 @@ import com.minimarket.customers.application.ListCustomersUseCase;
 import com.minimarket.customers.application.UpdateCustomerCommand;
 import com.minimarket.customers.application.UpdateCustomerUseCase;
 import com.minimarket.shared.api.PageResponse;
+import com.minimarket.shared.api.QueryParams;
 import com.minimarket.shared.api.RequirePermission;
 import com.minimarket.shared.domain.Permission;
 import jakarta.inject.Inject;
@@ -84,16 +85,20 @@ public class CustomersResource {
   /**
    * Lista paginada com busca no nome (trecho) e CPF/telefone (dígitos exatos) — o §9.3 define só
    * {@code search}/{@code page}/{@code size}, sem {@code sort}. {@code size} acima de 100 é
-   * limitado; parâmetro fora da regra → 400 {@code VALIDATION_ERROR} do caso de uso.
+   * limitado; parâmetro fora da regra → 400 {@code VALIDATION_ERROR} do caso de uso. {@code page} e
+   * {@code size} não numéricos → 400 com {@code errors[]}, nunca o 404 do conversor implícito
+   * (passo 1007).
    */
   @GET
   @RequirePermission(Permission.CUSTOMER_READ)
   @Produces(MediaType.APPLICATION_JSON)
   public PageResponse<CustomerResponse> list(
       @QueryParam("search") String search,
-      @QueryParam("page") @DefaultValue("0") int page,
-      @QueryParam("size") @DefaultValue("20") int size) {
-    CustomerPage customers = listCustomersUseCase.execute(search, page, size);
+      @QueryParam("page") @DefaultValue("0") String page,
+      @QueryParam("size") @DefaultValue("20") String size) {
+    CustomerPage customers =
+        listCustomersUseCase.execute(
+            search, QueryParams.intOf(page, "page"), QueryParams.intOf(size, "size"));
     return new PageResponse<>(
         customers.items().stream().map(CustomersResource::toResponse).toList(),
         customers.page(),

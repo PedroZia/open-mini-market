@@ -329,6 +329,23 @@ class ProductsResourceTest extends IntegrationTestBase {
   }
 
   @Test
+  @DisplayName("GET /api/v1/products com filtro tipado inválido responde 400 citando o campo")
+  void rejectsInvalidTypedFilters() {
+    for (String[] invalid :
+        List.of(
+            new String[] {"active", "abc"},
+            new String[] {"categoryId", "nao-e-uuid"},
+            new String[] {"page", "primeira"})) {
+      Response response = list(invalid[0], invalid[1]);
+
+      assertBadRequest(response);
+      assertThat(response.jsonPath().getList("errors.field", String.class))
+          .as("o 400 cita o campo %s", invalid[0])
+          .containsExactly(invalid[0]);
+    }
+  }
+
+  @Test
   @DisplayName(
       "GET /api/v1/products filtra active: produto com active=false só aparece com active=false")
   void filtersByActive() throws SQLException {

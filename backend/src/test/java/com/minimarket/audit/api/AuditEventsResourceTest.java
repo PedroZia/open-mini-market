@@ -226,7 +226,8 @@ class AuditEventsResourceTest extends IntegrationTestBase {
   }
 
   @Test
-  @DisplayName("GET /audit-events: from inclusivo e to exclusivo, e data fora do ISO-8601 em 400")
+  @DisplayName(
+      "GET /audit-events: from inclusivo e to exclusivo, e valor inválido em 400 com errors[]")
   void appliesPeriodBounds() {
     Response from =
         query(adminToken(), params("entityType", MARKER_ENTITY_TYPE, "from", DAY_TWO.toString()));
@@ -271,17 +272,26 @@ class AuditEventsResourceTest extends IntegrationTestBase {
         .isEqualTo(200);
     assertThat(inverted.jsonPath().getLong("totalItems")).isZero();
 
-    for (Response response :
+    for (String[] invalid :
         List.of(
-            query(adminToken(), params("from", "ontem")),
-            query(adminToken(), params("to", "2026-02-01")))) {
+            new String[] {"from", "ontem"},
+            new String[] {"to", "2026-02-01"},
+            new String[] {"entityId", "nao-e-uuid"})) {
+      Response response = query(adminToken(), params(invalid[0], invalid[1]));
+
       assertThat(response.statusCode())
-          .as("data inválida não pode virar 404 do conversor implícito")
+          .as("valor inválido em %s não pode virar 404 do conversor implícito", invalid[0])
           .isEqualTo(400);
       assertThat(response.contentType()).contains("application/problem+json");
       assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
-      assertThat(response.jsonPath().getString("detail")).contains("ISO-8601");
+      assertThat(response.jsonPath().getList("errors.field", String.class))
+          .as("o 400 cita o campo %s", invalid[0])
+          .containsExactly(invalid[0]);
     }
+    assertThat(
+            query(adminToken(), params("from", "ontem")).jsonPath().getString("errors[0].message"))
+        .as("a mensagem diz o formato esperado")
+        .contains("ISO-8601");
   }
 
   @Test

@@ -16,6 +16,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -233,6 +234,24 @@ class UsersResourceTest extends IntegrationTestBase {
         .isEqualTo("VALIDATION_ERROR");
     assertThat(listUsersBadRequest("size", "0").jsonPath().getString("code"))
         .isEqualTo("VALIDATION_ERROR");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/users com filtro tipado inválido responde 400 citando o campo, não 404")
+  void rejectsInvalidTypedFilters() {
+    for (String[] invalid :
+        List.of(
+            new String[] {"active", "abc"},
+            new String[] {"page", "primeira"},
+            new String[] {"size", "muitos"})) {
+      Response response = listUsersBadRequest(invalid[0], invalid[1]);
+
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+      assertThat(response.jsonPath().getList("errors.field", String.class))
+          .as("o 400 cita o campo %s", invalid[0])
+          .containsExactly(invalid[0]);
+    }
   }
 
   @Test

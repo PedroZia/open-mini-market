@@ -38,6 +38,7 @@ import com.minimarket.sales.domain.SaleItem;
 import com.minimarket.sales.domain.SaleStatus;
 import com.minimarket.shared.api.IdempotencyGuard;
 import com.minimarket.shared.api.PageResponse;
+import com.minimarket.shared.api.QueryParams;
 import com.minimarket.shared.api.RequirePermission;
 import com.minimarket.shared.application.OperationContext;
 import com.minimarket.shared.domain.Permission;
@@ -59,7 +60,6 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -594,7 +594,9 @@ public class SalesResource {
    * ({@code from} inclusivo, {@code to} exclusivo sobre {@code created_at}), status, sessão de
    * caixa e operador — em ordem {@code created_at desc}. Todos os filtros são opcionais e {@code
    * size} acima de 100 é limitado; {@code page} negativo ou {@code size} menor que 1 → 400 {@code
-   * VALIDATION_ERROR} do caso de uso.
+   * VALIDATION_ERROR} do caso de uso. Filtro tipado inválido ({@code from}/{@code to}, {@code
+   * status}, {@code cashSessionId}, {@code operatorUserId}, {@code page}, {@code size}) → 400
+   * {@code VALIDATION_ERROR} com {@code errors[]}, nunca o 404 do conversor implícito (passo 1007).
    *
    * <p>Exige {@code report.read}: é visão de loja, não do caixa — sem a permissão o interceptor
    * responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar (é o 403 do OPERADOR).
@@ -603,16 +605,23 @@ public class SalesResource {
   @RequirePermission(Permission.REPORT_READ)
   @Produces(MediaType.APPLICATION_JSON)
   public PageResponse<SaleSummaryResponse> list(
-      @QueryParam("from") Instant from,
-      @QueryParam("to") Instant to,
-      @QueryParam("status") SaleStatus status,
-      @QueryParam("cashSessionId") UUID cashSessionId,
-      @QueryParam("operatorUserId") UUID operatorUserId,
-      @QueryParam("page") @DefaultValue("0") int page,
-      @QueryParam("size") @DefaultValue("20") int size) {
+      @QueryParam("from") String from,
+      @QueryParam("to") String to,
+      @QueryParam("status") String status,
+      @QueryParam("cashSessionId") String cashSessionId,
+      @QueryParam("operatorUserId") String operatorUserId,
+      @QueryParam("page") @DefaultValue("0") String page,
+      @QueryParam("size") @DefaultValue("20") String size) {
     SalePage sales =
         listSalesUseCase.execute(
-            new ListSalesQuery(from, to, status, cashSessionId, operatorUserId, page, size));
+            new ListSalesQuery(
+                QueryParams.instantOf(from, "from"),
+                QueryParams.instantOf(to, "to"),
+                QueryParams.enumOf(SaleStatus.class, status, "status"),
+                QueryParams.uuidOf(cashSessionId, "cashSessionId"),
+                QueryParams.uuidOf(operatorUserId, "operatorUserId"),
+                QueryParams.intOf(page, "page"),
+                QueryParams.intOf(size, "size")));
     return new PageResponse<>(
         sales.items().stream().map(SalesResource::toSummaryResponse).toList(),
         sales.page(),

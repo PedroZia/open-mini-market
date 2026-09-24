@@ -290,6 +290,20 @@ class StockResourceTest extends IntegrationTestBase {
     assertBadRequest(list("size", "0"));
   }
 
+  @Test
+  @DisplayName("GET /api/v1/stock com filtro tipado inválido responde 400 citando o campo")
+  void rejectsInvalidTypedFilters() {
+    for (String[] invalid :
+        List.of(new String[] {"lowStock", "abc"}, new String[] {"page", "primeira"})) {
+      Response response = list(invalid[0], invalid[1]);
+
+      assertBadRequest(response);
+      assertThat(response.jsonPath().getList("errors.field", String.class))
+          .as("o 400 cita o campo %s", invalid[0])
+          .containsExactly(invalid[0]);
+    }
+  }
+
   /**
    * O request HTTP commita: some ao fim de cada teste o que esta classe criou, na ordem das FKs — o
    * ledger antes do saldo, os dois antes do produto e o operador por último (as três FKs de {@code

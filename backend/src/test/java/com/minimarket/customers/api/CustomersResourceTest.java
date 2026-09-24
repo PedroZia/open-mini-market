@@ -461,6 +461,15 @@ class CustomersResourceTest extends IntegrationTestBase {
   }
 
   @Test
+  @DisplayName("GET /api/v1/customers com page não numérico responde 400 citando o campo")
+  void rejectsNonNumericPage() {
+    Response response = list("page", "primeira");
+
+    assertBadRequest(response);
+    assertThat(response.jsonPath().getList("errors.field", String.class)).containsExactly("page");
+  }
+
+  @Test
   @DisplayName("POST com nome em branco responde 400 apontando o campo")
   void rejectsBlankName() {
     Response response = post(adminToken(), body("   ", null, null, null, null));

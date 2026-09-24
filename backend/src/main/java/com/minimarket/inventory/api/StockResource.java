@@ -14,6 +14,7 @@ import com.minimarket.inventory.application.StockMovementSummary;
 import com.minimarket.inventory.application.StockPage;
 import com.minimarket.shared.api.IdempotencyGuard;
 import com.minimarket.shared.api.PageResponse;
+import com.minimarket.shared.api.QueryParams;
 import com.minimarket.shared.api.RequirePermission;
 import com.minimarket.shared.application.OperationContext;
 import com.minimarket.shared.domain.Permission;
@@ -75,17 +76,24 @@ public class StockResource {
    * Lista paginada dos saldos da loja: busca por trecho do nome (sem diferenciar maiúsculas) ou
    * barcode exato e filtro de estoque baixo (§9.3). {@code lowStock} ausente = sem filtro; {@code
    * size} acima de 100 é limitado; parâmetro de paginação fora da regra → 400 {@code
-   * VALIDATION_ERROR} do caso de uso.
+   * VALIDATION_ERROR} do caso de uso. Filtro tipado inválido ({@code lowStock}, {@code page},
+   * {@code size}) → 400 {@code VALIDATION_ERROR} com {@code errors[]}, nunca o 404 do conversor
+   * implícito (passo 1007).
    */
   @GET
   @RequirePermission(Permission.STOCK_READ)
   @Produces(MediaType.APPLICATION_JSON)
   public PageResponse<StockItemResponse> list(
       @QueryParam("search") String search,
-      @QueryParam("lowStock") Boolean lowStock,
-      @QueryParam("page") @DefaultValue("0") int page,
-      @QueryParam("size") @DefaultValue("20") int size) {
-    StockPage stock = listStockUseCase.execute(search, lowStock, page, size);
+      @QueryParam("lowStock") String lowStock,
+      @QueryParam("page") @DefaultValue("0") String page,
+      @QueryParam("size") @DefaultValue("20") String size) {
+    StockPage stock =
+        listStockUseCase.execute(
+            search,
+            QueryParams.booleanOf(lowStock, "lowStock"),
+            QueryParams.intOf(page, "page"),
+            QueryParams.intOf(size, "size"));
     return new PageResponse<>(
         stock.items().stream().map(StockResource::toItemResponse).toList(),
         stock.page(),

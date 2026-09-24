@@ -837,7 +837,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `GET /api/v1/audit-events?cashSessionId=<id>` devolve os eventos da sessão (abertura, venda, fechamento) no fluxo real; `PASSWORD_CHANGED` exatamente 1, sem credencial em `details`.
   **Commit:** `feat(audit): registra sessao de caixa e troca de senha`
 
-- [ ] **1007 — Filtros inválidos respondem 400 (problem+json)**
+- [x] **1007 — Filtros inválidos respondem 400 (problem+json)**
   **Objetivo:** filtro tipado inválido vira 400 problem+json, nunca 404/500 do conversor. **Depende:** 607b
   **Implementar:** varredura dos filtros tipados das listagens (`users.active`, `sales.from`/`to`/`status`, `products.active`/`categoryId`, `stock.lowStock`, `page`/`size` numéricos) com parse explícito e 400 problem+json (`errors[]` com o field, padrão do `FieldValidationException` do 607b); helper em `shared/api` se ajudar; não mexer em `sort` (whitelist já responde 400).
   **Testes/aceite:** `GET /users?active=abc` → 400 (não 404); `GET /sales?from=abc` e `?status=xyz` → 400; filtros válidos inalterados; regressões verdes.
