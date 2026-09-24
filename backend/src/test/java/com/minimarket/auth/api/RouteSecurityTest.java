@@ -131,6 +131,8 @@ class RouteSecurityTest {
           new Route("POST", "/api/v1/products/{id}/disable"),
           new Route("POST", "/api/v1/products/{id}/enable"),
           new Route("GET", "/api/v1/products/barcode/{barcode}"),
+          new Route("GET", "/api/v1/stock"),
+          new Route("GET", "/api/v1/stock/{productId}"),
           new Route("GET", "/api/v1/customers"),
           new Route("POST", "/api/v1/customers"),
           new Route("GET", "/api/v1/customers/{id}"),

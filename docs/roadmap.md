@@ -601,7 +601,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitário/integração: entrada, saída, saldo insuficiente bloqueado, saldo insuficiente permitido com flag, `balance_after` correto em sequência de movimentos.
   **Commit:** `feat(inventory): aplica movimentos de estoque com lock`
 
-- [ ] **704 — Consulta de estoque**
+- [x] **704 — Consulta de estoque**
   **Objetivo:** ver saldos. **Depende:** 702
   **Implementar:** `GET /api/v1/stock` (busca por nome/barcode, filtro `lowStock` usando `min_quantity`, paginação) e `GET /api/v1/stock/{productId}` (saldo + últimos movimentos); permissão `stock.read`.
   **Testes/aceite:** saldo correto após movimentos; filtro de estoque baixo funciona.
