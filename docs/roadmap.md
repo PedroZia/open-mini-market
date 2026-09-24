@@ -589,7 +589,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** migration aplica; `UPDATE`/`DELETE` no ledger falham por permissão.
   **Commit:** `feat(inventory): cria saldo e ledger de estoque`
 
-- [ ] **702 — Repositórios de estoque**
+- [x] **702 — Repositórios de estoque**
   **Objetivo:** acessar saldo e ledger. **Depende:** 701
   **Implementar:** `ProductStockRepository` (`findByProduct`, `lockByProduct` com `FOR UPDATE`, `insertIfAbsent`, `updateQuantity`) e `StockMovementRepository` (`insert`, `listByProduct`, `sumByType`).
   **Testes/aceite:** integração: lock bloqueia segunda transação; saldo criado sob demanda.
