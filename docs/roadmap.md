@@ -531,6 +531,12 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 201; 409 já aberto; 403 sem `cash.open`; repetir com mesma `Idempotency-Key` devolve a mesma sessão.
   **Commit:** `feat(cash): expoe abertura de caixa na API`
 
+- [x] **607b — FK de `auth_sessions.cash_register_id` + validação do caixa no login**
+  **Objetivo:** garantir no banco o vínculo da sessão com o caixa e recusar caixa inexistente ou inativo no login. **Depende:** 601, 607
+  **Implementar:** `V15__auth_sessions_cash_register_fk.sql` (limpa vínculos órfãos pré-FK de dev/teste e cria a constraint com `on delete restrict`); porta `CashRegisterLookup` em `shared/application` — inversão que evita o ciclo `auth → cash` — implementada pelo repositório de caixa; `FieldValidationException` + `errors[]` no `BusinessExceptionMapper`; `LoginUseCase` valida o caixa depois da senha e antes de gravar (nulo segue aceito).
+  **Testes/aceite:** constraint existe com `on delete restrict`; insert com caixa inexistente → SQLState 23503; login com caixa desconhecido/inativo → 400 `VALIDATION_ERROR` com `errors[0].field == "cashRegisterId"`; login com `CAIXA-01` → 200 e `/auth/me` mostra o caixa.
+  **Commit:** `feat(auth): valida caixa ativo no login e cria a FK de auth_sessions`
+
 - [x] **608 — API `GET .../current-session`**
   **Objetivo:** TUI mostra o caixa aberto. **Depende:** 607
   **Implementar:** sessão atual com totais por tipo de movimento e saldo esperado; 404 quando não há sessão aberta.
@@ -579,7 +585,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 - [ ] **701 — Migration `product_stocks` + `stock_movements`**
   **Objetivo:** saldo e ledger. **Depende:** 403
-  **Implementar:** `V13__stock.sql` conforme §5.3 (ledger com `balance_after`, único `(store_id, product_id)` no saldo) + grants sem `UPDATE`/`DELETE` em `stock_movements`.
+  **Implementar:** `V16__stock.sql` conforme §5.3 (ledger com `balance_after`, único `(store_id, product_id)` no saldo) + grants sem `UPDATE`/`DELETE` em `stock_movements`.
   **Testes/aceite:** migration aplica; `UPDATE`/`DELETE` no ledger falham por permissão.
   **Commit:** `feat(inventory): cria saldo e ledger de estoque`
 
@@ -625,7 +631,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 - [ ] **801 — Migrations de venda**
   **Objetivo:** estrutura da venda. **Depende:** 603, 403
-  **Implementar:** `V14__document_sequences.sql`, `V15__sales.sql`, `V16__sale_items.sql` conforme §5.3.
+  **Implementar:** `V17__document_sequences.sql`, `V18__sales.sql`, `V19__sale_items.sql` conforme §5.3.
   **Testes/aceite:** migrations aplicam; unique `(store_id, number)`; `line_number` único por venda.
   **Commit:** `feat(sales): cria tabelas de vendas e itens`
 
@@ -713,7 +719,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 - [ ] **901 — Migration `payments`**
   **Objetivo:** pagamentos por venda. **Depende:** 801
-  **Implementar:** `V18__payments.sql` conforme §5.3 (múltiplos pagamentos, `tendered_amount`, `change_amount`, status).
+  **Implementar:** `V20__payments.sql` conforme §5.3 (múltiplos pagamentos, `tendered_amount`, `change_amount`, status).
   **Testes/aceite:** migration aplica; `amount > 0` garantido por check.
   **Commit:** `feat(sales): cria tabela de pagamentos`
 

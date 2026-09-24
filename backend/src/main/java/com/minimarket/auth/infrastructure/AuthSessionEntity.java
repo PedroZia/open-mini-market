@@ -41,7 +41,7 @@ public class AuthSessionEntity {
   @Column(name = "store_id")
   private UUID storeId;
 
-  /** Sem FK até a Fase 6, quando a tabela de caixa nascer. */
+  /** Caixa da sessão; a FK para {@code cash_registers} entra na V15 (passo 607b). */
   @Column(name = "cash_register_id")
   private UUID cashRegisterId;
 

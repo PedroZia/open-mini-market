@@ -49,7 +49,7 @@ class OperationContextTest extends IntegrationTestBase {
   void fillsContextForTuiSession() throws SQLException {
     String username = "ctx.tui." + SUFFIX;
     String userId = createUser(username);
-    UUID cashRegisterId = UUID.randomUUID();
+    UUID cashRegisterId = cashRegisterId("CAIXA-01");
     String token = login(username, "TUI", cashRegisterId.toString());
     String requestId = UUID.randomUUID().toString();
 

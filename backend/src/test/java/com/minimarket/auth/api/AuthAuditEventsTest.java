@@ -60,9 +60,9 @@ class AuthAuditEventsTest extends IntegrationTestBase {
   void auditsSuccessfulLogin() throws SQLException {
     String username = "audita.login." + SUFFIX;
     String id = createUser(username, "Audita Login");
-    UUID cashRegisterId = UUID.randomUUID();
+    UUID registerId = cashRegisterId("CAIXA-01");
 
-    loginToken(username, PASSWORD, "TUI", cashRegisterId.toString());
+    loginToken(username, PASSWORD, "TUI", registerId.toString());
 
     UUID userId = UUID.fromString(id);
     Event event = singleEvent("LOGIN_SUCCESS", userId);
@@ -74,7 +74,7 @@ class AuthAuditEventsTest extends IntegrationTestBase {
         .isEqualTo(sessionId(userId, "TUI"));
     assertThat(event.source()).isEqualTo("TUI");
     assertThat(event.storeId()).isNotNull();
-    assertThat(event.cashRegisterId()).isEqualTo(cashRegisterId.toString());
+    assertThat(event.cashRegisterId()).isEqualTo(registerId.toString());
     assertThat(event.ip()).isNotNull();
     assertThat(event.requestId()).isNotBlank();
   }

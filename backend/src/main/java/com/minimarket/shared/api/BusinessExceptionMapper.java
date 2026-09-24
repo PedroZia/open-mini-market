@@ -2,6 +2,7 @@ package com.minimarket.shared.api;
 
 import com.minimarket.shared.application.AccessDeniedEvent;
 import com.minimarket.shared.domain.BusinessException;
+import com.minimarket.shared.domain.FieldValidationException;
 import com.minimarket.shared.domain.ForbiddenException;
 import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
@@ -11,6 +12,7 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
+import java.util.List;
 
 /**
  * Converte {@link BusinessException} e subclasses no problem+json padrão.
@@ -19,6 +21,9 @@ import jakarta.ws.rs.ext.Provider;
  * o observer de {@code audit} grava como {@code ACCESS_DENIED} em transação própria — quando este
  * mapper roda, a transação do caso de uso já foi desfeita. O evento sai antes de montar a resposta
  * e sem {@code try/catch}: falha ao auditar sobe e derruba a requisição, como manda §7.1.
+ *
+ * <p>{@link FieldValidationException} (passo 607b) leva os campos inválidos para {@code errors[]},
+ * no mesmo contrato do Bean Validation; as demais exceções saem sem {@code errors}.
  */
 @Provider
 public class BusinessExceptionMapper implements ExceptionMapper<BusinessException> {
@@ -40,6 +45,17 @@ public class BusinessExceptionMapper implements ExceptionMapper<BusinessExceptio
           new AccessDeniedEvent(
               request.getMethod(), ProblemDetail.pathOf(uriInfo), forbidden.requiredPermission()));
     }
-    return ProblemDetail.response(uriInfo, exception.code(), exception.getMessage(), null);
+    return ProblemDetail.response(
+        uriInfo, exception.code(), exception.getMessage(), errorsOf(exception));
+  }
+
+  /** Campos inválidos de um erro de validação da aplicação; {@code null} para os demais erros. */
+  private static List<ProblemDetail.FieldError> errorsOf(BusinessException exception) {
+    if (!(exception instanceof FieldValidationException fieldValidation)) {
+      return null;
+    }
+    return fieldValidation.errors().stream()
+        .map(error -> new ProblemDetail.FieldError(error.field(), error.message()))
+        .toList();
   }
 }

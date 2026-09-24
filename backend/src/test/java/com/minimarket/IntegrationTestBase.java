@@ -1,11 +1,16 @@
 package com.minimarket;
 
 import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.minimarket.support.TestAdmin;
 import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.UUID;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 
@@ -42,6 +47,23 @@ public abstract class IntegrationTestBase {
   /** Requisição autenticada como o ADMIN da fixture: o atalho de quem exercita rota protegida. */
   protected RequestSpecification asAdmin() {
     return given().header("Authorization", "Bearer " + adminToken());
+  }
+
+  /**
+   * Id do caixa pelo código, direto do banco: a FK de {@code auth_sessions.cash_register_id} (passo
+   * 607b) exige um caixa real, então os testes de auth usam o {@code CAIXA-01} do seed da V11 em
+   * vez de inventar UUID. Falha quando o seed não existe — o banco é a fonte de verdade.
+   */
+  protected UUID cashRegisterId(String code) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement("select id from cash_registers where code = ?")) {
+      statement.setString(1, code);
+      try (ResultSet resultSet = statement.executeQuery()) {
+        assertThat(resultSet.next()).as("caixa %s do seed da V11 presente", code).isTrue();
+        return resultSet.getObject(1, UUID.class);
+      }
+    }
   }
 
   /**

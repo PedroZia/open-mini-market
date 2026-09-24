@@ -53,7 +53,7 @@ class AuthSessionRepositoryTest extends IntegrationTestBase {
   @DisplayName("insert gera id UUIDv7, preenche created_at/last_seen_at e persiste o ip como inet")
   void inserts() throws Exception {
     UUID userId = newUser("sessao.insert");
-    UUID cashRegisterId = UUID.randomUUID();
+    UUID cashRegisterId = cashRegisterId("CAIXA-01");
     UUID store = storeId();
     Instant lastSeenAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
     Instant expiresAt = expiresAt();

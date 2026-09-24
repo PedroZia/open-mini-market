@@ -87,7 +87,7 @@ class AuthResourceTest extends IntegrationTestBase {
   void logsIn() throws SQLException {
     String username = "login.ok." + SUFFIX;
     String id = createUser(username, "Login Ok", "OPERADOR");
-    UUID cashRegisterId = UUID.randomUUID();
+    UUID cashRegisterId = cashRegisterId("CAIXA-01");
 
     Response response = login(username, PASSWORD, "TUI", cashRegisterId.toString());
 
@@ -123,10 +123,10 @@ class AuthResourceTest extends IntegrationTestBase {
   @Test
   @DisplayName(
       "GET /api/v1/auth/me responde 200 com usuário, RBAC, loja, caixa, cliente e expiração")
-  void returnsCurrentSession() {
+  void returnsCurrentSession() throws SQLException {
     String username = "me.ok." + SUFFIX;
     String id = createUser(username, "Me Ok", "OPERADOR");
-    UUID cashRegisterId = UUID.randomUUID();
+    UUID cashRegisterId = cashRegisterId("CAIXA-01");
     String token =
         login(username, PASSWORD, "TUI", cashRegisterId.toString()).jsonPath().getString("token");
 
@@ -399,6 +399,43 @@ class AuthResourceTest extends IntegrationTestBase {
     assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
     assertThat(response.jsonPath().getString("detail")).contains("X-Client");
     assertThat(sessionCount(UUID.fromString(id))).isZero();
+  }
+
+  @Test
+  @DisplayName("login com caixa desconhecido responde 400 VALIDATION_ERROR sem abrir sessão")
+  void rejectsUnknownCashRegister() throws SQLException {
+    String username = "login.caixa-fantasma." + SUFFIX;
+    String id = createUser(username, "Login Caixa Fantasma", null);
+
+    Response response = login(username, PASSWORD, "TUI", UUID.randomUUID().toString());
+
+    assertThat(response.statusCode()).isEqualTo(400);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    assertThat(response.jsonPath().getList("errors.field", String.class))
+        .containsExactly("cashRegisterId");
+    assertThat(sessionCount(UUID.fromString(id))).as("caixa inválido não abre sessão").isZero();
+  }
+
+  @Test
+  @DisplayName("login com caixa inativo responde 400 VALIDATION_ERROR sem abrir sessão")
+  void rejectsInactiveCashRegister() throws SQLException {
+    String username = "login.caixa-inativo." + SUFFIX;
+    String id = createUser(username, "Login Caixa Inativo", null);
+    UUID inactive = insertInactiveCashRegister();
+
+    try {
+      Response response = login(username, PASSWORD, "TUI", inactive.toString());
+
+      assertThat(response.statusCode()).isEqualTo(400);
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+      assertThat(response.jsonPath().getList("errors.field", String.class))
+          .containsExactly("cashRegisterId");
+      assertThat(sessionCount(UUID.fromString(id))).as("caixa inválido não abre sessão").isZero();
+    } finally {
+      deleteCashRegister(inactive);
+    }
   }
 
   @Test
@@ -778,6 +815,32 @@ class AuthResourceTest extends IntegrationTestBase {
         resultSet.next();
         return resultSet.getInt(1);
       }
+    }
+  }
+
+  /** Caixa inativo de verdade no banco: o login precisa recusá-lo (passo 607b). */
+  private UUID insertInactiveCashRegister() throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "insert into cash_registers (id, store_id, code, name, active)"
+                    + " values (uuidv7(), (select id from stores where code = 'MATRIZ'), ?,"
+                    + " 'Caixa inativo de teste', false) returning id")) {
+      statement.setString(1, "INATIVO." + SUFFIX);
+      try (ResultSet resultSet = statement.executeQuery()) {
+        resultSet.next();
+        return resultSet.getObject("id", UUID.class);
+      }
+    }
+  }
+
+  /** Remove o caixa do teste; nenhuma sessão o referencia (o login o recusa). */
+  private void deleteCashRegister(UUID id) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement("delete from cash_registers where id = ?")) {
+      statement.setObject(1, id);
+      statement.executeUpdate();
     }
   }
 

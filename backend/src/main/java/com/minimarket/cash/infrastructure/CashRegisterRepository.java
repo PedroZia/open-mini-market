@@ -2,6 +2,7 @@ package com.minimarket.cash.infrastructure;
 
 import com.minimarket.cash.application.CashRegisterStore;
 import com.minimarket.cash.application.CashRegisterSummary;
+import com.minimarket.shared.application.CashRegisterLookup;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -14,10 +15,11 @@ import java.util.UUID;
  * transação, quando houver, é do caso de uso (§2.2, regra 6).
  *
  * <p>Implementa a porta {@link CashRegisterStore}: é por ela que {@code application} lê os caixas
- * sem tocar em JPA.
+ * sem tocar em JPA. Também implementa {@link CashRegisterLookup} (passo 607b) — a porta
+ * compartilhada que o login usa para validar o caixa sem importar {@code cash}.
  */
 @ApplicationScoped
-public class CashRegisterRepository implements CashRegisterStore {
+public class CashRegisterRepository implements CashRegisterStore, CashRegisterLookup {
 
   @Inject EntityManager entityManager;
 
@@ -51,6 +53,17 @@ public class CashRegisterRepository implements CashRegisterStore {
             .setMaxResults(1)
             .getResultList();
     return found.isEmpty() ? Optional.empty() : Optional.of(toSummary(found.getFirst()));
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Reaproveita a consulta de caixa ativo: caixa inexistente ou inativo é a mesma coisa para
+   * quem valida o login (passo 607b) — {@code false} nos dois casos.
+   */
+  @Override
+  public boolean isActive(UUID id) {
+    return findActiveById(id).isPresent();
   }
 
   /** Projeção do caixa para a porta: nada de entidade JPA na saída. */

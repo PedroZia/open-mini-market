@@ -6,10 +6,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.auth.domain.SessionClient;
 import com.minimarket.auth.domain.TokenHasher;
+import com.minimarket.shared.application.CashRegisterLookup;
 import com.minimarket.shared.application.OperationContext;
 import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.shared.domain.FieldValidationException;
 import com.minimarket.shared.domain.OperationSource;
 import com.minimarket.shared.domain.Store;
 import com.minimarket.users.application.NewUser;
@@ -64,6 +66,7 @@ class LoginUseCaseTest {
   private final FakeSessionStore sessionStore = new FakeSessionStore();
   private final FakePasswordHasher passwordHasher = new FakePasswordHasher();
   private final FakeStoreLookup storeLookup = new FakeStoreLookup();
+  private final FakeCashRegisterLookup cashRegisterLookup = new FakeCashRegisterLookup();
   private final FakeAuditRecorder auditRecorder = new FakeAuditRecorder();
   private final OperationContext operationContext = new OperationContext();
   private final TokenHasher tokenHasher = new TokenHasher();
@@ -77,6 +80,7 @@ class LoginUseCaseTest {
     useCase.sessionStore = sessionStore;
     useCase.passwordHasher = passwordHasher;
     useCase.storeLookup = storeLookup;
+    useCase.cashRegisterLookup = cashRegisterLookup;
     useCase.auditRecorder = auditRecorder;
     useCase.operationContext = operationContext;
     useCase.clock = Clock.fixed(NOW, ZoneOffset.UTC);
@@ -134,6 +138,41 @@ class LoginUseCaseTest {
     assertThat(userStore.successfulLoginId).isEqualTo(USER_ID);
     assertThat(userStore.successfulLoginAt).isEqualTo(NOW);
     assertThat(userStore.updatedHash).isNull();
+  }
+
+  @Test
+  @DisplayName("caixa inexistente ou inativo: 400 de validação sem sessão, login nem rehash")
+  void rejectsInvalidCashRegisterBeforePersisting() {
+    cashRegisterLookup.active = false;
+    passwordHasher.needsRehash = true;
+
+    assertThatThrownBy(
+            () ->
+                useCase.execute(
+                    new LoginCommand(
+                        USERNAME, PASSWORD, SessionClient.TUI, CASH_REGISTER_ID, null, null)))
+        .isInstanceOfSatisfying(
+            FieldValidationException.class,
+            exception -> {
+              assertThat(exception.code()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+              assertThat(exception.errors())
+                  .extracting(FieldValidationException.FieldError::field)
+                  .containsExactly("cashRegisterId");
+            });
+
+    // A consulta é depois da senha conferida e antes de qualquer gravação.
+    assertThat(cashRegisterLookup.lookedUpId).isEqualTo(CASH_REGISTER_ID);
+    assertThat(sessionStore.inserted).isNull();
+    assertThat(userStore.successfulLoginAt).isNull();
+    assertThat(userStore.updatedHash).as("caixa inválido não rehasha a senha").isNull();
+  }
+
+  @Test
+  @DisplayName("sessão sem caixa não consulta a porta de caixa")
+  void skipsCashRegisterLookupWhenAbsent() {
+    useCase.execute(new LoginCommand(USERNAME, PASSWORD, SessionClient.WEB, null, null, null));
+
+    assertThat(cashRegisterLookup.lookedUpId).isNull();
   }
 
   @Test
@@ -659,6 +698,19 @@ class LoginUseCaseTest {
     @Override
     public boolean needsRehash(String passwordHash) {
       return needsRehash;
+    }
+  }
+
+  /** Dublê de {@link CashRegisterLookup}: controla a resposta e registra o id consultado. */
+  private static final class FakeCashRegisterLookup implements CashRegisterLookup {
+
+    private boolean active = true;
+    private UUID lookedUpId;
+
+    @Override
+    public boolean isActive(UUID id) {
+      lookedUpId = id;
+      return active;
     }
   }
 

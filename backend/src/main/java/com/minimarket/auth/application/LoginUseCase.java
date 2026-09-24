@@ -4,10 +4,12 @@ import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.auth.domain.SessionClient;
 import com.minimarket.auth.domain.TokenGenerator;
 import com.minimarket.auth.domain.TokenHasher;
+import com.minimarket.shared.application.CashRegisterLookup;
 import com.minimarket.shared.application.OperationContext;
 import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.shared.domain.FieldValidationException;
 import com.minimarket.shared.domain.OperationSource;
 import com.minimarket.shared.domain.Store;
 import com.minimarket.users.application.PasswordHasher;
@@ -61,6 +63,11 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * requestId} e o IP que o filtro já preencheu. As recusas não têm ator — o username tentado vai em
  * {@code details} — e a gravação acontece antes do throw, dentro da transação que o {@code
  * dontRollbackOn} mantém.
+ *
+ * <p>Caixa informado (passo 607b): {@code cashRegisterId} só é aceito se existir e estiver ativo. A
+ * checagem vem depois da senha conferida e antes de qualquer gravação — quem não autenticou não
+ * descobre nada sobre o caixa e um caixa inválido não cria sessão, não rehasha senha e não grava
+ * login. Nulo continua aceito: sessão sem caixa, vinculada depois na abertura (passo 607).
  */
 @ApplicationScoped
 public class LoginUseCase {
@@ -114,6 +121,12 @@ public class LoginUseCase {
 
   @Inject StoreLookup storeLookup;
 
+  /**
+   * Porta compartilhada do caixa (passo 607b): o login valida o caixa informado sem depender de
+   * {@code cash.application}, que já depende de {@code auth} (ciclo fecharia).
+   */
+  @Inject CashRegisterLookup cashRegisterLookup;
+
   /** Auditoria do acesso (§6.3.3, passo 304): a tentativa vira evento na transação do login. */
   @Inject AuditRecorder auditRecorder;
 
@@ -157,6 +170,10 @@ public class LoginUseCase {
    *
    * <p>O rate limit do passo 212 vem primeiro: IP com o teto estourado recebe 429 {@code
    * RATE_LIMITED} sem que a senha seja conferida nem o contador do usuário mude.
+   *
+   * <p>O caixa informado (passo 607b) é validado depois da senha e antes das gravações: caixa
+   * inexistente ou inativo responde 400 {@code VALIDATION_ERROR} com {@code errors[]} apontando
+   * {@code cashRegisterId}, sem sessão criada nem rehash.
    */
   @Transactional(dontRollbackOn = BusinessException.class)
   public LoginResult execute(LoginCommand command) {
@@ -190,6 +207,7 @@ public class LoginUseCase {
       recordLoginFailure(LOGIN_FAILED_ACTION, command, user);
       rejectInvalidCredentials(command.ip());
     }
+    requireActiveCashRegister(command.cashRegisterId());
     rehashIfNeeded(user, command.password());
 
     Store store = requireStore();
@@ -291,6 +309,17 @@ public class LoginUseCase {
       Thread.currentThread().interrupt();
     }
     throw new BusinessException(ErrorCode.INVALID_CREDENTIALS, INVALID_CREDENTIALS_DETAIL);
+  }
+
+  /**
+   * Caixa informado precisa existir e estar ativo (passo 607b); nulo segue aceito. A checagem roda
+   * depois da senha conferida e antes de qualquer gravação: o 400 não vaza a existência do caixa
+   * para quem não autenticou e caixa inválido não deixa sessão, rehash nem login registrado.
+   */
+  private void requireActiveCashRegister(UUID cashRegisterId) {
+    if (cashRegisterId != null && !cashRegisterLookup.isActive(cashRegisterId)) {
+      throw new FieldValidationException("cashRegisterId", "caixa não encontrado ou inativo");
+    }
   }
 
   /**
