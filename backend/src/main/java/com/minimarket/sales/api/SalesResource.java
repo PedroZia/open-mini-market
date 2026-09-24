@@ -1,5 +1,6 @@
 package com.minimarket.sales.api;
 
+import com.minimarket.auth.application.AuthorizationService;
 import com.minimarket.sales.application.AddSaleItemCommand;
 import com.minimarket.sales.application.AddSaleItemUseCase;
 import com.minimarket.sales.application.ApplyDiscountCommand;
@@ -8,24 +9,35 @@ import com.minimarket.sales.application.ChangeSaleItemQuantityCommand;
 import com.minimarket.sales.application.ChangeSaleItemQuantityUseCase;
 import com.minimarket.sales.application.CreateSaleCommand;
 import com.minimarket.sales.application.CreateSaleUseCase;
+import com.minimarket.sales.application.GetSaleCommand;
+import com.minimarket.sales.application.GetSaleUseCase;
 import com.minimarket.sales.application.LinkCustomerCommand;
 import com.minimarket.sales.application.LinkCustomerUseCase;
+import com.minimarket.sales.application.ListSalesQuery;
+import com.minimarket.sales.application.ListSalesUseCase;
 import com.minimarket.sales.application.RemoveDiscountCommand;
 import com.minimarket.sales.application.RemoveDiscountUseCase;
 import com.minimarket.sales.application.RemoveSaleItemCommand;
 import com.minimarket.sales.application.RemoveSaleItemUseCase;
+import com.minimarket.sales.application.SalePage;
+import com.minimarket.sales.application.SaleSummary;
 import com.minimarket.sales.application.UnlinkCustomerCommand;
 import com.minimarket.sales.application.UnlinkCustomerUseCase;
 import com.minimarket.sales.domain.Sale;
 import com.minimarket.sales.domain.SaleItem;
+import com.minimarket.sales.domain.SaleStatus;
 import com.minimarket.shared.api.IdempotencyGuard;
+import com.minimarket.shared.api.PageResponse;
 import com.minimarket.shared.api.RequirePermission;
 import com.minimarket.shared.application.OperationContext;
 import com.minimarket.shared.domain.Permission;
+import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.HttpMethod;
 import jakarta.ws.rs.PATCH;
@@ -34,8 +46,10 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -82,6 +96,17 @@ import java.util.UUID;
  * {@code Idempotency-Key} (§8 só a exige em {@code POST /sales}, pagamentos, conclusão,
  * cancelamento e dinheiro): repetir o gesto é do operador, e o {@code DELETE} sem o que tirar é
  * no-op (200, sem evento).
+ *
+ * <p>A consulta (passo 812) tem duas rotas: o detalhe {@code GET /sales/{id}} devolve a venda
+ * inteira — o mesmo {@link SaleDetailResponse} das operações acima, com itens, desconto e cliente —
+ * e o histórico {@code GET /sales} devolve a página do envelope padrão. O detalhe <em>não</em> usa
+ * {@code @RequirePermission}: o §4.5 não tem permissão de leitura de venda e a posse (BR-11, §9.4)
+ * é de quem opera o caixa; a permissão de gestão {@code report.read} entra como bypass — resolvida
+ * aqui pelo {@link AuthorizationService} e passada ao caso de uso, como o 305 faz com o porteiro
+ * declarativo. Assim o OPERADOR lê a venda do seu caixa e recebe 403 {@code ACCESS_DENIED} na do
+ * outro, enquanto o GERENTE lê qualquer uma. O histórico exige {@code report.read} na rota: é visão
+ * de loja, não do caixa. Pagamentos ficam na Fase 9 — a tabela ainda não existe — então o detalhe
+ * não tem {@code paidAmount}/{@code changeAmount}.
  */
 @Path(SalesResource.PATH)
 public class SalesResource {
@@ -115,8 +140,20 @@ public class SalesResource {
   /** Idempotência da abertura (§8, passo 807): a chave identifica o gesto de abrir a venda. */
   @Inject IdempotencyGuard idempotencyGuard;
 
+  /** Consulta de venda (passo 812): a rota que a expõe nasce neste passo. */
+  @Inject GetSaleUseCase getSaleUseCase;
+
+  /** Histórico de vendas (passo 812): a rota que o expõe nasce neste passo. */
+  @Inject ListSalesUseCase listSalesUseCase;
+
   /** O ator da requisição: o caixa vinculado e o operador saem daqui, não do cliente (BR-11). */
   @Inject OperationContext operationContext;
+
+  /**
+   * Permissões efetivas da sessão (passo 305): é daqui que sai o bypass de gestão do detalhe — a
+   * leitura não passa pelo porteiro declarativo, então quem pergunta é o resource.
+   */
+  @Inject AuthorizationService authorizationService;
 
   /**
    * Abre a venda no caixa da sessão autenticada e devolve 201 com o cabeçalho da venda nascida. Sem
@@ -305,6 +342,63 @@ public class SalesResource {
     return toDetailResponse(sale);
   }
 
+  /**
+   * Detalhe da venda (passo 812): a venda inteira — cabeçalho, itens, desconto e cliente. Sem
+   * {@code @RequirePermission}: o §4.5 não tem permissão de leitura de venda e a visibilidade é da
+   * guarda do caso de uso — a sessão lê a venda do seu caixa (BR-11, §9.4) e quem tem {@code
+   * report.read} lê a de qualquer caixa (bypass de gestão, resolvido aqui e passado no comando).
+   * {@code @Authenticated} mantém explícita a exigência de sessão da política global.
+   *
+   * <p>Venda inexistente é 404 {@code SALE_NOT_FOUND} para qualquer sessão; venda de outro caixa
+   * sem a permissão de relatório é 403 {@code ACCESS_DENIED} — os dois do caso de uso. Venda
+   * concluída é consultável: a leitura não exige {@code OPEN}.
+   */
+  @GET
+  @Path("/{id}")
+  @Authenticated
+  @Produces(MediaType.APPLICATION_JSON)
+  public SaleDetailResponse get(@PathParam("id") UUID id) {
+    Sale sale =
+        getSaleUseCase.execute(
+            new GetSaleCommand(
+                id,
+                operationContext.cashRegisterId(),
+                authorizationService.has(Permission.REPORT_READ)));
+    return toDetailResponse(sale);
+  }
+
+  /**
+   * Histórico da loja (passo 812): página do envelope padrão com os filtros do §9.3 — período
+   * ({@code from} inclusivo, {@code to} exclusivo sobre {@code created_at}), status, sessão de
+   * caixa e operador — em ordem {@code created_at desc}. Todos os filtros são opcionais e {@code
+   * size} acima de 100 é limitado; {@code page} negativo ou {@code size} menor que 1 → 400 {@code
+   * VALIDATION_ERROR} do caso de uso.
+   *
+   * <p>Exige {@code report.read}: é visão de loja, não do caixa — sem a permissão o interceptor
+   * responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar (é o 403 do OPERADOR).
+   */
+  @GET
+  @RequirePermission(Permission.REPORT_READ)
+  @Produces(MediaType.APPLICATION_JSON)
+  public PageResponse<SaleSummaryResponse> list(
+      @QueryParam("from") Instant from,
+      @QueryParam("to") Instant to,
+      @QueryParam("status") SaleStatus status,
+      @QueryParam("cashSessionId") UUID cashSessionId,
+      @QueryParam("operatorUserId") UUID operatorUserId,
+      @QueryParam("page") @DefaultValue("0") int page,
+      @QueryParam("size") @DefaultValue("20") int size) {
+    SalePage sales =
+        listSalesUseCase.execute(
+            new ListSalesQuery(from, to, status, cashSessionId, operatorUserId, page, size));
+    return new PageResponse<>(
+        sales.items().stream().map(SalesResource::toSummaryResponse).toList(),
+        sales.page(),
+        sales.size(),
+        sales.totalItems(),
+        sales.totalPages());
+  }
+
   private static SaleResponse toResponse(Sale sale) {
     return new SaleResponse(
         sale.id(),
@@ -355,5 +449,23 @@ public class SalesResource {
         item.unitPrice(),
         item.quantity(),
         item.lineTotal());
+  }
+
+  /** Linha do histórico: o cabeçalho da projeção do 803, sem os itens (o detalhe tem os seus). */
+  private static SaleSummaryResponse toSummaryResponse(SaleSummary sale) {
+    return new SaleSummaryResponse(
+        sale.id(),
+        sale.number(),
+        sale.status(),
+        sale.cashSessionId(),
+        sale.cashRegisterId(),
+        sale.operatorUserId(),
+        sale.customerId(),
+        sale.subtotal(),
+        sale.discountAmount(),
+        sale.total(),
+        sale.itemCount(),
+        sale.createdAt(),
+        sale.completedAt());
   }
 }

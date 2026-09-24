@@ -8,10 +8,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Dublê de {@link SaleStore} dos unitários das operações de item (passos 808/809): guarda a venda
- * do cenário e o que o caso de uso mandou atualizar. Leitura, busca, contagem e lock são
- * exercitados pelos testes de integração do passo 803 — aqui o que importa é o que o caso de uso
- * fez com o agregado e se gravou.
+ * Dublê de {@link SaleStore} dos unitários das operações de item (passos 808/809) e da consulta
+ * (passo 812): guarda a venda do cenário e o que o caso de uso mandou atualizar, e devolve o
+ * resultado configurado da busca/contagem registrando como o caso de uso as chamou. O round-trip
+ * real (find/insert/update/search/lock) é exercitado pelos testes de integração do passo 803 — aqui
+ * o que importa é o que o caso de uso fez com o agregado e o que repassou à porta.
  */
 final class FakeSaleStore implements SaleStore {
 
@@ -26,6 +27,18 @@ final class FakeSaleStore implements SaleStore {
    */
   int updateCount;
 
+  /** Resultado que a busca devolve; vazio é a página sem venda. */
+  List<SaleSummary> searchResult = List.of();
+
+  /** Total que a contagem devolve — o {@code totalItems} da página montada pelo caso de uso. */
+  long countResult;
+
+  /** Como o caso de uso chamou a busca; nula quando não houve busca. */
+  SearchCall searchCall;
+
+  /** Como o caso de uso chamou a contagem; nula quando não houve contagem. */
+  CountCall countCall;
+
   @Override
   public Optional<Sale> findById(UUID id) {
     return Optional.ofNullable(sale).filter(found -> found.id().equals(id));
@@ -39,7 +52,7 @@ final class FakeSaleStore implements SaleStore {
 
   @Override
   public void insert(Sale sale) {
-    throw new UnsupportedOperationException("insert não é usado pelas operações de item");
+    throw new UnsupportedOperationException("insert não é usado pela consulta");
   }
 
   @Override
@@ -51,23 +64,38 @@ final class FakeSaleStore implements SaleStore {
       UUID operatorUserId,
       int page,
       int size) {
-    throw new UnsupportedOperationException("search não é usado pelas operações de item");
+    searchCall = new SearchCall(from, to, status, cashSessionId, operatorUserId, page, size);
+    return searchResult;
   }
 
   @Override
   public long count(
       Instant from, Instant to, SaleStatus status, UUID cashSessionId, UUID operatorUserId) {
-    throw new UnsupportedOperationException("count não é usado pelas operações de item");
+    countCall = new CountCall(from, to, status, cashSessionId, operatorUserId);
+    return countResult;
   }
 
   @Override
   public Optional<Sale> lockById(UUID id) {
-    throw new UnsupportedOperationException("lockById não é usado pelas operações de item");
+    throw new UnsupportedOperationException("lockById não é usado pela consulta");
   }
 
   @Override
   public boolean existsOpenByCashSession(UUID cashSessionId) {
-    throw new UnsupportedOperationException(
-        "existsOpenByCashSession não é usado pelas operações de item");
+    throw new UnsupportedOperationException("existsOpenByCashSession não é usado pela consulta");
   }
+
+  /** Argumentos de uma busca, como o caso de uso os repassou. */
+  record SearchCall(
+      Instant from,
+      Instant to,
+      SaleStatus status,
+      UUID cashSessionId,
+      UUID operatorUserId,
+      int page,
+      int size) {}
+
+  /** Argumentos de uma contagem, como o caso de uso os repassou. */
+  record CountCall(
+      Instant from, Instant to, SaleStatus status, UUID cashSessionId, UUID operatorUserId) {}
 }

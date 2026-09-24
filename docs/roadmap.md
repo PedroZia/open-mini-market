@@ -707,7 +707,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 nos quatro endpoints; cliente inativo → 422; cliente inexistente → 404; OPERADOR → 403 nos dois de desconto (matriz real); venda de outro caixa → 403; venda concluída → 409; forma inválida → 400.
   **Commit:** `feat(sales): expoe desconto e cliente na venda`
 
-- [ ] **812 — Consulta de vendas**
+- [x] **812 — Consulta de vendas**
   **Objetivo:** ver venda e histórico. **Depende:** 803
   **Implementar:** `GET /sales/{id}` (itens + pagamentos + desconto + status) e `GET /sales` (filtros `from`, `to`, `status`, `cashSessionId`, `operatorUserId`, paginação).
   **Testes/aceite:** detalhe correto; filtros e paginação funcionando; venda de outro caixa → 403 para operador.
