@@ -3,6 +3,8 @@ package com.minimarket.cash.api;
 import com.minimarket.cash.application.CashMovementResult;
 import com.minimarket.cash.application.CashRegisterView;
 import com.minimarket.cash.application.CashSessionSummary;
+import com.minimarket.cash.application.CloseCashSessionCommand;
+import com.minimarket.cash.application.CloseCashSessionUseCase;
 import com.minimarket.cash.application.CurrentCashSessionView;
 import com.minimarket.cash.application.GetCurrentCashSessionUseCase;
 import com.minimarket.cash.application.ListCashRegistersUseCase;
@@ -56,6 +58,9 @@ public class CashRegistersResource {
 
   @Inject OpenCashSessionUseCase openCashSessionUseCase;
 
+  /** Fechamento com conferência (passo 611): a rota que o expõe é do passo 612. */
+  @Inject CloseCashSessionUseCase closeCashSessionUseCase;
+
   @Inject GetCurrentCashSessionUseCase getCurrentCashSessionUseCase;
 
   /** Sangria (passo 609) e suprimento (passo 610): os dois movimentos de dinheiro do caixa. */
@@ -108,6 +113,36 @@ public class CashRegistersResource {
       @Valid OpenCashSessionRequest request) {
     return idempotencyGuard.execute(
         idempotencyKey, HttpMethod.POST, openPath(id), request, () -> openSession(id, request));
+  }
+
+  /**
+   * Fecha o caixa com a conferência do operador e devolve 200 com o detalhe da sessão fechada: é
+   * atualização de estado, não criação (§9.1). Exige {@code cash.close} — sem a permissão o
+   * interceptor responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar — e é operação
+   * de dinheiro idempotente por contrato (§8): o {@link IdempotencyGuard} exige o header {@code
+   * Idempotency-Key} (sem ele, 400 {@code IDEMPOTENCY_KEY_REQUIRED}) e o retry com a mesma chave
+   * devolve a resposta gravada com {@code Idempotency-Replayed: true}, sem fechar de novo.
+   *
+   * <p>A forma é validada antes ({@code countedAmount} ausente ou negativo → 400 {@code
+   * VALIDATION_ERROR}); caixa sem sessão aberta é 409 {@code CASH_SESSION_ALREADY_CLOSED} — a
+   * segunda chamada com chave nova cai no mesmo conflito de estado. Quem calcula o esperado e a
+   * diferença é o caso de uso (passo 611), nunca o cliente (BR-12).
+   */
+  @POST
+  @Path("/{id}/close")
+  @RequirePermission(Permission.CASH_CLOSE)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response close(
+      @PathParam("id") UUID id,
+      @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
+      @Valid CloseCashSessionRequest request) {
+    return idempotencyGuard.execute(
+        idempotencyKey,
+        HttpMethod.POST,
+        closePath(id),
+        request,
+        () -> Response.ok(toDetailResponse(closeSession(id, request))).build());
   }
 
   /**
@@ -195,6 +230,13 @@ public class CashRegistersResource {
     return Response.created(currentSessionLocation(id)).entity(toSessionResponse(session)).build();
   }
 
+  /** Fecha a sessão com o ator da requisição: o contado e as observações vêm do corpo validado. */
+  private CashSessionSummary closeSession(UUID id, CloseCashSessionRequest request) {
+    return closeCashSessionUseCase.execute(
+        new CloseCashSessionCommand(
+            id, request.countedAmount(), request.notes(), operationContext.userId()));
+  }
+
   /** Sangra com o ator da requisição: o motivo e o valor vêm do corpo validado. */
   private CashMovementResult recordWithdrawal(UUID id, CashMovementRequest request) {
     return recordWithdrawalUseCase.execute(
@@ -222,6 +264,11 @@ public class CashRegistersResource {
   /** O caminho concreto da requisição: é ele que a chave de idempotência identifica (§8). */
   private static String openPath(UUID cashRegisterId) {
     return PATH + "/" + cashRegisterId + "/open";
+  }
+
+  /** O caminho concreto do fechamento, pelo mesmo motivo do {@link #openPath}. */
+  private static String closePath(UUID cashRegisterId) {
+    return PATH + "/" + cashRegisterId + "/close";
   }
 
   /**
@@ -254,6 +301,23 @@ public class CashRegistersResource {
         session.openedAt(),
         session.openedByUserId(),
         session.openingAmount());
+  }
+
+  /** Detalhe da sessão fechada (passo 612): abertura + conferência, sem {@code storeId}/version. */
+  private static CashSessionDetailResponse toDetailResponse(CashSessionSummary session) {
+    return new CashSessionDetailResponse(
+        session.id(),
+        session.cashRegisterId(),
+        session.status(),
+        session.openedAt(),
+        session.openedByUserId(),
+        session.openingAmount(),
+        session.closedAt(),
+        session.closedByUserId(),
+        session.countedAmount(),
+        session.expectedAmount(),
+        session.differenceAmount(),
+        session.closingNotes());
   }
 
   private static CashMovementResponse toMovementResponse(CashMovementResult movement) {

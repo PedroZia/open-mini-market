@@ -561,7 +561,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** fecha com diferença calculada corretamente; fechar duas vezes → 409; auditoria registrada.
   **Commit:** `feat(cash): implementa fechamento de caixa`
 
-- [ ] **612 — API de fechamento e resumo**
+- [x] **612 — API de fechamento e resumo**
   **Objetivo:** fechar e conferir pela API. **Depende:** 611
   **Implementar:** `POST /cash-registers/{id}/close` (idempotente) + `GET /cash-sessions/{id}` + `GET /cash-sessions/{id}/summary` (esperado × contado, por tipo de movimento).
   **Testes/aceite:** 200; resumo confere com os movimentos; 409 se já fechada.
