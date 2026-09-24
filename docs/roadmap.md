@@ -823,7 +823,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** chave expirada é removida; chave válida permanece.
   **Commit:** `chore(shared): limpa chaves de idempotencia expiradas`
 
-- [ ] **1005 — Catálogo de auditoria documentado**
+- [x] **1005 — Catálogo de auditoria documentado**
   **Objetivo:** consulta sem adivinhação. **Depende:** 1001
   **Implementar:** `docs/auditoria.md` com a lista de `action`, campos de `details` e exemplo de investigação (venda, desconto, sangria).
   **Testes/aceite:** documento cobre todos os eventos emitidos no código (conferido por busca no fonte).
