@@ -473,7 +473,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** integração do repositório (busca por nome parcial, CPF e telefone; CPF duplicado ativo falha; soft delete libera o tax_id) + unitário do validador de CPF.
   **Commit:** `feat(customers): adiciona entidade e repositorio de clientes`
 
-- [ ] **502b — Cliente: casos de uso e CRUD na API**
+- [x] **502b — Cliente: casos de uso e CRUD na API**
   **Objetivo:** manter clientes pela API. **Depende:** 502a
   **Implementar:** casos de uso (listar/buscar, criar, detalhar, atualizar, desativar) + `GET/POST /api/v1/customers`, `GET/PUT /api/v1/customers/{id}` e `POST /api/v1/customers/{id}/disable` com `customer.read`/`customer.write`; `CUSTOMER_NOT_FOUND`; auditoria `CUSTOMER_CREATED`/`CUSTOMER_UPDATED`/`CUSTOMER_DISABLED`; rotas novas na lista `API_ROUTES` do `RouteSecurityTest`.
   **Testes/aceite:** CRUD na API; busca por nome parcial e por CPF; CPF inválido rejeitado; CPF duplicado → 409; auditoria registrada; OPERADOR escreve (a matriz de clientes dá `customer.write` ao operador).
