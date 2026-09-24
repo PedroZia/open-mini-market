@@ -8,6 +8,7 @@ import java.util.Locale;
  */
 public enum ErrorCode {
   VALIDATION_ERROR(400, "Dados inválidos"),
+  IDEMPOTENCY_KEY_REQUIRED(400, "Cabeçalho Idempotency-Key obrigatório"),
   UNKNOWN_ROLE(400, "Papel desconhecido"),
   UNKNOWN_PERMISSION(400, "Permissão desconhecida"),
   INVALID_CURRENT_PASSWORD(400, "Senha atual inválida"),
@@ -29,6 +30,7 @@ public enum ErrorCode {
   BARCODE_ALREADY_EXISTS(409, "Código de barras já está em uso"),
   TAX_ID_ALREADY_EXISTS(409, "CPF já está em uso"),
   CASH_REGISTER_ALREADY_OPEN(409, "Caixa já está aberto"),
+  IDEMPOTENCY_KEY_REUSED(409, "Chave de idempotência já utilizada"),
   CONCURRENT_MODIFICATION(409, "Modificação concorrente"),
   BUSINESS_ERROR(422, "Regra de negócio violada"),
   ACCOUNT_LOCKED(423, "Conta bloqueada"),

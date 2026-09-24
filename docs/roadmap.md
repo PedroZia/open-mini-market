@@ -519,6 +519,12 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitário/integração: abre com sucesso; segunda abertura → `409 CASH_REGISTER_ALREADY_OPEN`; auditoria registrada.
   **Commit:** `feat(cash): implementa abertura de caixa`
 
+- [x] **607a — Migration `idempotency_keys` + `IdempotencyService`**
+  **Objetivo:** ligar o mecanismo de idempotência compartilhado antes do primeiro endpoint idempotente (dinheiro/estoque). **Depende:** 603
+  **Implementar:** `V14__idempotency_keys.sql` (§5.3, com índice em `expires_at`); porta `IdempotencyKeyStore` + records `StoredIdempotentResponse`/`NewIdempotencyRecord` + `IdempotencyService` em `shared/application` (replay só com `userId + method + path + hash` iguais, senão `409 IDEMPOTENCY_KEY_REUSED`; `expires_at` = `Clock` + `minimarket.idempotency.ttl`, 24 h); entidade e repositório em `shared/infrastructure` (PK é a própria `key`; 23505 → `ConflictException(IDEMPOTENCY_KEY_REUSED)`); `IdempotencyGuard` em `shared/api` (header `Idempotency-Key` obrigatório → 400, hash SHA-256 do corpo, replay com status/corpo gravados + `Idempotency-Replayed: true`, grava só resposta < 400); códigos novos `IDEMPOTENCY_KEY_REQUIRED` (400) e `IDEMPOTENCY_KEY_REUSED` (409). Subpasso criado antes do 607 para o mecanismo compartilhado nascer pronto e testado, sem endpoint novo: o primeiro consumidor é o próprio 607.
+  **Testes/aceite:** migration aplica do zero (colunas + PK + índice); repositório: round-trip (inclusive corpo `null` em jsonb) e chave repetida → `ConflictException`; guard unitário sem Quarkus: sem header → 400, primeira chamada grava e devolve a ação, replay não roda a ação, hash/usuário divergente → 409, corrida perdida no record → replay do vencedor.
+  **Commit:** `feat(shared): adiciona idempotencia de requisicoes`
+
 - [ ] **607 — API `POST /api/v1/cash-registers/{id}/open`**
   **Objetivo:** abrir caixa pela API. **Depende:** 606
   **Implementar:** endpoint idempotente + resposta com sessão criada; vínculo da sessão autenticada ao caixa (atualiza `auth_sessions.cash_register_id`).
@@ -648,8 +654,8 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Commit:** `feat(sales): implementa abertura de venda`
 
 - [ ] **806 — Idempotência na API**
-  **Objetivo:** retry não duplica operação. **Depende:** 801
-  **Implementar:** `V17__idempotency_keys.sql` + `IdempotencyService` (hash do corpo, replay da resposta, 409 se mesma chave com corpo diferente) + filtro/helper reutilizável nos endpoints de dinheiro/estoque.
+  **Objetivo:** retry não duplica operação. **Depende:** 801, 607a
+  **Implementar:** reutiliza o mecanismo do **607a** nos endpoints de dinheiro/estoque — `idempotency_keys` (V14), `IdempotencyService` e `IdempotencyGuard`: hash do corpo, replay da resposta, 409 se mesma chave com corpo diferente. A `V17__idempotency_keys.sql` que o passo citava não existe mais; sem migration nova.
   **Testes/aceite:** duas chamadas com a mesma chave → mesma resposta e um único efeito; corpo diferente → 409 `IDEMPOTENCY_KEY_REUSED`; sem header em endpoint obrigatório → 400.
   **Commit:** `feat(shared): adiciona idempotencia de requisicoes`
 
