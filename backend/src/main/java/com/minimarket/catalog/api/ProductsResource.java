@@ -2,6 +2,7 @@ package com.minimarket.catalog.api;
 
 import com.minimarket.catalog.application.CreateProductCommand;
 import com.minimarket.catalog.application.CreateProductUseCase;
+import com.minimarket.catalog.application.GetProductByBarcodeUseCase;
 import com.minimarket.catalog.application.GetProductUseCase;
 import com.minimarket.catalog.application.ListProductsUseCase;
 import com.minimarket.catalog.application.ProductPage;
@@ -46,6 +47,8 @@ public class ProductsResource {
   @Inject ListProductsUseCase listProductsUseCase;
 
   @Inject GetProductUseCase getProductUseCase;
+
+  @Inject GetProductByBarcodeUseCase getProductByBarcodeUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -115,6 +118,20 @@ public class ProductsResource {
     return toResponse(getProductUseCase.execute(id));
   }
 
+  /**
+   * Bipe do PDV (passo 409): resolve o produto pelo barcode lido, com a normalização do caso de
+   * uso. Produto inativo, soft-deletado ou código desconhecido → 404 {@code PRODUCT_NOT_FOUND}. O
+   * segmento literal {@code barcode} tem prioridade sobre {@code /{id}} no JAX-RS: um código
+   * não-UUID nunca cai no detalhe de 408.
+   */
+  @GET
+  @Path("/barcode/{barcode}")
+  @RequirePermission(Permission.PRODUCT_READ)
+  @Produces(MediaType.APPLICATION_JSON)
+  public ProductBarcodeResponse getByBarcode(@PathParam("barcode") String barcode) {
+    return toBarcodeResponse(getProductByBarcodeUseCase.execute(barcode));
+  }
+
   private static ProductResponse toResponse(ProductSummary product) {
     return new ProductResponse(
         product.id(),
@@ -129,5 +146,11 @@ public class ProductsResource {
         product.version(),
         product.createdAt(),
         product.updatedAt());
+  }
+
+  /** Só os cinco campos do bipe; o resto do cadastro fica no detalhe (passo 408). */
+  private static ProductBarcodeResponse toBarcodeResponse(ProductSummary product) {
+    return new ProductBarcodeResponse(
+        product.id(), product.barcode(), product.name(), product.price(), product.unit());
   }
 }

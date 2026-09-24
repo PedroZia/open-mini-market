@@ -421,7 +421,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200; 404 `PRODUCT_NOT_FOUND`.
   **Commit:** `feat(catalog): expoe detalhe de produto`
 
-- [ ] **409 — API `GET /api/v1/products/barcode/{barcode}`** ⭐ caminho quente do PDV
+- [x] **409 — API `GET /api/v1/products/barcode/{barcode}`** ⭐ caminho quente do PDV
   **Objetivo:** bipe resolve produto. **Depende:** 404
   **Implementar:** busca por barcode normalizado; só produtos ativos; resposta enxuta (id, barcode, nome, preço, unidade); `404` com `code=PRODUCT_NOT_FOUND`. O passo 1104b estende este endpoint para código interno e etiqueta de balança (BR-14).
   **Testes/aceite:** 200 para ativo; 404 para inativo/inexistente; teste de tempo de resposta < 50 ms (smoke).

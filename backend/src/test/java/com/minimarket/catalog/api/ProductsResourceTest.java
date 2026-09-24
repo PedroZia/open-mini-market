@@ -20,6 +20,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -30,10 +31,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Produtos na API: criação (passo 406), listagem com busca e filtros (passo 407) e detalhe (passo
- * 408) contra PostgreSQL real (Dev Services): as rotas de verdade, com o ADMIN da fixture e um
- * OPERADOR criado pelo caso de uso e autenticado por login real, como no {@code
- * PermissionMatrixTest}.
+ * Produtos na API: criação (passo 406), listagem com busca e filtros (passo 407), detalhe (passo
+ * 408) e bipe por código de barras (passo 409) contra PostgreSQL real (Dev Services): as rotas de
+ * verdade, com o ADMIN da fixture e um OPERADOR criado pelo caso de uso e autenticado por login
+ * real, como no {@code PermissionMatrixTest}.
  *
  * <p>A listagem é semeada pela porta {@code ProductStore} (sem caso de uso nem auditoria, em
  * transação própria). O request HTTP commita: o {@link #removeRowsCreatedByThisTest()} apaga ao fim
@@ -46,6 +47,9 @@ class ProductsResourceTest extends IntegrationTestBase {
 
   /** Sufixo desta classe: nomes e barcodes nascem e morrem com ele. */
   private static final String SUFFIX = UUID.randomUUID().toString().substring(0, 8);
+
+  /** Limite do smoke de tempo do bipe (passo 409): o caminho quente não pode passar disso. */
+  private static final long MAX_BARCODE_LOOKUP_NANOS = 50_000_000L;
 
   private static final String PASSWORD = "senha-secreta";
   private static final String AUTHORIZATION = "Authorization";
@@ -397,6 +401,122 @@ class ProductsResourceTest extends IntegrationTestBase {
     assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
   }
 
+  @Test
+  @DisplayName("GET /api/v1/products/barcode/{barcode} devolve 200 com os cinco campos do bipe")
+  void resolvesActiveProductByBarcode() {
+    UUID id = seedProduct("Refrigerante 2L", "7.50", null, STORED_BARCODE);
+
+    Response response = getByBarcode(STORED_BARCODE);
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.contentType()).contains("application/json");
+
+    Map<String, Object> json = response.jsonPath().getMap("$");
+    assertThat(json)
+        .as("contrato do bipe: resposta enxuta, sem cadastro completo nem estoque")
+        .containsOnlyKeys("id", "barcode", "name", "price", "unit");
+    assertThat(json.get("id")).isEqualTo(id.toString());
+    assertThat(json.get("barcode")).isEqualTo(STORED_BARCODE);
+    assertThat(json.get("name")).isEqualTo(name("Refrigerante 2L"));
+    assertThat(number(json.get("price"))).isEqualByComparingTo("7.50");
+    assertThat(json.get("unit")).isEqualTo("UN");
+  }
+
+  @Test
+  @DisplayName(
+      "GET /api/v1/products/barcode/{barcode} normaliza espaços: o bipe resolve o mesmo produto")
+  void normalizesBarcodeWithSpaces() {
+    UUID id = seedProduct("Café 500g", "18.90", null, STORED_BARCODE);
+
+    Response response = getByBarcode(SPACED_BARCODE);
+
+    assertThat(response.statusCode())
+        .as("trim e espaços internos removidos pelo caso de uso, não pela API")
+        .isEqualTo(200);
+    assertThat(response.jsonPath().getString("id")).isEqualTo(id.toString());
+    assertThat(response.jsonPath().getString("barcode"))
+        .as("a resposta devolve o código como o banco guardou")
+        .isEqualTo(STORED_BARCODE);
+
+    Response blank = getByBarcode("   ");
+
+    assertThat(blank.statusCode())
+        .as("código só de espaços normaliza para vazio e não resolve produto")
+        .isEqualTo(404);
+    assertThat(blank.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+  }
+
+  @Test
+  @DisplayName(
+      "GET /api/v1/products/barcode/{barcode} de produto soft-deletado responde 404 PRODUCT_NOT_FOUND")
+  void hidesSoftDeletedProductFromBarcode() {
+    UUID id = seedProduct("Detergente 500ml", "3.79", null, STORED_BARCODE);
+    softDeleteViaPort(id);
+
+    Response response = getByBarcode(STORED_BARCODE);
+
+    assertThat(response.statusCode()).isEqualTo(404);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+  }
+
+  @Test
+  @DisplayName(
+      "GET /api/v1/products/barcode/{barcode} de produto inativo responde 404 PRODUCT_NOT_FOUND")
+  void hidesInactiveProductFromBarcode() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null, STORED_BARCODE);
+    setActiveDirectly(id, false);
+
+    Response response = getByBarcode(STORED_BARCODE);
+
+    assertThat(response.statusCode()).as("bipe só resolve produto ativo").isEqualTo(404);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+  }
+
+  @Test
+  @DisplayName(
+      "GET /api/v1/products/barcode/{barcode} de código inexistente responde 404 PRODUCT_NOT_FOUND")
+  void returnsNotFoundForUnknownBarcode() {
+    // O código não é UUID: se caísse na rota /{id}, a conversão do parâmetro responderia outro
+    // código — o PRODUCT_NOT_FOUND abaixo prova que o segmento literal venceu no roteamento.
+    Response response = getByBarcode("000" + SUFFIX + "000");
+
+    assertThat(response.statusCode()).isEqualTo(404);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/product-not-found");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Produto não encontrado");
+    assertThat(response.jsonPath().getInt("status")).isEqualTo(404);
+    assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+  }
+
+  @Test
+  @DisplayName(
+      "GET /api/v1/products/barcode/{barcode} responde abaixo de 50 ms (smoke do caminho quente)")
+  void resolvesBarcodeWithinFiftyMilliseconds() {
+    seedProduct("Cerveja lata", "4.29", null, STORED_BARCODE);
+
+    // O primeiro GET aquece a rota (e faz o login lazy do ADMIN da fixture): só as três medições
+    // seguintes contam, e a melhor delas é a do teste — sem sleep e sem depender de outra classe.
+    assertThat(getByBarcode(STORED_BARCODE).statusCode()).as("aquecimento").isEqualTo(200);
+
+    long[] measured = new long[3];
+    for (int index = 0; index < measured.length; index++) {
+      long start = System.nanoTime();
+      Response response = getByBarcode(STORED_BARCODE);
+      measured[index] = System.nanoTime() - start;
+      assertThat(response.statusCode()).as("medição %d", index + 1).isEqualTo(200);
+    }
+
+    long best = Arrays.stream(measured).min().orElseThrow();
+    assertThat(best)
+        .as(
+            "melhor das 3 medições: %.2f ms, %.2f ms, %.2f ms (limite de 50 ms)",
+            millis(measured[0]), millis(measured[1]), millis(measured[2]))
+        .isLessThan(MAX_BARCODE_LOOKUP_NANOS);
+  }
+
   /**
    * O request HTTP commita: some ao fim de cada teste o que esta classe criou — os eventos de
    * auditoria (do OPERADOR e os que apontam para os produtos criados) antes das sessões, do usuário
@@ -496,6 +616,23 @@ class ProductsResourceTest extends IntegrationTestBase {
         .response();
   }
 
+  /** GET no caminho quente do bipe como ADMIN; o RestAssured encoda o path param do barcode. */
+  private Response getByBarcode(String barcode) {
+    return given()
+        .header(AUTHORIZATION, "Bearer " + adminToken())
+        .pathParam("barcode", barcode)
+        .when()
+        .get(PATH + "/barcode/{barcode}")
+        .then()
+        .extract()
+        .response();
+  }
+
+  /** Nanossegundos em milissegundos fracionários, só para a mensagem do smoke de tempo. */
+  private static double millis(long nanos) {
+    return nanos / 1_000_000.0;
+  }
+
   /** GET no detalhe como ADMIN exigindo 404; o formato do problem fica com cada teste. */
   private Response getDetailExpectingNotFound(String id) {
     Response response = getDetail(id);
@@ -524,6 +661,13 @@ class ProductsResourceTest extends IntegrationTestBase {
 
   /** Produto da fixture pela porta, sem caso de uso nem auditoria — o alvo é a listagem. */
   private UUID seedProduct(String base, String price, UUID categoryId) {
+    return seedProduct(base, price, categoryId, null);
+  }
+
+  /**
+   * Produto da fixture com barcode gravado: o bipe precisa do código na linha, como o 405 grava.
+   */
+  private UUID seedProduct(String base, String price, UUID categoryId, String barcode) {
     return QuarkusTransaction.requiringNew()
         .call(
             () ->
@@ -531,7 +675,7 @@ class ProductsResourceTest extends IntegrationTestBase {
                     new NewProduct(
                         storeId(),
                         name(base),
-                        null,
+                        barcode,
                         "descrição de " + base,
                         categoryId,
                         "UN",
