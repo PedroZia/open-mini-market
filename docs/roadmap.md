@@ -925,7 +925,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** tela exibe leitura e timing; `docs/leitores.md` com o guia de configuração dos modelos usados na loja.
   **Commit:** `feat(tui): adiciona autoteste do leitor de codigo de barras`
 
-- [ ] **1105 — Núcleo: atalhos de teclado**
+- [x] **1105 — Núcleo: atalhos de teclado**
   **Objetivo:** operação 100% por teclado. **Depende:** 1103
   **Implementar:** `core/keys.ts` com o mapa de §11.3 (F1–F12, ENTER, ESC, setas, `+`/`-`, DEL) e resolução de conflito por contexto.
   **Testes/aceite:** cada atalho resolve a ação esperada no contexto correto; ESC fecha modal antes de sair da tela.
