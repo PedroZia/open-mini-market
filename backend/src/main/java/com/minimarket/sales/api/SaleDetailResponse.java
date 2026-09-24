@@ -16,11 +16,12 @@ import java.util.UUID;
  *
  * <p>O passo 812 (consulta de venda) reusa este DTO para o {@code GET /sales/{id}}; os pagamentos
  * entram na Fase 9, quando existirem. {@code customerId} é nulo na venda anônima (vínculo do passo
- * 811) e {@code completedAt}, até a conclusão (passo 906). O desconto aparece como o agregado o
- * guarda: tipo e valor informado (reais em {@code VALUE}, percentual em {@code PERCENT}), motivo e
- * o valor calculado pelo servidor em {@code discountAmount} (BR-03). {@code storeId} e {@code
- * version} são detalhe do banco e não entram; a projeção {@code Sale} do domínio é mapeada para cá
- * — entidade JPA nunca vai a JSON.
+ * 811) e {@code completedAt}, até a conclusão (passo 906). O cancelamento (passo 813) aparece com o
+ * motivo, o autor e o instante — todos nulos enquanto a venda não foi cancelada. O desconto aparece
+ * como o agregado o guarda: tipo e valor informado (reais em {@code VALUE}, percentual em {@code
+ * PERCENT}), motivo e o valor calculado pelo servidor em {@code discountAmount} (BR-03). {@code
+ * storeId} e {@code version} são detalhe do banco e não entram; a projeção {@code Sale} do domínio
+ * é mapeada para cá — entidade JPA nunca vai a JSON.
  */
 public record SaleDetailResponse(
     UUID id,
@@ -39,4 +40,7 @@ public record SaleDetailResponse(
     int itemCount,
     Instant createdAt,
     Instant completedAt,
+    String cancelReason,
+    UUID cancelledByUserId,
+    Instant cancelledAt,
     List<SaleItemResponse> items) {}

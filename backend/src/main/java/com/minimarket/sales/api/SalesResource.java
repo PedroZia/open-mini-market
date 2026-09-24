@@ -5,6 +5,8 @@ import com.minimarket.sales.application.AddSaleItemCommand;
 import com.minimarket.sales.application.AddSaleItemUseCase;
 import com.minimarket.sales.application.ApplyDiscountCommand;
 import com.minimarket.sales.application.ApplyDiscountUseCase;
+import com.minimarket.sales.application.CancelSaleCommand;
+import com.minimarket.sales.application.CancelSaleUseCase;
 import com.minimarket.sales.application.ChangeSaleItemQuantityCommand;
 import com.minimarket.sales.application.ChangeSaleItemQuantityUseCase;
 import com.minimarket.sales.application.CreateSaleCommand;
@@ -97,6 +99,12 @@ import java.util.UUID;
  * cancelamento e dinheiro): repetir o gesto é do operador, e o {@code DELETE} sem o que tirar é
  * no-op (200, sem evento).
  *
+ * <p>O cancelamento (passo 813) é o outro {@code POST} idempotente da venda: exige {@code
+ * sale.cancel} e o header {@code Idempotency-Key} (§8) e devolve 200 com a venda cancelada —
+ * status, motivo, autor e instante no mesmo {@link SaleDetailResponse} das demais operações. Só a
+ * venda {@code OPEN} transita: a já cancelada é no-op (200, sem evento) e a concluída, 409 {@code
+ * SALE_ALREADY_COMPLETED}.
+ *
  * <p>A consulta (passo 812) tem duas rotas: o detalhe {@code GET /sales/{id}} devolve a venda
  * inteira — o mesmo {@link SaleDetailResponse} das operações acima, com itens, desconto e cliente —
  * e o histórico {@code GET /sales} devolve a página do envelope padrão. O detalhe <em>não</em> usa
@@ -136,6 +144,9 @@ public class SalesResource {
 
   /** Desvínculo de cliente (passo 811a): a rota que o expõe nasce neste passo. */
   @Inject UnlinkCustomerUseCase unlinkCustomerUseCase;
+
+  /** Cancelamento da venda aberta (passo 813): a rota que o expõe nasce neste passo. */
+  @Inject CancelSaleUseCase cancelSaleUseCase;
 
   /** Idempotência da abertura (§8, passo 807): a chave identifica o gesto de abrir a venda. */
   @Inject IdempotencyGuard idempotencyGuard;
@@ -343,6 +354,49 @@ public class SalesResource {
   }
 
   /**
+   * Cancela a venda aberta do caixa da sessão (passo 813) e devolve 200 com a venda cancelada —
+   * status {@code CANCELLED}, motivo, autor e instante. Desistir não apaga nada: a venda e os itens
+   * ficam no histórico.
+   *
+   * <p>Exige {@code sale.cancel} (BR-04/§4.5): o OPERADOR opera a venda, mas não a cancela — sem a
+   * permissão o interceptor do {@code RequirePermission} responde 403 {@code ACCESS_DENIED} antes
+   * de o corpo do método rodar, e o caso de uso repete a checagem como backstop. A posse é da
+   * guarda (BR-11, §9.4), como nas operações de item, desconto e cliente: venda de outro caixa é
+   * 403 {@code ACCESS_DENIED} e venda inexistente, 404 {@code SALE_NOT_FOUND}.
+   *
+   * <p>É operação de dinheiro/estado idempotente por contrato (§8): o {@link IdempotencyGuard}
+   * exige o header {@code Idempotency-Key} (sem ele, 400 {@code IDEMPOTENCY_KEY_REQUIRED}) e o
+   * retry com a mesma chave devolve a resposta gravada com {@code Idempotency-Replayed: true}, sem
+   * cancelar de novo. Chave nova na venda já cancelada também é 200: o caso de uso trata o estado
+   * como no-op (sem evento); venda concluída é 409 {@code SALE_ALREADY_COMPLETED} — o pagamento
+   * aconteceu e a correção dela é o estorno da Fase 13. Motivo ausente ou em branco é 400 {@code
+   * VALIDATION_ERROR} da forma, validada antes do caso de uso.
+   */
+  @POST
+  @Path("/{id}/cancel")
+  @RequirePermission(Permission.SALE_CANCEL)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response cancel(
+      @PathParam("id") UUID id,
+      @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
+      @Valid SaleCancelRequest request) {
+    return idempotencyGuard.execute(
+        idempotencyKey,
+        HttpMethod.POST,
+        PATH + "/" + id + "/cancel",
+        request,
+        () -> Response.ok(toDetailResponse(cancelSale(id, request))).build());
+  }
+
+  /** Ação idempotente: cancela a venda e monta o 200 com a venda como ela ficou. */
+  private Sale cancelSale(UUID id, SaleCancelRequest request) {
+    return cancelSaleUseCase.execute(
+        new CancelSaleCommand(
+            id, operationContext.cashRegisterId(), request.reason(), operationContext.userId()));
+  }
+
+  /**
    * Detalhe da venda (passo 812): a venda inteira — cabeçalho, itens, desconto e cliente. Sem
    * {@code @RequirePermission}: o §4.5 não tem permissão de leitura de venda e a visibilidade é da
    * guarda do caso de uso — a sessão lê a venda do seu caixa (BR-11, §9.4) e quem tem {@code
@@ -436,6 +490,9 @@ public class SalesResource {
         sale.itemCount(),
         sale.createdAt(),
         sale.completedAt(),
+        sale.cancelReason(),
+        sale.cancelledByUserId(),
+        sale.cancelledAt(),
         sale.items().stream().map(SalesResource::toItemResponse).toList());
   }
 

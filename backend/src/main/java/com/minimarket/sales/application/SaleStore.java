@@ -21,8 +21,8 @@ public interface SaleStore {
 
   /**
    * Venda pelo id com os itens na ordem de inclusão; vazio para id desconhecido. Venda cancelada
-   * (passo 813) não é reconstruível pelo domínio do 802 — o adaptador falha explícito em vez de
-   * devolver um agregado que não corresponde à linha.
+   * (passo 813) é reconstruída como qualquer outra: o agregado rehidrata status, motivo, autor e
+   * instante do cancelamento.
    */
   Optional<Sale> findById(UUID id);
 

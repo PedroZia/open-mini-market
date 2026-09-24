@@ -40,6 +40,7 @@ public enum ErrorCode {
   IDEMPOTENCY_KEY_REUSED(409, "Chave de idempotência já utilizada"),
   CONCURRENT_MODIFICATION(409, "Modificação concorrente"),
   SALE_NOT_OPEN(409, "Venda não está aberta"),
+  SALE_ALREADY_COMPLETED(409, "Venda já concluída"),
   BUSINESS_ERROR(422, "Regra de negócio violada"),
   INSUFFICIENT_STOCK(422, "Estoque insuficiente"),
   PRODUCT_INACTIVE(422, "Produto inativo"),

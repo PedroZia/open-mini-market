@@ -21,11 +21,11 @@ import java.util.UUID;
  * Panache — o id (UUIDv7) chega pronto do agregado e a entidade não sai do módulo: nada de JPA em
  * JSON.
  *
- * <p>Só as colunas que o domínio do 802 usa hoje estão mapeadas; {@code
- * discount_authorized_by_user_id} e o bloco de cancelamento (passo 813) entram quando houver caso
- * de uso para eles. {@code paid_amount}/{@code change_amount} (passos 905+) nascem no default da
- * tabela e {@link #syncFrom(Sale)} não os toca — enquanto o agregado não os muda, ninguém os
- * escreve.
+ * <p>Só as colunas que o domínio usa hoje estão mapeadas; {@code discount_authorized_by_user_id}
+ * entra quando houver caso de uso para ele. O bloco de cancelamento (passo 813) está mapeado:
+ * motivo, autor e instante são estado do agregado desde o {@code Sale.cancel}. {@code
+ * paid_amount}/{@code change_amount} (passos 905+) nascem no default da tabela e {@link
+ * #syncFrom(Sale)} não os toca — enquanto o agregado não os muda, ninguém os escreve.
  */
 @Entity
 @Table(name = "sales")
@@ -100,6 +100,18 @@ public class SaleEntity {
   @Column(name = "completed_at")
   private Instant completedAt;
 
+  /** Motivo do cancelamento (passo 813); nulo enquanto a venda não foi cancelada. */
+  @Column(name = "cancel_reason")
+  private String cancelReason;
+
+  /** Quem cancelou a venda (passo 813); nulo enquanto ela não foi cancelada. */
+  @Column(name = "cancelled_by_user_id")
+  private UUID cancelledByUserId;
+
+  /** Instante do cancelamento (passo 813); nulo enquanto a venda não foi cancelada. */
+  @Column(name = "cancelled_at")
+  private Instant cancelledAt;
+
   @Version
   @Column(name = "version")
   private long version;
@@ -147,8 +159,8 @@ public class SaleEntity {
 
   /**
    * Estado que o agregado manda para a linha: status, totais, desconto, cliente, contagem de itens
-   * e as datas de criação/conclusão. As colunas de pagamento e cancelamento ficam como estão — o
-   * domínio ainda não as governa (passos 905+ e 813).
+   * e as datas de criação/conclusão/cancelamento. As colunas de pagamento ficam como estão — o
+   * domínio ainda não as governa (passos 905+).
    */
   void syncFrom(Sale sale) {
     this.status = sale.status();
@@ -161,6 +173,9 @@ public class SaleEntity {
     this.total = sale.total();
     this.itemCount = sale.itemCount();
     this.completedAt = sale.completedAt();
+    this.cancelReason = sale.cancelReason();
+    this.cancelledByUserId = sale.cancelledByUserId();
+    this.cancelledAt = sale.cancelledAt();
   }
 
   private static BigDecimal zeroMoney() {
@@ -249,6 +264,18 @@ public class SaleEntity {
 
   public Instant getCompletedAt() {
     return completedAt;
+  }
+
+  public String getCancelReason() {
+    return cancelReason;
+  }
+
+  public UUID getCancelledByUserId() {
+    return cancelledByUserId;
+  }
+
+  public Instant getCancelledAt() {
+    return cancelledAt;
   }
 
   public long getVersion() {

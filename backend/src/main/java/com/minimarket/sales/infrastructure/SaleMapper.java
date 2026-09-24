@@ -61,18 +61,14 @@ final class SaleMapper {
   }
 
   /**
-   * Agregado a partir da linha e dos itens na ordem de {@code line_number}. Não reconstrói o que o
-   * domínio não representa e nunca silencia: {@code CANCELLED} falha explícita (o cancelamento só
-   * existe a partir do 813), assim como a linha com dois itens do mesmo produto (o agregado guarda
-   * um item por produto) e o que o próprio domínio recusa (conclusão sem instante, desconto sem
-   * valor).
+   * Agregado a partir da linha e dos itens na ordem de {@code line_number}. A ordem da rehidratação
+   * é a ordem em que o agregado aceita as transições: itens, desconto e cliente antes do estado
+   * final — a venda concluída ou cancelada é imutável e não aceitaria mais nenhum deles. Não
+   * reconstrói o que o domínio não representa e nunca silencia: a linha com dois itens do mesmo
+   * produto (o agregado guarda um item por produto) e o que o próprio domínio recusa (conclusão sem
+   * instante, desconto sem valor, cancelamento sem motivo/autor/instante) falham explícito.
    */
   static Sale toDomain(SaleEntity entity, List<SaleItemEntity> itemEntities) {
-    if (entity.getStatus() == SaleStatus.CANCELLED) {
-      throw new IllegalStateException(
-          "venda %s está cancelada e o domínio atual não reconstrói CANCELLED (passo 813)"
-              .formatted(entity.getId()));
-    }
     Sale sale =
         new Sale(
             entity.getId(),
@@ -105,8 +101,11 @@ final class SaleMapper {
     if (entity.getCustomerId() != null) {
       sale.linkCustomer(entity.getCustomerId());
     }
+    // O estado final entra por último: a venda concluída ou cancelada não aceita mais nada.
     if (entity.getStatus() == SaleStatus.COMPLETED) {
       sale.complete(entity.getCompletedAt());
+    } else if (entity.getStatus() == SaleStatus.CANCELLED) {
+      sale.cancel(entity.getCancelReason(), entity.getCancelledByUserId(), entity.getCancelledAt());
     }
     return sale;
   }

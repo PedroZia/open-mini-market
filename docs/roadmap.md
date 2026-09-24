@@ -713,7 +713,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** detalhe correto; filtros e paginação funcionando; venda de outro caixa → 403 para operador.
   **Commit:** `feat(sales): consulta venda e historico`
 
-- [ ] **813 — Cancelamento de venda aberta**
+- [x] **813 — Cancelamento de venda aberta**
   **Objetivo:** desistir da venda sem sujeira. **Depende:** 805
   **Implementar:** `POST /sales/{id}/cancel` `{reason}` (idempotente); só `OPEN`; status `CANCELLED` + motivo + autor; auditoria `SALE_CANCELLED`; permissão `sale.cancel`.
   **Testes/aceite:** 200; venda concluída → 409 `SALE_ALREADY_COMPLETED`; motivo obrigatório; auditoria.

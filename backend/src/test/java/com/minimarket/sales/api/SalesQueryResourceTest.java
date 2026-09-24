@@ -195,6 +195,9 @@ class SalesQueryResourceTest extends IntegrationTestBase {
             "itemCount",
             "createdAt",
             "completedAt",
+            "cancelReason",
+            "cancelledByUserId",
+            "cancelledAt",
             "items");
     assertThat(body.get("id")).isEqualTo(saleOne.toString());
     assertThat(body.get("status")).isEqualTo("OPEN");

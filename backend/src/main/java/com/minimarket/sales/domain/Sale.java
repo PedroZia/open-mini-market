@@ -1,6 +1,7 @@
 package com.minimarket.sales.domain;
 
 import com.minimarket.shared.domain.BusinessException;
+import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -17,10 +18,12 @@ import java.util.UUID;
  *
  * <p>A venda nasce {@link SaleStatus#OPEN} no caixa que a criou (BR-06) e só sai daí ao concluir
  * (passo 906, quando o pagamento cobre o total) ou ao cancelar (passo 813, enquanto não foi paga).
- * Depois de {@code COMPLETED} ou {@code CANCELLED} o agregado é imutável (BR-07): item, desconto e
- * cliente recusam mutação com {@link ErrorCode#BUSINESS_ERROR} (422), a mesma convenção do {@code
- * CashSession}. Dinheiro tem escala 2 com arredondamento {@code HALF_UP} e quantidade escala 3 (§3
- * do plano).
+ * O cancelamento guarda motivo, autor e instante na própria venda — desistir não apaga o rastro — e
+ * venda já concluída não se cancela (409 {@link ErrorCode#SALE_ALREADY_COMPLETED}; a correção dela
+ * é o estorno da Fase 13). Depois de {@code COMPLETED} ou {@code CANCELLED} o agregado é imutável
+ * (BR-07): item, desconto e cliente recusam mutação com {@link ErrorCode#BUSINESS_ERROR} (422), a
+ * mesma convenção do {@code CashSession}. Dinheiro tem escala 2 com arredondamento {@code HALF_UP}
+ * e quantidade escala 3 (§3 do plano).
  */
 public final class Sale {
 
@@ -48,6 +51,9 @@ public final class Sale {
   private int itemCount;
   private UUID customerId;
   private Instant completedAt;
+  private String cancelReason;
+  private UUID cancelledByUserId;
+  private Instant cancelledAt;
 
   /**
    * Venda nova, aberta e sem itens, na sessão de caixa do operador (BR-06). O número sequencial da
@@ -185,6 +191,21 @@ public final class Sale {
   /** Instante da conclusão; nulo enquanto a venda não foi concluída. */
   public Instant completedAt() {
     return completedAt;
+  }
+
+  /** Motivo do cancelamento; nulo enquanto a venda não foi cancelada (passo 813). */
+  public String cancelReason() {
+    return cancelReason;
+  }
+
+  /** Quem cancelou a venda; nulo enquanto ela não foi cancelada (passo 813). */
+  public UUID cancelledByUserId() {
+    return cancelledByUserId;
+  }
+
+  /** Instante do cancelamento; nulo enquanto a venda não foi cancelada (passo 813). */
+  public Instant cancelledAt() {
+    return cancelledAt;
   }
 
   /**
@@ -356,6 +377,43 @@ public final class Sale {
     }
     this.completedAt = completedAt;
     this.status = SaleStatus.COMPLETED;
+  }
+
+  /**
+   * Cancela a venda aberta (passo 813, BR-07): a desistência não apaga nada — a venda fica no
+   * histórico com o motivo, o autor e o instante do cancelamento. Quem confere a permissão {@code
+   * sale.cancel}, a posse da venda (BR-11) e a obrigatoriedade do motivo é o caso de uso; aqui só a
+   * transição {@code OPEN → CANCELLED}, depois da qual o agregado não aceita mais mutação (BR-07).
+   *
+   * <p>Venda já concluída não se cancela: o pagamento e a baixa de estoque aconteceram e a correção
+   * é o estorno da Fase 13 — é conflito de estado, {@link ErrorCode#SALE_ALREADY_COMPLETED} (409),
+   * não regra de negócio. Venda já cancelada cai em {@link #requireOpen()} (422); quem trata a
+   * repetição como no-op de estado é o caso de uso.
+   *
+   * @param reason motivo do cancelamento, não vazio
+   * @param cancelledByUserId autor do cancelamento, obrigatório
+   * @param cancelledAt instante do cancelamento, obrigatório
+   * @throws ConflictException se a venda já estiver concluída
+   * @throws BusinessException se a venda não estiver aberta ou faltar motivo, autor ou instante
+   */
+  public void cancel(String reason, UUID cancelledByUserId, Instant cancelledAt) {
+    if (status == SaleStatus.COMPLETED) {
+      throw new ConflictException(
+          ErrorCode.SALE_ALREADY_COMPLETED,
+          "venda %s já foi concluída em %s e não pode ser cancelada".formatted(id, completedAt));
+    }
+    requireOpen();
+    if (reason == null || reason.isBlank()) {
+      throw new BusinessException(ErrorCode.BUSINESS_ERROR, "motivo do cancelamento é obrigatório");
+    }
+    if (cancelledByUserId == null || cancelledAt == null) {
+      throw new BusinessException(
+          ErrorCode.BUSINESS_ERROR, "autor e instante do cancelamento são obrigatórios");
+    }
+    this.cancelReason = reason;
+    this.cancelledByUserId = cancelledByUserId;
+    this.cancelledAt = cancelledAt;
+    this.status = SaleStatus.CANCELLED;
   }
 
   /** Venda concluída ou cancelada é imutável (BR-07). */

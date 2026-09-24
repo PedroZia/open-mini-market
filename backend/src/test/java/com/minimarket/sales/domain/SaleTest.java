@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.minimarket.shared.domain.BusinessException;
+import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -50,6 +51,9 @@ class SaleTest {
     assertThat(sale.total()).isEqualTo(new BigDecimal("0.00"));
     assertThat(sale.itemCount()).isZero();
     assertThat(sale.completedAt()).isNull();
+    assertThat(sale.cancelReason()).isNull();
+    assertThat(sale.cancelledByUserId()).isNull();
+    assertThat(sale.cancelledAt()).isNull();
   }
 
   @Test
@@ -429,6 +433,104 @@ class SaleTest {
     assertThat(sale.subtotal()).isEqualTo(new BigDecimal("20.00"));
     assertThat(sale.total()).isEqualTo(new BigDecimal("20.00"));
     assertThat(sale.itemCount()).isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("cancel grava motivo, autor e instante e muda o status para CANCELLED")
+  void cancelsOpenSale() {
+    Sale sale = openSale();
+    sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("10.00"), new BigDecimal("2"));
+    UUID author = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-09-24T13:00:00Z");
+
+    sale.cancel("cliente desistiu", author, cancelledAt);
+
+    assertThat(sale.status()).isEqualTo(SaleStatus.CANCELLED);
+    assertThat(sale.cancelReason()).isEqualTo("cliente desistiu");
+    assertThat(sale.cancelledByUserId()).isEqualTo(author);
+    assertThat(sale.cancelledAt()).isEqualTo(cancelledAt);
+    assertThat(sale.completedAt()).as("cancelar não conclui").isNull();
+    assertThat(sale.total()).as("cancelar não mexe nos totais").isEqualTo(new BigDecimal("20.00"));
+    assertThat(sale.items()).as("os itens ficam no histórico").hasSize(1);
+  }
+
+  @Test
+  @DisplayName("venda cancelada é imutável: item, desconto, cliente, conclusão e novo cancelamento")
+  void rejectsMutationAfterCancellation() {
+    Sale sale = openSale();
+    sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("10.00"), new BigDecimal("2"));
+    UUID author = UUID.randomUUID();
+    sale.cancel("cliente desistiu", author, Instant.parse("2026-09-24T13:00:00Z"));
+
+    assertBusinessError(
+        () -> sale.addItem(BEANS, null, "Feijão 1kg", "UN", new BigDecimal("8.00"), BigDecimal.ONE),
+        "não aceita alteração");
+    assertBusinessError(
+        () -> sale.changeQuantity(RICE, new BigDecimal("3.000")), "não aceita alteração");
+    assertBusinessError(() -> sale.removeItem(RICE), "não aceita alteração");
+    assertBusinessError(
+        () -> sale.applyDiscount(DiscountType.VALUE, new BigDecimal("1.00"), "cortesia"),
+        "não aceita alteração");
+    assertBusinessError(sale::removeDiscount, "não aceita alteração");
+    assertBusinessError(() -> sale.linkCustomer(UUID.randomUUID()), "não aceita alteração");
+    assertBusinessError(sale::unlinkCustomer, "não aceita alteração");
+    assertBusinessError(
+        () -> sale.complete(Instant.parse("2026-09-24T13:05:00Z")),
+        "não está aberta para ser concluída");
+    assertBusinessError(
+        () -> sale.cancel("desistiu de novo", author, Instant.parse("2026-09-24T13:06:00Z")),
+        "não aceita alteração");
+
+    assertThat(sale.status()).isEqualTo(SaleStatus.CANCELLED);
+    assertThat(sale.cancelReason())
+        .as("o primeiro motivo é o que vale")
+        .isEqualTo("cliente desistiu");
+    assertThat(sale.cancelledAt()).isEqualTo(Instant.parse("2026-09-24T13:00:00Z"));
+    assertThat(sale.items()).hasSize(1);
+    assertThat(sale.total()).isEqualTo(new BigDecimal("20.00"));
+  }
+
+  @Test
+  @DisplayName("cancelar venda concluída é conflito SALE_ALREADY_COMPLETED (409)")
+  void rejectsCancellationAfterCompletion() {
+    Sale sale = openSale();
+    sale.complete(Instant.parse("2026-09-24T12:30:00Z"));
+
+    assertThatThrownBy(
+            () -> sale.cancel("desistiu", UUID.randomUUID(), Instant.parse("2026-09-24T13:00:00Z")))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> {
+              assertThat(error.code()).isEqualTo(ErrorCode.SALE_ALREADY_COMPLETED);
+              assertThat(error).hasMessageContaining(SALE_ID.toString());
+            });
+
+    assertThat(sale.status())
+        .as("a venda concluída fica concluída")
+        .isEqualTo(SaleStatus.COMPLETED);
+    assertThat(sale.cancelReason()).isNull();
+    assertThat(sale.cancelledByUserId()).isNull();
+    assertThat(sale.cancelledAt()).isNull();
+  }
+
+  @Test
+  @DisplayName("cancelar sem motivo, autor ou instante é violação de negócio e não cancela")
+  void rejectsIncompleteCancellation() {
+    Sale sale = openSale();
+    UUID author = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-09-24T13:00:00Z");
+
+    assertBusinessError(
+        () -> sale.cancel(null, author, cancelledAt), "motivo do cancelamento é obrigatório");
+    assertBusinessError(
+        () -> sale.cancel("  ", author, cancelledAt), "motivo do cancelamento é obrigatório");
+    assertBusinessError(
+        () -> sale.cancel("desistiu", null, cancelledAt), "autor e instante do cancelamento");
+    assertBusinessError(
+        () -> sale.cancel("desistiu", author, null), "autor e instante do cancelamento");
+
+    assertThat(sale.status()).as("recusa não cancela").isEqualTo(SaleStatus.OPEN);
+    assertThat(sale.cancelledAt()).isNull();
   }
 
   @Test

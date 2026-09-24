@@ -521,22 +521,60 @@ class SaleRepositoryTest extends IntegrationTestBase {
 
   @Test
   @Transactional
-  @DisplayName("venda cancelada no banco falha explícito em vez de virar venda aberta")
-  void failsExplicitlyForCancelledSale() {
+  @DisplayName("cancel grava motivo, autor e instante e o round-trip rehidrata a venda CANCELLED")
+  void roundTripsCancelledSale() {
+    Sale sale = openSale(1, openSessionId, operatorA, DAY_ONE);
+    sale.addItem(rice, "7891000315507", "Arroz 5kg", "UN", new BigDecimal("25.00"), BigDecimal.ONE);
+    saleRepository.insert(sale);
+    flushAndClear();
+
+    Instant cancelledAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+    Sale loaded = saleRepository.findById(sale.id()).orElseThrow();
+    loaded.cancel("cliente desistiu", operatorB, cancelledAt);
+    saleRepository.update(loaded);
+    flushAndClear();
+
+    assertThat(saleRepository.findById(sale.id()))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.status()).isEqualTo(SaleStatus.CANCELLED);
+              assertThat(found.cancelReason()).isEqualTo("cliente desistiu");
+              assertThat(found.cancelledByUserId()).isEqualTo(operatorB);
+              assertThat(found.cancelledAt()).isEqualTo(cancelledAt);
+              assertThat(found.completedAt()).isNull();
+              assertThat(found.items()).as("os itens ficam no histórico").hasSize(1);
+              assertThat(found.total()).isEqualByComparingTo("25.00");
+            });
+    assertThat(saleColumn("cancel_reason", sale.id())).isEqualTo("cliente desistiu");
+    assertThat(saleColumn("cancelled_by_user_id", sale.id())).isEqualTo(operatorB);
+    assertThat(saleColumn("cancelled_at", sale.id())).isNotNull();
+  }
+
+  @Test
+  @Transactional
+  @DisplayName("venda marcada CANCELLED direto no banco é rehidratada com motivo, autor e instante")
+  void rehydratesCancelledSaleWrittenInDatabase() {
     Sale sale = openSale(1, openSessionId, operatorA, DAY_ONE);
     sale.addItem(rice, "7891000315507", "Arroz 5kg", "UN", new BigDecimal("25.00"), BigDecimal.ONE);
     saleRepository.insert(sale);
     flushAndClear();
     entityManager
         .createNativeQuery(
-            "update sales set status = 'CANCELLED', cancelled_at = now(), cancel_reason = 'desistiu'"
-                + " where id = :id")
+            "update sales set status = 'CANCELLED', cancelled_at = now(), cancelled_by_user_id ="
+                + " :operator, cancel_reason = 'desistiu' where id = :id")
+        .setParameter("operator", operatorB)
         .setParameter("id", sale.id())
         .executeUpdate();
 
-    assertThatThrownBy(() -> saleRepository.findById(sale.id()))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("CANCELLED");
+    assertThat(saleRepository.findById(sale.id()))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.status()).isEqualTo(SaleStatus.CANCELLED);
+              assertThat(found.cancelReason()).isEqualTo("desistiu");
+              assertThat(found.cancelledByUserId()).isEqualTo(operatorB);
+              assertThat(found.cancelledAt()).isNotNull();
+              assertThat(found.items()).as("a venda cancelada não perde os itens").hasSize(1);
+            });
   }
 
   /** Venda nova no caixa da sessão informada; entra na lista de limpeza do teste. */
