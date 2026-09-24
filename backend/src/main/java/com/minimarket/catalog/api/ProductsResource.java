@@ -7,15 +7,21 @@ import com.minimarket.catalog.application.GetProductUseCase;
 import com.minimarket.catalog.application.ListProductsUseCase;
 import com.minimarket.catalog.application.ProductPage;
 import com.minimarket.catalog.application.ProductSummary;
+import com.minimarket.catalog.application.UpdateProductCommand;
+import com.minimarket.catalog.application.UpdateProductUseCase;
 import com.minimarket.shared.api.PageResponse;
 import com.minimarket.shared.api.RequirePermission;
+import com.minimarket.shared.domain.BusinessException;
+import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.Permission;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -31,7 +37,9 @@ import java.util.UUID;
  * regra de negócio aqui.
  *
  * <p>A escrita exige {@code product.write}: sem a permissão o interceptor do {@code
- * RequirePermission} responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar.
+ * RequirePermission} responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar. A edição
+ * (passo 410) exige ainda o {@code If-Match} com a versão lida no detalhe — é o contrato do lock
+ * otimista (§9.4).
  *
  * <p>O 201 devolve o produto como o banco o guardou (barcode normalizado, preço em escala 2, {@code
  * active}, timestamps e {@code version}) — os mesmos valores que o detalhe de 408 mostrará.
@@ -49,6 +57,8 @@ public class ProductsResource {
   @Inject GetProductUseCase getProductUseCase;
 
   @Inject GetProductByBarcodeUseCase getProductByBarcodeUseCase;
+
+  @Inject UpdateProductUseCase updateProductUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -119,6 +129,35 @@ public class ProductsResource {
   }
 
   /**
+   * Edita nome, categoria, unidade, descrição e quantidade mínima (§9.3, passo 410) — preço (411),
+   * barcode (imutável) e status (412) não passam por aqui. O {@code If-Match} é obrigatório e leva
+   * a versão que o cliente leu no detalhe: ausente ou em branco → 428 {@code IF_MATCH_REQUIRED};
+   * versão velha → 409 {@code CONCURRENT_MODIFICATION} (§8 do plano); id desconhecido, produto
+   * desativado ou soft-deletado → 404 {@code PRODUCT_NOT_FOUND}; unidade fora da whitelist ou
+   * categoria inexistente → 400/404 do caso de uso.
+   */
+  @PUT
+  @Path("/{id}")
+  @RequirePermission(Permission.PRODUCT_WRITE)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public ProductResponse update(
+      @PathParam("id") UUID id,
+      @HeaderParam("If-Match") String ifMatch,
+      @Valid UpdateProductRequest request) {
+    return toResponse(
+        updateProductUseCase.execute(
+            new UpdateProductCommand(
+                id,
+                expectedVersion(ifMatch),
+                request.name(),
+                request.categoryId(),
+                request.unit(),
+                request.description(),
+                request.minQuantity())));
+  }
+
+  /**
    * Bipe do PDV (passo 409): resolve o produto pelo barcode lido, com a normalização do caso de
    * uso. Produto inativo, soft-deletado ou código desconhecido → 404 {@code PRODUCT_NOT_FOUND}. O
    * segmento literal {@code barcode} tem prioridade sobre {@code /{id}} no JAX-RS: um código
@@ -152,5 +191,40 @@ public class ProductsResource {
   private static ProductBarcodeResponse toBarcodeResponse(ProductSummary product) {
     return new ProductBarcodeResponse(
         product.id(), product.barcode(), product.name(), product.price(), product.unit());
+  }
+
+  /**
+   * A versão esperada do {@code If-Match} (passo 410). O cabeçalho é opcional no protocolo, mas
+   * obrigatório aqui: ausente ou em branco → 428 {@code IF_MATCH_REQUIRED}. Aceita as formas que os
+   * clientes mandam — {@code 13}, {@code "13"} e o ETag fraco {@code W/"13"} — e qualquer outra
+   * coisa que não seja um número não negativo → 400 {@code VALIDATION_ERROR}.
+   */
+  private static long expectedVersion(String ifMatch) {
+    if (ifMatch == null || ifMatch.isBlank()) {
+      throw new BusinessException(
+          ErrorCode.IF_MATCH_REQUIRED,
+          "envie o cabeçalho If-Match com a versão lida no detalhe do produto");
+    }
+    String value = ifMatch.trim();
+    if (value.startsWith("W/")) {
+      value = value.substring(2).trim();
+    }
+    if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+      value = value.substring(1, value.length() - 1).trim();
+    }
+    try {
+      long version = Long.parseLong(value);
+      if (version < 0) {
+        throw invalidIfMatch();
+      }
+      return version;
+    } catch (NumberFormatException notAVersion) {
+      throw invalidIfMatch();
+    }
+  }
+
+  private static BusinessException invalidIfMatch() {
+    return new BusinessException(
+        ErrorCode.VALIDATION_ERROR, "If-Match deve ser a versão do produto, ex.: 3");
   }
 }

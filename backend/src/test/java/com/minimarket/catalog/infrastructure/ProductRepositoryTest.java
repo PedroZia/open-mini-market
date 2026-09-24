@@ -353,6 +353,27 @@ class ProductRepositoryTest extends IntegrationTestBase {
             error -> assertThat(error.code()).isEqualTo(ErrorCode.BARCODE_ALREADY_EXISTS));
   }
 
+  @Test
+  @TestTransaction
+  @DisplayName(
+      "update de linha já alterada por outra transação vira ConflictException(CONCURRENT_MODIFICATION)")
+  void translatesStaleVersionOnUpdate() {
+    UUID id = insert("Arroz 5kg", "7891000000017", "24.90", null);
+    // A entidade entra no contexto com a versão 0: é ela que o If-Match do cliente leu.
+    assertThat(productRepository.findById(id)).isPresent();
+    // Outra transação grava primeiro, direto no banco: o update com "where version = 0" não acha
+    // mais a linha e o flush antecipado traduz o stale do Hibernate — o backstop do lock otimista.
+    entityManager
+        .createNativeQuery("update products set version = version + 1 where id = :id")
+        .setParameter("id", id)
+        .executeUpdate();
+
+    assertThatThrownBy(() -> productRepository.update(id, "Arroz Novo", null, "UN", null, null))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.CONCURRENT_MODIFICATION));
+  }
+
   /** Insere pelo repositório e limpa o contexto: o que o teste lê depois vem do banco. */
   private UUID insert(
       String name, String barcode, String price, UUID categoryId, String unit, String minQuantity) {

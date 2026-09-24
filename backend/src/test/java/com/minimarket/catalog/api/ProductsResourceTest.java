@@ -9,11 +9,13 @@ import com.minimarket.catalog.application.NewCategory;
 import com.minimarket.catalog.application.NewProduct;
 import com.minimarket.catalog.application.ProductStore;
 import com.minimarket.shared.application.StoreLookup;
+import com.minimarket.support.TestAdmin;
 import com.minimarket.users.application.CreateUserCommand;
 import com.minimarket.users.application.CreateUserUseCase;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
 import java.math.BigDecimal;
 import java.sql.Connection;
@@ -32,15 +34,15 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Produtos na API: criação (passo 406), listagem com busca e filtros (passo 407), detalhe (passo
- * 408) e bipe por código de barras (passo 409) contra PostgreSQL real (Dev Services): as rotas de
- * verdade, com o ADMIN da fixture e um OPERADOR criado pelo caso de uso e autenticado por login
- * real, como no {@code PermissionMatrixTest}.
+ * 408), bipe por código de barras (passo 409) e edição com {@code If-Match} (passo 410) contra
+ * PostgreSQL real (Dev Services): as rotas de verdade, com o ADMIN da fixture e um OPERADOR criado
+ * pelo caso de uso e autenticado por login real, como no {@code PermissionMatrixTest}.
  *
  * <p>A listagem é semeada pela porta {@code ProductStore} (sem caso de uso nem auditoria, em
  * transação própria). O request HTTP commita: o {@link #removeRowsCreatedByThisTest()} apaga ao fim
  * de cada teste os produtos e categorias com o sufixo desta classe (e os eventos de auditoria que
  * os referenciam), o usuário OPERADOR, as sessões e os eventos dele — os do ADMIN já saem pelo
- * {@code TestAdmin.remove}.
+ * {@code TestAdmin.remove}. Nomes editados pelo PUT mantêm o sufixo para a limpeza alcançá-los.
  */
 @QuarkusTest
 class ProductsResourceTest extends IntegrationTestBase {
@@ -174,19 +176,32 @@ class ProductsResourceTest extends IntegrationTestBase {
 
   @Test
   @DisplayName(
-      "OPERADOR não cria produto: 403 ACCESS_DENIED citando product.write, sem gravar nada")
+      "OPERADOR não cria nem edita produto: 403 ACCESS_DENIED citando product.write, sem gravar nada")
   void deniesOperator() throws SQLException {
     String username = "produtos.operador." + SUFFIX;
     createUser(username, OPERATOR_ROLE);
+    String token = login(username);
     String barcode = "555" + SUFFIX;
 
-    Response response = post(login(username), validBody(name("Café"), barcode));
+    Response response = post(token, validBody(name("Café"), barcode));
 
     assertThat(response.statusCode()).isEqualTo(403);
     assertThat(response.contentType()).contains("application/problem+json");
     assertThat(response.jsonPath().getString("code")).isEqualTo("ACCESS_DENIED");
     assertThat(response.jsonPath().getString("detail")).contains("product.write");
     assertThat(countActiveByBarcode(barcode)).as("o 403 barra antes do caso de uso").isZero();
+
+    // A edição (passo 410) também exige product.write: barrada antes do caso de uso, sem tocar no
+    // produto — nem na versão, que seguiria valendo para o próximo If-Match do dono.
+    UUID id = seedProduct("Café", "18.90", null);
+    Response onUpdate =
+        put(token, id, "\"0\"", updateBody(name("Café moído"), null, "KG", "moído fino", null));
+
+    assertThat(onUpdate.statusCode()).isEqualTo(403);
+    assertThat(onUpdate.contentType()).contains("application/problem+json");
+    assertThat(onUpdate.jsonPath().getString("code")).isEqualTo("ACCESS_DENIED");
+    assertThat(onUpdate.jsonPath().getString("detail")).contains("product.write");
+    assertThat(storedName(id)).as("o 403 não editou o produto").isEqualTo(name("Café"));
   }
 
   @Test
@@ -517,6 +532,262 @@ class ProductsResourceTest extends IntegrationTestBase {
         .isLessThan(MAX_BARCODE_LOOKUP_NANOS);
   }
 
+  @Test
+  @DisplayName(
+      "PUT /api/v1/products/{id} com If-Match correto devolve 200 com os valores novos e version maior")
+  void updatesProduct() throws SQLException {
+    UUID categoryId = seedCategory("Bebidas");
+    UUID id = seedProduct("Arroz 5kg", "24.90", null, STORED_BARCODE);
+    String newName = name("Arroz Tipo 1 5kg");
+
+    Response response =
+        put(
+            adminToken(),
+            id,
+            "\"" + versionOf(id) + "\"",
+            updateBody(newName, categoryId, "KG", "grão longo tipo 1", "2.500"));
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.contentType()).contains("application/json");
+
+    Map<String, Object> json = response.jsonPath().getMap("$");
+    assertThat(json)
+        .as("contrato: nem storeId nem deletedAt vazam")
+        .containsOnlyKeys(
+            "id",
+            "name",
+            "barcode",
+            "description",
+            "categoryId",
+            "unit",
+            "price",
+            "minQuantity",
+            "active",
+            "version",
+            "createdAt",
+            "updatedAt");
+    assertThat(json.get("id")).isEqualTo(id.toString());
+    assertThat(json.get("name")).isEqualTo(newName);
+    assertThat(json.get("categoryId")).isEqualTo(categoryId.toString());
+    assertThat(json.get("unit")).isEqualTo("KG");
+    assertThat(json.get("description")).isEqualTo("grão longo tipo 1");
+    assertThat(number(json.get("minQuantity"))).isEqualByComparingTo("2.500");
+    assertThat(json.get("version")).as("lock otimista avançou").isEqualTo(1);
+    assertThat(json.get("barcode")).as("barcode não muda por aqui").isEqualTo(STORED_BARCODE);
+    assertThat(number(json.get("price")))
+        .as("preço não muda por aqui")
+        .isEqualByComparingTo("24.90");
+    assertThat(json.get("active")).isEqualTo(true);
+
+    assertThat(storedName(id)).as("o banco guardou a edição").isEqualTo(newName);
+  }
+
+  @Test
+  @DisplayName("If-Match aceita 13, \"13\" e W/\"13\": as três formas editam o produto")
+  void acceptsIfMatchFormats() {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+    List<String> forms = List.of("0", "\"1\"", "W/\"2\"");
+
+    for (int index = 0; index < forms.size(); index++) {
+      Response response =
+          put(
+              adminToken(),
+              id,
+              forms.get(index),
+              updateBody(name("Arroz Tipo " + (index + 1)), null, "UN", null, null));
+
+      assertThat(response.statusCode()).as("If-Match %s", forms.get(index)).isEqualTo(200);
+      assertThat(response.jsonPath().getInt("version")).isEqualTo(index + 1);
+    }
+  }
+
+  @Test
+  @DisplayName("PUT com versão antiga responde 409 CONCURRENT_MODIFICATION e não altera o produto")
+  void rejectsStaleVersion() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+    String edited = name("Arroz Tipo 1 5kg");
+    assertThat(
+            put(adminToken(), id, "\"0\"", updateBody(edited, null, "KG", "grão longo", "1.000"))
+                .statusCode())
+        .as("primeira edição")
+        .isEqualTo(200);
+
+    Response stale =
+        put(
+            adminToken(),
+            id,
+            "\"0\"",
+            updateBody(name("Arroz Integral"), null, "UN", "outra descrição", "2.000"));
+
+    assertThat(stale.statusCode()).isEqualTo(409);
+    assertThat(stale.contentType()).contains("application/problem+json");
+    assertThat(stale.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/concurrent-modification");
+    assertThat(stale.jsonPath().getString("title")).isEqualTo("Modificação concorrente");
+    assertThat(stale.jsonPath().getInt("status")).isEqualTo(409);
+    assertThat(stale.jsonPath().getString("code")).isEqualTo("CONCURRENT_MODIFICATION");
+
+    // Releitura: o 409 não deixa a alteração pela metade, nem na API nem no banco.
+    Map<String, Object> json = getDetail(id.toString()).jsonPath().getMap("$");
+    assertThat(json.get("name")).isEqualTo(edited);
+    assertThat(json.get("unit")).isEqualTo("KG");
+    assertThat(json.get("version")).as("a versão não avançou").isEqualTo(1);
+    assertThat(storedName(id)).isEqualTo(edited);
+  }
+
+  @Test
+  @DisplayName("PUT sem If-Match responde 428 IF_MATCH_REQUIRED e não altera o produto")
+  void requiresIfMatch() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+
+    for (String missing : Arrays.asList(null, "   ")) {
+      Response response =
+          put(
+              adminToken(),
+              id,
+              missing,
+              updateBody(name("Arroz Tipo 1 5kg"), null, "KG", null, null));
+
+      assertThat(response.statusCode()).as("If-Match %s", missing).isEqualTo(428);
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("type"))
+          .isEqualTo("https://minimarket.local/problems/if-match-required");
+      assertThat(response.jsonPath().getString("title"))
+          .isEqualTo("Cabeçalho If-Match obrigatório");
+      assertThat(response.jsonPath().getInt("status")).isEqualTo(428);
+      assertThat(response.jsonPath().getString("code")).isEqualTo("IF_MATCH_REQUIRED");
+    }
+
+    assertThat(storedName(id)).as("o 428 barra antes do caso de uso").isEqualTo(name("Arroz 5kg"));
+  }
+
+  @Test
+  @DisplayName(
+      "If-Match que não é versão (texto, negativo ou decimal) responde 400 VALIDATION_ERROR")
+  void rejectsMalformedIfMatch() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+
+    for (String malformed : Arrays.asList("abc", "-1", "1.5")) {
+      Response response =
+          put(
+              adminToken(),
+              id,
+              malformed,
+              updateBody(name("Arroz Tipo 1 5kg"), null, "KG", null, null));
+
+      assertThat(response.statusCode()).as("If-Match %s", malformed).isEqualTo(400);
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    }
+
+    assertThat(storedName(id)).isEqualTo(name("Arroz 5kg"));
+  }
+
+  @Test
+  @DisplayName(
+      "PUT de produto inexistente, desativado ou soft-deletado responde 404 PRODUCT_NOT_FOUND")
+  void hidesUnknownInactiveAndDeletedFromUpdate() throws SQLException {
+    UUID inactive = seedProduct("Detergente 500ml", "3.79", null);
+    setActiveDirectly(inactive, false);
+    UUID deleted = seedProduct("Café 500g", "18.90", null);
+    softDeleteViaPort(deleted);
+
+    for (UUID id : List.of(UUID.randomUUID(), inactive, deleted)) {
+      Response response =
+          put(
+              adminToken(),
+              id,
+              "\"0\"",
+              updateBody(name("Arroz Tipo 1 5kg"), null, "KG", null, null));
+
+      assertThat(response.statusCode()).as("produto %s", id).isEqualTo(404);
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+    }
+  }
+
+  @Test
+  @DisplayName("unidade fora de UN/KG (ou ausente) responde 400 e não altera o produto")
+  void rejectsInvalidUnitOnUpdate() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+
+    Response onUnknownUnit =
+        put(
+            adminToken(),
+            id,
+            "\"0\"",
+            updateBody(name("Arroz Tipo 1 5kg"), null, "CX", "grão longo", null));
+
+    assertThat(onUnknownUnit.statusCode()).isEqualTo(400);
+    assertThat(onUnknownUnit.contentType()).contains("application/problem+json");
+    assertThat(onUnknownUnit.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+
+    Response onMissingUnit =
+        put(
+            adminToken(),
+            id,
+            "\"0\"",
+            updateBody(name("Arroz Tipo 1 5kg"), null, null, "grão longo", null));
+
+    assertThat(onMissingUnit.statusCode()).isEqualTo(400);
+    assertThat(onMissingUnit.jsonPath().getList("errors.field", String.class)).contains("unit");
+
+    assertThat(storedName(id)).isEqualTo(name("Arroz 5kg"));
+  }
+
+  @Test
+  @DisplayName(
+      "categoria inexistente no PUT responde 404 CATEGORY_NOT_FOUND e não altera o produto")
+  void rejectsUnknownCategoryOnUpdate() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+
+    Response response =
+        put(
+            adminToken(),
+            id,
+            "\"0\"",
+            updateBody(name("Arroz Tipo 1 5kg"), UUID.randomUUID(), "KG", null, null));
+
+    assertThat(response.statusCode()).isEqualTo(404);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("CATEGORY_NOT_FOUND");
+    assertThat(storedName(id)).isEqualTo(name("Arroz 5kg"));
+  }
+
+  @Test
+  @DisplayName("PUT grava PRODUCT_UPDATED com o antes/depois dos campos editados")
+  void auditsProductUpdated() throws SQLException {
+    UUID categoryId = seedCategory("Bebidas");
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+    String newName = name("Arroz Tipo 1 5kg");
+
+    assertThat(
+            put(
+                    adminToken(),
+                    id,
+                    "\"0\"",
+                    updateBody(newName, categoryId, "KG", "grão longo tipo 1", "2.500"))
+                .statusCode())
+        .isEqualTo(200);
+
+    UpdateEvent event = updateEventOf(id);
+    assertThat(event.entityType()).isEqualTo("PRODUCT");
+    assertThat(event.source())
+        .as("evento da requisição autenticada, não de sistema")
+        .isNotEqualTo("SYSTEM");
+    assertThat(event.actorUsername()).isEqualTo(TestAdmin.USERNAME);
+    assertThat(event.beforeName()).isEqualTo(name("Arroz 5kg"));
+    assertThat(event.beforeCategoryId()).as("produto nasceu sem categoria").isNull();
+    assertThat(event.beforeUnit()).isEqualTo("UN");
+    assertThat(event.beforeDescription()).isEqualTo("descrição de Arroz 5kg");
+    assertThat(event.beforeMinQuantity()).as("produto nasceu sem mínimo").isNull();
+    assertThat(event.afterName()).isEqualTo(newName);
+    assertThat(event.afterCategoryId()).isEqualTo(categoryId.toString());
+    assertThat(event.afterUnit()).isEqualTo("KG");
+    assertThat(event.afterDescription()).isEqualTo("grão longo tipo 1");
+    assertThat(event.afterMinQuantity()).isEqualTo("2.500");
+  }
+
   /**
    * O request HTTP commita: some ao fim de cada teste o que esta classe criou — os eventos de
    * auditoria (do OPERADOR e os que apontam para os produtos criados) antes das sessões, do usuário
@@ -626,6 +897,31 @@ class ProductsResourceTest extends IntegrationTestBase {
         .then()
         .extract()
         .response();
+  }
+
+  /**
+   * PUT na edição (passo 410) com o token e o {@code If-Match} informados; {@code ifMatch} nulo
+   * omite o cabeçalho, como o cliente que esqueceu de mandá-lo.
+   */
+  private static Response put(String token, UUID id, String ifMatch, String body) {
+    RequestSpecification request =
+        given().header(AUTHORIZATION, "Bearer " + token).contentType("application/json").body(body);
+    if (ifMatch != null) {
+      request = request.header("If-Match", ifMatch);
+    }
+    return request.when().put(PATH + "/" + id).then().extract().response();
+  }
+
+  /**
+   * Versão do produto como o detalhe a devolve: é o valor que o cliente manda no {@code If-Match}.
+   */
+  private int versionOf(UUID id) {
+    Response detail = getDetail(id.toString());
+
+    assertThat(detail.statusCode())
+        .as("detalhe para ler a versão: %s", detail.asString())
+        .isEqualTo(200);
+    return detail.jsonPath().getInt("version");
   }
 
   /** Nanossegundos em milissegundos fracionários, só para a mensagem do smoke de tempo. */
@@ -754,6 +1050,27 @@ class ProductsResourceTest extends IntegrationTestBase {
         .formatted(name, barcode);
   }
 
+  /**
+   * Corpo do PUT com os cinco campos da edição (passo 410). Campo nulo fica fora do JSON, como o
+   * cliente o omite; {@code unit} nulo é a exceção — o teste da bean validation precisa mandá-lo
+   * nulo de propósito.
+   */
+  private static String updateBody(
+      String name, UUID categoryId, String unit, String description, Object minQuantity) {
+    StringBuilder json = new StringBuilder("{\"name\": \"").append(name).append('"');
+    if (categoryId != null) {
+      json.append(", \"categoryId\": \"").append(categoryId).append('"');
+    }
+    json.append(", \"unit\": ").append(unit == null ? "null" : "\"" + unit + "\"");
+    if (description != null) {
+      json.append(", \"description\": \"").append(description).append('"');
+    }
+    if (minQuantity != null) {
+      json.append(", \"minQuantity\": ").append(minQuantity);
+    }
+    return json.append('}').toString();
+  }
+
   /** O 400 padrão da bean validation: problem+json com o campo apontado em {@code errors[]}. */
   private void assertInvalid(String body, String field) {
     Response response = post(adminToken(), body);
@@ -803,6 +1120,63 @@ class ProductsResourceTest extends IntegrationTestBase {
     }
   }
 
+  /** Nome do produto no banco; falha quando a linha não existe. */
+  private String storedName(UUID id) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement("select name from products where id = ?::uuid")) {
+      statement.setString(1, id.toString());
+      try (ResultSet resultSet = statement.executeQuery()) {
+        assertThat(resultSet.next()).as("produto %s gravado", id).isTrue();
+        return resultSet.getString("name");
+      }
+    }
+  }
+
+  /**
+   * Evento {@code PRODUCT_UPDATED} do produto, com o antes/depois extraído do jsonb por chave;
+   * falha se houver zero ou mais de um evento para o alvo.
+   */
+  private UpdateEvent updateEventOf(UUID id) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select entity_type, source, actor_username,"
+                    + " details->'before'->>'name' as before_name,"
+                    + " details->'before'->>'categoryId' as before_category_id,"
+                    + " details->'before'->>'unit' as before_unit,"
+                    + " details->'before'->>'description' as before_description,"
+                    + " details->'before'->>'minQuantity' as before_min_quantity,"
+                    + " details->'after'->>'name' as after_name,"
+                    + " details->'after'->>'categoryId' as after_category_id,"
+                    + " details->'after'->>'unit' as after_unit,"
+                    + " details->'after'->>'description' as after_description,"
+                    + " details->'after'->>'minQuantity' as after_min_quantity"
+                    + " from audit_events where action = 'PRODUCT_UPDATED' and entity_id = ?::uuid")) {
+      statement.setString(1, id.toString());
+      try (ResultSet resultSet = statement.executeQuery()) {
+        assertThat(resultSet.next()).as("evento PRODUCT_UPDATED do produto %s", id).isTrue();
+        UpdateEvent event =
+            new UpdateEvent(
+                resultSet.getString("entity_type"),
+                resultSet.getString("source"),
+                resultSet.getString("actor_username"),
+                resultSet.getString("before_name"),
+                resultSet.getString("before_category_id"),
+                resultSet.getString("before_unit"),
+                resultSet.getString("before_description"),
+                resultSet.getString("before_min_quantity"),
+                resultSet.getString("after_name"),
+                resultSet.getString("after_category_id"),
+                resultSet.getString("after_unit"),
+                resultSet.getString("after_description"),
+                resultSet.getString("after_min_quantity"));
+        assertThat(resultSet.next()).as("uma edição, um evento").isFalse();
+        return event;
+      }
+    }
+  }
+
   /** Quantos produtos vivos existem com o barcode informado; o 409 e o 403 não podem criar. */
   private int countActiveByBarcode(String barcode) throws SQLException {
     try (Connection connection = dataSource.getConnection();
@@ -829,4 +1203,20 @@ class ProductsResourceTest extends IntegrationTestBase {
 
   /** Linha de {@code products} como o banco a guardou; preço no formato textual do numeric. */
   private record StoredProduct(String barcode, String price, boolean active) {}
+
+  /** Linha de {@code audit_events} do {@code PRODUCT_UPDATED} com o antes/depois já extraído. */
+  private record UpdateEvent(
+      String entityType,
+      String source,
+      String actorUsername,
+      String beforeName,
+      String beforeCategoryId,
+      String beforeUnit,
+      String beforeDescription,
+      String beforeMinQuantity,
+      String afterName,
+      String afterCategoryId,
+      String afterUnit,
+      String afterDescription,
+      String afterMinQuantity) {}
 }

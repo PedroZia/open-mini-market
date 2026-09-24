@@ -10,6 +10,7 @@ import com.minimarket.shared.domain.ErrorCode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.OptimisticLockException;
 import jakarta.persistence.TypedQuery;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -53,7 +54,7 @@ public class ProductRepository implements ProductStore {
             product.minQuantity());
     entity.assignId(UuidCreator.getTimeOrderedEpoch());
     entityManager.persist(entity);
-    flushTranslatingBarcodeConflict();
+    flushTranslatingConflicts();
     return entity.getId();
   }
 
@@ -95,6 +96,11 @@ public class ProductRepository implements ProductStore {
    *
    * <p>A alteração sai no flush da transação do caso de uso, como em {@link #insert} — o flush
    * daqui também deixa o {@code version} novo visível na projeção devolvida.
+   *
+   * <p>O flush antecipado é também o backstop do lock otimista: se outra requisição gravar o
+   * produto entre a checagem de versão do caso de uso e este flush, o {@code update ... where
+   * version = ?} com a versão velha não acha a linha e o Hibernate sinaliza o stale — traduzido
+   * para {@link ConflictException} com o mesmo código do caminho comum, nunca 500.
    */
   @Override
   public Optional<ProductSummary> update(
@@ -109,7 +115,7 @@ public class ProductRepository implements ProductStore {
         .map(
             product -> {
               product.updateDetails(name, categoryId, unit, description, minQuantity);
-              flushTranslatingBarcodeConflict();
+              flushTranslatingConflicts();
               return toSummary(product);
             });
   }
@@ -185,10 +191,18 @@ public class ProductRepository implements ProductStore {
    * único além da chave primária (o id é UUIDv7 gerado na aplicação), então SQLState 23505 aqui só
    * pode ser barcode duplicado entre produtos vivos; qualquer outra falha de persistência sobe como
    * está.
+   *
+   * <p>O mesmo flush é o backstop do lock otimista do {@code update}: o Hibernate sinaliza a versão
+   * vencida (o {@code where version = ?} não achou a linha) e o stale vira o 409 {@code
+   * CONCURRENT_MODIFICATION} do caso de uso.
    */
-  private void flushTranslatingBarcodeConflict() {
+  private void flushTranslatingConflicts() {
     try {
       entityManager.flush();
+    } catch (OptimisticLockException exception) {
+      throw new ConflictException(
+          ErrorCode.CONCURRENT_MODIFICATION,
+          "produto alterado por outra requisição; recarregue e tente de novo");
     } catch (ConstraintViolationException exception) {
       if (!UNIQUE_VIOLATION.equals(exception.getSQLState())) {
         throw exception;

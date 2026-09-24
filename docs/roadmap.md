@@ -427,7 +427,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 para ativo; 404 para inativo/inexistente; teste de tempo de resposta < 50 ms (smoke).
   **Commit:** `feat(catalog): consulta produto por codigo de barras`
 
-- [ ] **410 — API `PUT /api/v1/products/{id}`**
+- [x] **410 — API `PUT /api/v1/products/{id}`**
   **Objetivo:** editar cadastro com controle de concorrência. **Depende:** 408
   **Implementar:** atualização de nome, categoria, unidade, descrição, `min_quantity`; exige `If-Match` com `version`.
   **Testes/aceite:** 200 com version correta; 409 `CONCURRENT_MODIFICATION` com version antiga; 428 se `If-Match` ausente (ou 400, conforme padrão adotado).
