@@ -35,9 +35,13 @@ import java.util.UUID;
  * rechecado: entre a consulta e o lock, outro operador pode ter fechado a mesma sessão — o segundo
  * recebe o mesmo 409 e nunca fecha duas vezes (§8).
  *
- * <p>Vendas {@code OPEN} do caixa ainda não bloqueiam o fechamento: a checagem {@code 409
- * SESSION_HAS_OPEN_SALES} é escopo do passo 909, que a implementa junto com as vendas da Fase 8 —
- * nada de porta ou seam especulativo aqui.
+ * <p>Venda {@code OPEN} na sessão bloqueia o fechamento com 409 {@code SESSION_HAS_OPEN_SALES}
+ * (passo 909): dinheiro de venda em andamento não está no ledger e fechar agora deixaria o turno
+ * com venda pendurada. A checagem vem <em>depois</em> do lock da sessão e antes da conta — a
+ * conclusão da venda trava a mesma sessão (passo 906) na mesma ordem, então venda que concluir
+ * primeiro não bloqueia (o lock desta transação só sai no fim) e venda que continuar {@code OPEN}
+ * bloqueia; o operador conclui ou cancela a venda e fecha de novo. Quem responde pela consulta é a
+ * porta invertida {@link SessionSalesLookup}, porque o caixa não depende de {@code sales} (§2.2).
  *
  * <p>Auditoria (§7.2): {@code CASH_SESSION_CLOSED} na mesma transação, com a sessão em {@code
  * entityId} e {@code countedAmount}, {@code expectedAmount} e {@code differenceAmount} em {@code
@@ -60,6 +64,11 @@ public class CloseCashSessionUseCase {
 
   @Inject CashSessionStore cashSessionStore;
 
+  /**
+   * Vendas da sessão (passo 909): a porta invertida que o caixa tem para o módulo {@code sales}.
+   */
+  @Inject SessionSalesLookup sessionSalesLookup;
+
   /** Auditoria do fechamento (§7.2), na transação da conferência. */
   @Inject AuditRecorder auditRecorder;
 
@@ -68,14 +77,16 @@ public class CloseCashSessionUseCase {
 
   /**
    * 400 {@code VALIDATION_ERROR} para valor contado ausente ou negativo; 409 {@code
-   * CASH_SESSION_ALREADY_CLOSED} para caixa sem sessão aberta ou sessão já fechada. Devolve a
-   * sessão fechada com a conferência gravada.
+   * CASH_SESSION_ALREADY_CLOSED} para caixa sem sessão aberta ou sessão já fechada; 409 {@code
+   * SESSION_HAS_OPEN_SALES} para venda em andamento na sessão. Devolve a sessão fechada com a
+   * conferência gravada.
    */
   @Transactional
   public CashSessionSummary execute(CloseCashSessionCommand command) {
     BigDecimal countedAmount = requireCountedAmount(command.countedAmount());
     CashSessionSummary openSession = requireOpenSession(command.cashRegisterId());
     CashSessionSummary lockedSession = lockOpenSession(openSession.id());
+    requireNoOpenSales(lockedSession.id());
     BigDecimal expectedAmount = expectedAmount(lockedSession);
     BigDecimal differenceAmount = difference(countedAmount, expectedAmount);
     Instant closedAt = clock.instant();
@@ -139,6 +150,21 @@ public class CloseCashSessionUseCase {
                 new ConflictException(
                     ErrorCode.CASH_SESSION_ALREADY_CLOSED,
                     "sessão de caixa %s já está fechada".formatted(sessionId)));
+  }
+
+  /**
+   * Venda {@code OPEN} na sessão é 409 {@code SESSION_HAS_OPEN_SALES} (passo 909). A checagem vem
+   * depois do lock da sessão: a conclusão da venda trava a mesma sessão na transação dela (passo
+   * 906), então o lock decide a corrida — venda que concluir primeiro não bloqueia, venda que ficar
+   * {@code OPEN} bloqueia. A consulta é da porta invertida {@link SessionSalesLookup}: o módulo
+   * {@code cash} não conhece o banco da venda (§2.2).
+   */
+  private void requireNoOpenSales(UUID sessionId) {
+    if (sessionSalesLookup.existsOpenByCashSession(sessionId)) {
+      throw new ConflictException(
+          ErrorCode.SESSION_HAS_OPEN_SALES,
+          "sessão de caixa %s tem venda em andamento".formatted(sessionId));
+    }
   }
 
   /**

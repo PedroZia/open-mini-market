@@ -783,7 +783,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes determinísticos verdes; saldo final e ledger coerentes.
   **Commit:** `test(sales): cobre concorrencia de conclusao de venda`
 
-- [ ] **909 — Fechamento de caixa com vendas**
+- [x] **909 — Fechamento de caixa com vendas**
   **Objetivo:** esperado do caixa reflete as vendas. **Depende:** 906, 611
   **Implementar:** incluir movimentos `SALE` em dinheiro no `expectedAmount`; `GET /cash-sessions/{id}/summary` com quebra por forma de pagamento; teste: abrir → 3 vendas (2 dinheiro, 1 cartão) → esperado = abertura + dinheiro − sangrias.
   **Testes/aceite:** valores batem com a soma dos movimentos; venda em cartão não afeta dinheiro esperado.

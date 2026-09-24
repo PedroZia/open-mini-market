@@ -38,6 +38,7 @@ public enum ErrorCode {
   CASH_REGISTER_ALREADY_OPEN(409, "Caixa já está aberto"),
   CASH_SESSION_ALREADY_CLOSED(409, "Sessão de caixa já está fechada"),
   CASH_SESSION_REQUIRED(409, "Sessão de caixa aberta obrigatória"),
+  SESSION_HAS_OPEN_SALES(409, "Sessão de caixa com venda em andamento"),
   IDEMPOTENCY_KEY_REUSED(409, "Chave de idempotência já utilizada"),
   CONCURRENT_MODIFICATION(409, "Modificação concorrente"),
   SALE_NOT_OPEN(409, "Venda não está aberta"),

@@ -57,6 +57,10 @@ class CashSessionsResourceTest extends IntegrationTestBase {
   private static final List<String> MOVEMENT_TYPES =
       List.of("OPENING", "SALE", "SUPPLY", "WITHDRAWAL");
 
+  /** As cinco formas de pagamento, como o JSON as traz (ordem do enum, passo 909). */
+  private static final List<String> PAYMENT_METHODS =
+      List.of("CASH", "PIX", "DEBIT", "CREDIT", "VOUCHER");
+
   /** Chaves de idempotência usadas pelo teste: a limpeza apaga exatamente elas. */
   private final List<String> idempotencyKeys = new ArrayList<>();
 
@@ -169,7 +173,8 @@ class CashSessionsResourceTest extends IntegrationTestBase {
             "expectedAmount",
             "countedAmount",
             "differenceAmount",
-            "totalsByType");
+            "totalsByType",
+            "paymentsByMethod");
     assertThat(openBody.get("sessionId")).isEqualTo(sessionId.toString());
     assertThat(openBody.get("status")).isEqualTo("OPEN");
     assertThat(money(openBody, "openingAmount")).isEqualByComparingTo("100.00");
@@ -198,6 +203,17 @@ class CashSessionsResourceTest extends IntegrationTestBase {
           .isEqualByComparingTo(storedTotal(sessionId, type));
     }
 
+    Map<String, Object> payments = paymentsByMethod(openBody);
+
+    assertThat(payments)
+        .as("as cinco formas sempre aparecem, zeradas na sessão sem venda")
+        .containsOnlyKeys(PAYMENT_METHODS.toArray(String[]::new));
+    for (String method : PAYMENT_METHODS) {
+      assertThat(money(payments, method))
+          .as("forma %s sem venda paga", method)
+          .isEqualByComparingTo("0.00");
+    }
+
     close(registerId, "85.00", "conferência do turno");
 
     Response closed = get(SUMMARY_PATH.formatted(sessionId));
@@ -216,6 +232,9 @@ class CashSessionsResourceTest extends IntegrationTestBase {
         .as("contado 85 − esperado 90")
         .isEqualByComparingTo("-5.00");
     assertThat(totalsByType(closedBody)).as("fechar não mexe nos movimentos").isEqualTo(totals);
+    assertThat(paymentsByMethod(closedBody))
+        .as("fechar não mexe nos pagamentos")
+        .isEqualTo(payments);
   }
 
   /** Remove o que o teste comitou, na ordem que as FKs exigem. */
@@ -329,6 +348,14 @@ class CashSessionsResourceTest extends IntegrationTestBase {
     Map<String, Object> totals = (Map<String, Object>) body.get("totalsByType");
     assertThat(totals).as("totalsByType no corpo").isNotNull();
     return totals;
+  }
+
+  /** Mapa {@code paymentsByMethod} do corpo, com as chaves das formas como o JSON as traz. */
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> paymentsByMethod(Map<String, Object> body) {
+    Map<String, Object> payments = (Map<String, Object>) body.get("paymentsByMethod");
+    assertThat(payments).as("paymentsByMethod no corpo").isNotNull();
+    return payments;
   }
 
   private UUID queryUuid(String sql, String parameter) throws SQLException {

@@ -25,12 +25,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unitários puros do {@link CloseCashSessionUseCase}, sem Quarkus e sem banco: a porta {@link
- * CashSessionStore} é um dublê escrito à mão e o relógio é fixo, para o fechamento ser conferido
- * campo a campo. O dublê devolve a sessão travada configurada — é ele que encena a corrida do
- * {@code lockById} devolvendo uma sessão já {@code CLOSED} — e registra o que o caso de uso pediu
- * para gravar; a gravação de verdade contra o PostgreSQL é coberta pelo {@code
- * CloseCashSessionIntegrationTest}.
+ * Unitários puros do {@link CloseCashSessionUseCase}, sem Quarkus e sem banco: as portas {@link
+ * CashSessionStore} e {@link SessionSalesLookup} são dublês escritos à mão e o relógio é fixo, para
+ * o fechamento ser conferido campo a campo. O dublê da sessão devolve a sessão travada configurada
+ * — é ele que encena a corrida do {@code lockById} devolvendo uma sessão já {@code CLOSED} — e
+ * registra o que o caso de uso pediu para gravar; a gravação de verdade contra o PostgreSQL é
+ * coberta pelo {@code CloseCashSessionIntegrationTest}.
  */
 class CloseCashSessionUseCaseTest {
 
@@ -41,6 +41,7 @@ class CloseCashSessionUseCaseTest {
   private static final Instant NOW = Instant.parse("2026-09-24T18:00:00Z");
 
   private final FakeCashSessionStore cashSessionStore = new FakeCashSessionStore();
+  private final FakeSessionSalesLookup sessionSalesLookup = new FakeSessionSalesLookup();
   private final FakeAuditRecorder auditRecorder = new FakeAuditRecorder();
 
   private CloseCashSessionUseCase useCase;
@@ -49,6 +50,7 @@ class CloseCashSessionUseCaseTest {
   void setUp() {
     useCase = new CloseCashSessionUseCase();
     useCase.cashSessionStore = cashSessionStore;
+    useCase.sessionSalesLookup = sessionSalesLookup;
     useCase.auditRecorder = auditRecorder;
     useCase.clock = Clock.fixed(NOW, ZoneOffset.UTC);
   }
@@ -188,6 +190,9 @@ class CloseCashSessionUseCaseTest {
             error -> assertThat(error.code()).isEqualTo(ErrorCode.CASH_SESSION_ALREADY_CLOSED));
 
     assertThat(cashSessionStore.lockedSessionIds).containsExactly(SESSION_ID);
+    assertThat(sessionSalesLookup.lookedUpSessionIds)
+        .as("sessão já fechada nem chega a consultar as vendas")
+        .isEmpty();
     assertThat(cashSessionStore.summedSessionIds)
         .as("sessão já fechada nem chega a somar movimentos")
         .isEmpty();
@@ -202,6 +207,32 @@ class CloseCashSessionUseCaseTest {
             error -> assertThat(error.code()).isEqualTo(ErrorCode.CASH_SESSION_ALREADY_CLOSED));
 
     assertThat(cashSessionStore.closeCall).isNull();
+    assertThat(auditRecorder.recorded).isEmpty();
+  }
+
+  @Test
+  @DisplayName(
+      "venda OPEN na sessão é 409 SESSION_HAS_OPEN_SALES depois do lock, sem fechar nem auditar")
+  void rejectsSessionWithOpenSale() {
+    cashSessionStore.open("100.00");
+    sessionSalesLookup.openSales = true;
+
+    assertThatThrownBy(() -> useCase.execute(command("100.00", null)))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> {
+              assertThat(error.code()).isEqualTo(ErrorCode.SESSION_HAS_OPEN_SALES);
+              assertThat(error).hasMessageContaining(SESSION_ID.toString());
+            });
+
+    assertThat(cashSessionStore.lockedSessionIds)
+        .as("a venda é consultada depois do lock da sessão")
+        .containsExactly(SESSION_ID);
+    assertThat(sessionSalesLookup.lookedUpSessionIds).containsExactly(SESSION_ID);
+    assertThat(cashSessionStore.summedSessionIds)
+        .as("com venda aberta nem chega a somar os movimentos")
+        .isEmpty();
+    assertThat(cashSessionStore.closeCall).as("nada é gravado na sessão bloqueada").isNull();
     assertThat(auditRecorder.recorded).isEmpty();
   }
 
@@ -366,6 +397,29 @@ class CloseCashSessionUseCaseTest {
     private Recorded only() {
       assertThat(recorded).as("eventos de auditoria do cenário").hasSize(1);
       return recorded.getFirst();
+    }
+  }
+
+  /**
+   * Dublê de {@link SessionSalesLookup} (passo 909): configura se a sessão tem venda {@code OPEN} e
+   * registra as sessões consultadas — é por ele que o teste confere que a checagem vem depois do
+   * lock e antes da conta.
+   */
+  private static final class FakeSessionSalesLookup implements SessionSalesLookup {
+
+    private boolean openSales;
+    private final List<UUID> lookedUpSessionIds = new ArrayList<>();
+
+    @Override
+    public boolean existsOpenByCashSession(UUID cashSessionId) {
+      lookedUpSessionIds.add(cashSessionId);
+      return openSales;
+    }
+
+    @Override
+    public Map<String, BigDecimal> sumApprovedPaymentsByMethod(UUID cashSessionId) {
+      throw new UnsupportedOperationException(
+          "sumApprovedPaymentsByMethod não é usado por CloseCashSession");
     }
   }
 

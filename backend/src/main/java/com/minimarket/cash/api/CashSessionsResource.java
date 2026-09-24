@@ -46,7 +46,8 @@ public class CashSessionsResource {
 
   /**
    * Resumo do fechamento: esperado × contado com os totais por tipo de movimento, pela mesma conta
-   * da sessão atual (passo 608) — o esperado é do servidor, nunca do cliente (BR-12).
+   * da sessão atual (passo 608), mais a quebra por forma de pagamento das vendas da sessão (passo
+   * 909) — o esperado é do servidor, nunca do cliente (BR-12).
    */
   @GET
   @Path("/{id}/summary")
@@ -80,6 +81,7 @@ public class CashSessionsResource {
         summary.expectedAmount(),
         summary.countedAmount(),
         summary.differenceAmount(),
-        summary.totalsByType());
+        summary.totalsByType(),
+        summary.paymentsByMethod());
   }
 }
