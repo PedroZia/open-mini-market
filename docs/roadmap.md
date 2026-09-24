@@ -931,6 +931,12 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** tela exibe leitura e timing; `docs/leitores.md` com o guia de configuração dos modelos usados na loja.
   **Commit:** `feat(tui): adiciona autoteste do leitor de codigo de barras`
 
+- [ ] **1104d — Código interno no cadastro do produto**
+  **Objetivo:** cadastrar o PLU da balança pela API, sem tocar no banco. **Depende:** 1104b3
+  **Implementar:** `products.internal_code` no `POST`/`PUT`/detalhe reutilizando a permissão `product.write` — **sem** endpoint nem permissão para configurar a balança (os parâmetros da etiqueta em `stores` são por SQL, documentados em `docs/leitores.md`); erro novo `INTERNAL_CODE_ALREADY_EXISTS` (409) e a tradução do 23505 do produto passa a distinguir pelo nome da constraint (`ux_products_internal_code` × `ux_products_barcode`, senão o 409 genérico); `internalCode` em `CreateProductRequest`/`UpdateProductRequest`/`ProductResponse` (POST 201, detalhe e PUT 200), nos commands, em `NewProduct`, no `ProductStore.update` e na entidade — no PUT o campo nulo/ausente **limpa** (substituição, como descrição e `minQuantity`); a regra é do caso de uso, não da bean validation: normalização como o `BarcodeNormalizer` (trim, sem espaços internos, vazio → nulo), só dígitos e no máximo `internal_code_length`, completando com zeros à esquerda até o tamanho que a balança imprime — é o que mantém o invariante de o mesmo produto resolver pela etiqueta e pelo código interno digitado (o `BarcodeResolver` completa o código curto do bipe); duplicado entre vivos → 409 via `existsActiveInternalCode` na porta (+ a variante que ignora o próprio id no PUT) e backstop da constraint, que o `enable` também atravessa; `internalCode` nos details de `PRODUCT_CREATED`/`PRODUCT_UPDATED`; `docs/leitores.md` com as premissas do parser e a configuração da loja; `packages/api-client/src/schema.d.ts` regenerado.
+  **Testes/aceite:** POST/PUT/detalhe com `internalCode` (PUT sem o campo limpa); 409 duplicado (inclusive no `enable`) e 400 não numérico/maior que o configurado apontando o campo; etiqueta de balança e código digitado curto resolvem o mesmo produto; 409 de barcode continua `BARCODE_ALREADY_EXISTS`.
+  **Commit:** `feat(catalog): expoe codigo interno no cadastro de produtos`
+
 - [x] **1105 — Núcleo: atalhos de teclado**
   **Objetivo:** operação 100% por teclado. **Depende:** 1103
   **Implementar:** `core/keys.ts` com o mapa de §11.3 (F1–F12, ENTER, ESC, setas, `+`/`-`, DEL) e resolução de conflito por contexto.
