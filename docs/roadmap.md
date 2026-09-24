@@ -777,7 +777,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200; replay devolve a mesma resposta com `Idempotency-Replayed: true` e **sem** segunda baixa de estoque (assertar saldo).
   **Commit:** `feat(sales): expoe conclusao de venda`
 
-- [ ] **908 — Testes de concorrência da conclusão**
+- [x] **908 — Testes de concorrência da conclusão**
   **Objetivo:** provar §8 sob disputa. **Depende:** 906
   **Implementar:** última unidade com duas vendas simultâneas (`allow_negative_stock=false` → uma falha; `true` → saldo negativo auditado); dois pagamentos simultâneos na mesma venda.
   **Testes/aceite:** testes determinísticos verdes; saldo final e ledger coerentes.
