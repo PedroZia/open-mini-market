@@ -753,7 +753,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** round-trip e soma correta.
   **Commit:** `feat(sales): adiciona persistencia de pagamentos`
 
-- [ ] **904 — Caso de uso `AddPayment`**
+- [x] **904 — Caso de uso `AddPayment`**
   **Objetivo:** receber pagamento. **Depende:** 903, 802
   **Implementar:** venda `OPEN` e do próprio caixa; `amount > 0`; em dinheiro exige `tenderedAmount ≥ amount`; calcula troco; recalcula `paidAmount`; auditoria `PAYMENT_ADDED`; permissão `payment.add`.
   **Testes/aceite:** pagamento parcial; pagamento que completa; dinheiro com troco; tendered insuficiente → 422; venda de outro caixa → 403.

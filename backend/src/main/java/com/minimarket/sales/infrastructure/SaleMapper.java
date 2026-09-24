@@ -2,6 +2,7 @@ package com.minimarket.sales.infrastructure;
 
 import com.github.f4b6a3.uuid.UuidCreator;
 import com.minimarket.sales.application.SaleSummary;
+import com.minimarket.sales.domain.PaymentTotals;
 import com.minimarket.sales.domain.Sale;
 import com.minimarket.sales.domain.SaleItem;
 import com.minimarket.sales.domain.SaleStatus;
@@ -12,8 +13,8 @@ import java.util.UUID;
 /**
  * Conversão entre o agregado {@link Sale} e as entidades JPA de {@code sales}/{@code sale_items}:
  * nada de JPA fora daqui. A rehidratação usa só os métodos públicos do domínio (construtor, {@code
- * addItem}, {@code applyDiscount}, {@code linkCustomer}, {@code complete}), como o §4.1 manda — a
- * linha não reconstrói estado que o agregado não aceita.
+ * addItem}, {@code applyDiscount}, {@code linkCustomer}, {@code applyPaymentTotals}, {@code
+ * complete}), como o §4.1 manda — a linha não reconstrói estado que o agregado não aceita.
  */
 final class SaleMapper {
 
@@ -101,6 +102,9 @@ final class SaleMapper {
     if (entity.getCustomerId() != null) {
       sale.linkCustomer(entity.getCustomerId());
     }
+    // O pago/troco derivado dos pagamentos (passo 904) volta antes do estado final: sem isso um
+    // update de item depois do pagamento regravaria zero nas colunas e perderia o pagamento.
+    sale.applyPaymentTotals(new PaymentTotals(entity.getPaidAmount(), entity.getChangeAmount()));
     // O estado final entra por último: a venda concluída ou cancelada não aceita mais nada.
     if (entity.getStatus() == SaleStatus.COMPLETED) {
       sale.complete(entity.getCompletedAt());

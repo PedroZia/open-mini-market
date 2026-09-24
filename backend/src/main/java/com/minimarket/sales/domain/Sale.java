@@ -12,9 +12,9 @@ import java.util.UUID;
 
 /**
  * Agregado da venda (linha “Venda” do §4.4): itens com snapshot do produto (BR-01), desconto
- * calculado sempre no servidor (BR-03) e totais derivados dos itens e do desconto (BR-02) — nada de
- * valor calculado vindo de fora. Java puro — sem JPA, Quarkus, Jackson ou HTTP; quem grava é o caso
- * de uso, a partir do passo 803.
+ * calculado sempre no servidor (BR-03), totais derivados dos itens e do desconto (BR-02) e
+ * pago/troco derivados dos pagamentos (BR-05) — nada de valor calculado vindo de fora. Java puro —
+ * sem JPA, Quarkus, Jackson ou HTTP; quem grava é o caso de uso, a partir do passo 803.
  *
  * <p>A venda nasce {@link SaleStatus#OPEN} no caixa que a criou (BR-06) e só sai daí ao concluir
  * (passo 906, quando o pagamento cobre o total) ou ao cancelar (passo 813, enquanto não foi paga).
@@ -48,6 +48,8 @@ public final class Sale {
   private BigDecimal subtotal = zeroMoney();
   private BigDecimal discountAmount = zeroMoney();
   private BigDecimal total = zeroMoney();
+  private BigDecimal paidAmount = zeroMoney();
+  private BigDecimal changeAmount = zeroMoney();
   private int itemCount;
   private UUID customerId;
   private Instant completedAt;
@@ -170,6 +172,20 @@ public final class Sale {
    */
   public BigDecimal total() {
     return total;
+  }
+
+  /**
+   * Σ dos pagamentos aprovados (BR-05): estado <em>derivado</em> dos pagamentos, nunca informado
+   * pelo cliente (BR-12) — quem escreve é {@link #applyPaymentTotals(PaymentTotals)} com a conta
+   * que o caso de uso (passo 904) apurou. Zero enquanto não há pagamento aprovado.
+   */
+  public BigDecimal paidAmount() {
+    return paidAmount;
+  }
+
+  /** Σ do troco dos pagamentos aprovados; zero sem pagamento em dinheiro (BR-05). */
+  public BigDecimal changeAmount() {
+    return changeAmount;
   }
 
   /**
@@ -343,6 +359,29 @@ public final class Sale {
     this.discountAmount = computedDiscountAmount(itemsTotal);
     this.total = money(this.subtotal.subtract(this.discountAmount).max(BigDecimal.ZERO));
     this.itemCount = items.size();
+  }
+
+  /**
+   * Aplica os totais derivados dos pagamentos (BR-05/BR-12): {@code paidAmount} é a soma dos
+   * aprovados e {@code changeAmount} a soma do troco deles. Ninguém calcula isso de fora — o caso
+   * de uso (passo 904) entrega o {@link PaymentTotals} já somado e a venda só guarda; o cliente
+   * nunca manda valor pago (BR-12).
+   *
+   * <p>Sem guarda de {@code OPEN} de propósito: não é mutação da venda, é estado derivado dos
+   * pagamentos — o mapper rehidrata venda concluída ou cancelada (que já não aceita item, desconto
+   * ou cliente) e as colunas {@code paid_amount}/{@code change_amount} precisam voltar como
+   * estavam, inclusive para um update posterior não zerá-las.
+   *
+   * @param totals totais dos pagamentos aprovados, obrigatórios
+   * @throws BusinessException se os totais não forem informados
+   */
+  public void applyPaymentTotals(PaymentTotals totals) {
+    if (totals == null) {
+      throw new BusinessException(
+          ErrorCode.BUSINESS_ERROR, "totais dos pagamentos são obrigatórios");
+    }
+    this.paidAmount = totals.paidAmount();
+    this.changeAmount = totals.changeAmount();
   }
 
   /**

@@ -24,8 +24,9 @@ import java.util.UUID;
  * <p>Só as colunas que o domínio usa hoje estão mapeadas; {@code discount_authorized_by_user_id}
  * entra quando houver caso de uso para ele. O bloco de cancelamento (passo 813) está mapeado:
  * motivo, autor e instante são estado do agregado desde o {@code Sale.cancel}. {@code
- * paid_amount}/{@code change_amount} (passos 905+) nascem no default da tabela e {@link
- * #syncFrom(Sale)} não os toca — enquanto o agregado não os muda, ninguém os escreve.
+ * paid_amount}/{@code change_amount} também são do agregado desde o 904: o domínio os deriva dos
+ * pagamentos ({@code Sale.applyPaymentTotals}) e {@link #syncFrom(Sale)} os grava como qualquer
+ * outro total.
  */
 @Entity
 @Table(name = "sales")
@@ -77,11 +78,11 @@ public class SaleEntity {
   @Column(name = "total")
   private BigDecimal total;
 
-  /** Total pago (passos 905+); zero até o pagamento. */
+  /** Total pago (passo 904); zero até o pagamento. */
   @Column(name = "paid_amount")
   private BigDecimal paidAmount;
 
-  /** Troco (passos 905+); zero até o pagamento. */
+  /** Troco (passo 904); zero até o pagamento. */
   @Column(name = "change_amount")
   private BigDecimal changeAmount;
 
@@ -158,9 +159,10 @@ public class SaleEntity {
   }
 
   /**
-   * Estado que o agregado manda para a linha: status, totais, desconto, cliente, contagem de itens
-   * e as datas de criação/conclusão/cancelamento. As colunas de pagamento ficam como estão — o
-   * domínio ainda não as governa (passos 905+).
+   * Estado que o agregado manda para a linha: status, totais (inclusive o pago e o troco derivados
+   * dos pagamentos, passo 904), desconto, cliente, contagem de itens e as datas de
+   * criação/conclusão/cancelamento. Como a leitura rehidrata o agregado inteiro, um update de item
+   * depois de um pagamento regrava o pago/troco como estavam — nunca os zera.
    */
   void syncFrom(Sale sale) {
     this.status = sale.status();
@@ -171,6 +173,8 @@ public class SaleEntity {
     this.discountReason = sale.discountReason();
     this.customerId = sale.customerId();
     this.total = sale.total();
+    this.paidAmount = sale.paidAmount();
+    this.changeAmount = sale.changeAmount();
     this.itemCount = sale.itemCount();
     this.completedAt = sale.completedAt();
     this.cancelReason = sale.cancelReason();
