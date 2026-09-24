@@ -883,7 +883,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `npm test` e `tsc --noEmit` verdes; execução manual no Windows e no Linux.
   **Commit:** `chore(tui): cria projeto da TUI com Ink`
 
-- [ ] **1102 — Client de API tipado**
+- [x] **1102 — Client de API tipado**
   **Objetivo:** falar com o backend sem duplicar tipos. **Depende:** 1101, 907
   **Implementar:** `packages/api-client` gerado do OpenAPI (`openapi-typescript`) + wrapper `fetch` com bearer token, `Idempotency-Key` automática, timeout, retry seguro (só leitura) e tradução de `problem+json` para `ApiError`.
   **Testes/aceite:** testes com servidor fake: sucesso, 401, 409 com `code`, timeout, retry de GET e **não** retry de POST.

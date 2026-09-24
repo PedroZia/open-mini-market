@@ -49,6 +49,15 @@
       <groupId>io.quarkus</groupId>
       <artifactId>quarkus-rest-jackson</artifactId>
     </dependency>
+    <!--
+      Contrato OpenAPI (passo 1102): o /q/openapi é a fonte dos tipos do packages/api-client
+      (§9.1 do plano). Extensão oficial do SmallRye OpenAPI — habilita o endpoint em todos os
+      perfis por padrão; em %prod ele é desligado em application.properties.
+    -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-smallrye-openapi</artifactId>
+    </dependency>
     <dependency>
       <groupId>io.quarkus</groupId>
       <artifactId>quarkus-hibernate-orm</artifactId>
