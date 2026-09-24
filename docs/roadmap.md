@@ -309,7 +309,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de integração grava evento e confere todos os campos; rollback da transação não deixa evento órfão.
   **Commit:** `feat(audit): adiciona gravador de eventos de auditoria`
 
-- [ ] **304 — Auditar autenticação**
+- [x] **304 — Auditar autenticação**
   **Objetivo:** rastrear acessos. **Depende:** 303, 204
   **Implementar:** eventos `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGIN_LOCKED`, `LOGOUT`, `SESSION_REVOKED`.
   **Testes/aceite:** cada evento gerado no cenário correspondente, com IP e `authSessionId`.

@@ -1,10 +1,14 @@
 package com.minimarket.auth.application;
 
+import com.minimarket.audit.application.AuditRecorder;
+import com.minimarket.auth.domain.SessionClient;
 import com.minimarket.auth.domain.TokenGenerator;
 import com.minimarket.auth.domain.TokenHasher;
+import com.minimarket.shared.application.OperationContext;
 import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.shared.domain.OperationSource;
 import com.minimarket.shared.domain.Store;
 import com.minimarket.users.application.PasswordHasher;
 import com.minimarket.users.application.UserAuthState;
@@ -16,6 +20,8 @@ import java.net.InetAddress;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -46,9 +52,30 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * LoginRateLimiter} decide o 429 — teto de falhas por IP na janela em memória — e cada recusa (401
  * ou 423) conta para o IP; o login bem-sucedido limpa a contagem. É um paliativo de uma instância;
  * o limite definitivo é do proxy reverso (passo 1305 da Fase 13, citado como 1402 no passo 212).
+ *
+ * <p>Auditoria (§6.3.3, passo 304): cada tentativa vira um evento na mesma transação — {@code
+ * LOGIN_SUCCESS} no sucesso, {@code LOGIN_FAILED} na credencial recusada (inclusive a falha que
+ * atinge o limite, que ainda responde 401) e {@code LOGIN_LOCKED} na tentativa recusada por {@code
+ * locked_until} no futuro. A rota é pública, então o filtro do passo 302 deixa o contexto anônimo:
+ * o ator do sucesso nasce aqui, com o usuário e a sessão recém-criada, preservando o {@code
+ * requestId} e o IP que o filtro já preencheu. As recusas não têm ator — o username tentado vai em
+ * {@code details} — e a gravação acontece antes do throw, dentro da transação que o {@code
+ * dontRollbackOn} mantém.
  */
 @ApplicationScoped
 public class LoginUseCase {
+
+  /** Ação do login bem-sucedido (§7.2). */
+  private static final String LOGIN_SUCCESS_ACTION = "LOGIN_SUCCESS";
+
+  /** Ação da credencial recusada (§7.2); o 401 da tentativa que atinge o limite também é esta. */
+  private static final String LOGIN_FAILED_ACTION = "LOGIN_FAILED";
+
+  /** Ação da tentativa recusada por conta bloqueada (§7.2). */
+  private static final String LOGIN_LOCKED_ACTION = "LOGIN_LOCKED";
+
+  /** Alvo dos eventos de login: o usuário; nulo quando o username tentado não existe. */
+  private static final String USER_ENTITY_TYPE = "USER";
 
   /**
    * Hash PHC de uma senha aleatória que ninguém conhece, com os mesmos parâmetros do Argon2id do
@@ -86,6 +113,15 @@ public class LoginUseCase {
   private final TokenHasher tokenHasher = new TokenHasher();
 
   @Inject StoreLookup storeLookup;
+
+  /** Auditoria do acesso (§6.3.3, passo 304): a tentativa vira evento na transação do login. */
+  @Inject AuditRecorder auditRecorder;
+
+  /**
+   * Contexto do ator (passo 302): o filtro preenche {@code requestId} e IP em toda requisição e
+   * deixa o resto vazio no login, que é público — é aqui que o ator da sessão nova nasce.
+   */
+  @Inject OperationContext operationContext;
 
   /** Relógio da aplicação: expiração, lock, {@code last_login_at} e {@code last_seen_at}. */
   @Inject Clock clock;
@@ -131,6 +167,7 @@ public class LoginUseCase {
     if (user != null) {
       if (user.lockedUntil() != null && user.lockedUntil().isAfter(now)) {
         rateLimiter.recordFailure(command.ip());
+        recordLoginFailure(LOGIN_LOCKED_ACTION, command, user);
         throw new BusinessException(ErrorCode.ACCOUNT_LOCKED, ACCOUNT_LOCKED_DETAIL);
       }
       if (user.lockedUntil() != null) {
@@ -145,10 +182,12 @@ public class LoginUseCase {
         passwordHasher.verify(
             command.password(), user == null ? DUMMY_PASSWORD_HASH : user.passwordHash());
     if (user == null || !isActive(user)) {
+      recordLoginFailure(LOGIN_FAILED_ACTION, command, user);
       rejectInvalidCredentials(command.ip());
     }
     if (!passwordMatches) {
       registerFailedAttempt(user.id(), previousAttempts, now);
+      recordLoginFailure(LOGIN_FAILED_ACTION, command, user);
       rejectInvalidCredentials(command.ip());
     }
     rehashIfNeeded(user, command.password());
@@ -156,20 +195,22 @@ public class LoginUseCase {
     Store store = requireStore();
     String token = tokenGenerator.generate();
     Instant expiresAt = now.plus(absoluteExpiration);
-    sessionStore.insert(
-        new NewAuthSession(
-            user.id(),
-            tokenHasher.hash(token),
-            command.client(),
-            store.id(),
-            command.cashRegisterId(),
-            command.ip(),
-            command.userAgent(),
-            now,
-            expiresAt));
+    UUID sessionId =
+        sessionStore.insert(
+            new NewAuthSession(
+                user.id(),
+                tokenHasher.hash(token),
+                command.client(),
+                store.id(),
+                command.cashRegisterId(),
+                command.ip(),
+                command.userAgent(),
+                now,
+                expiresAt));
     userStore.recordSuccessfulLogin(user.id(), now);
     // Sucesso limpa a contagem do IP (passo 212): NAT compartilhado não carrega falha de ninguém.
     rateLimiter.recordSuccess(command.ip());
+    recordLoginSuccess(command, user, store, sessionId);
 
     return new LoginResult(
         token,
@@ -191,6 +232,48 @@ public class LoginUseCase {
     Instant lockedUntil =
         attempts >= maxLoginAttempts ? now.plus(Duration.ofMinutes(lockMinutes)) : null;
     userStore.recordFailedLogin(userId, attempts, lockedUntil);
+  }
+
+  /**
+   * Evento da tentativa recusada (passo 304), gravado antes do throw — o {@code dontRollbackOn} do
+   * {@link #execute} mantém a linha junto com o contador e o lock que a falha acabou de gravar.
+   *
+   * <p>Não há ator: a requisição é anônima e o username pode nem existir. O username tentado e o
+   * cliente vão em {@code details} para a investigação; o IP e o {@code request_id} já vêm do
+   * contexto que o filtro preencheu (passo 302). {@code user} nulo (username desconhecido) deixa o
+   * evento sem entidade.
+   */
+  private void recordLoginFailure(String action, LoginCommand command, UserAuthState user) {
+    Map<String, Object> details = new LinkedHashMap<>();
+    details.put("username", command.username());
+    details.put("client", command.client().name());
+    auditRecorder.record(action, USER_ENTITY_TYPE, user == null ? null : user.id(), null, details);
+  }
+
+  /**
+   * Ator do login bem-sucedido (passo 304): a rota é pública, então o contexto chega anônimo do
+   * filtro e é aqui que ele ganha usuário, sessão recém-criada, loja e caixa — preservando o {@code
+   * requestId} e o IP que o filtro já tinha preenchido nesta requisição.
+   */
+  private void recordLoginSuccess(
+      LoginCommand command, UserAuthState user, Store store, UUID sessionId) {
+    String requestId = operationContext.requestId();
+    InetAddress ip = operationContext.ip();
+    operationContext.fill(
+        user.id(),
+        user.username(),
+        sessionId,
+        store.id(),
+        command.cashRegisterId(),
+        requestId,
+        ip,
+        sourceOf(command.client()));
+    auditRecorder.record(LOGIN_SUCCESS_ACTION, USER_ENTITY_TYPE, user.id(), null, null);
+  }
+
+  /** Origem do evento (passo 302): o cliente da sessão nova vira {@code TUI}/{@code WEB}. */
+  private static OperationSource sourceOf(SessionClient client) {
+    return client == SessionClient.TUI ? OperationSource.TUI : OperationSource.WEB;
   }
 
   /**

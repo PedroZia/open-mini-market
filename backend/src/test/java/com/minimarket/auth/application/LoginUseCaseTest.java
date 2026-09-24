@@ -3,11 +3,14 @@ package com.minimarket.auth.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.auth.domain.SessionClient;
 import com.minimarket.auth.domain.TokenHasher;
+import com.minimarket.shared.application.OperationContext;
 import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.shared.domain.OperationSource;
 import com.minimarket.shared.domain.Store;
 import com.minimarket.users.application.NewUser;
 import com.minimarket.users.application.PasswordHasher;
@@ -23,7 +26,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -34,7 +39,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Unitários puros do {@link LoginUseCase}, sem Quarkus e sem banco: as portas são dublês escritos à
  * mão e o relógio é fixo — a expiração e o {@code last_seen_at} são conferidos no instante
- * controlado.
+ * controlado. O gravador de auditoria (passo 304) também é dublê: o evento é conferido como o caso
+ * de uso o entregou, e a gravação de verdade contra o PostgreSQL é coberta pelo teste de API.
  */
 class LoginUseCaseTest {
 
@@ -52,11 +58,14 @@ class LoginUseCaseTest {
   private static final UUID STORE_ID = UUID.fromString("0199a2b3-0000-7000-8000-000000000002");
   private static final UUID CASH_REGISTER_ID =
       UUID.fromString("0199a2b3-0000-7000-8000-000000000003");
+  private static final String REQUEST_ID = "0199a2b3-0000-7000-8000-000000000004";
 
   private final FakeUserStore userStore = new FakeUserStore();
   private final FakeSessionStore sessionStore = new FakeSessionStore();
   private final FakePasswordHasher passwordHasher = new FakePasswordHasher();
   private final FakeStoreLookup storeLookup = new FakeStoreLookup();
+  private final FakeAuditRecorder auditRecorder = new FakeAuditRecorder();
+  private final OperationContext operationContext = new OperationContext();
   private final TokenHasher tokenHasher = new TokenHasher();
 
   private LoginUseCase useCase;
@@ -68,6 +77,8 @@ class LoginUseCaseTest {
     useCase.sessionStore = sessionStore;
     useCase.passwordHasher = passwordHasher;
     useCase.storeLookup = storeLookup;
+    useCase.auditRecorder = auditRecorder;
+    useCase.operationContext = operationContext;
     useCase.clock = Clock.fixed(NOW, ZoneOffset.UTC);
     useCase.defaultStoreCode = "MATRIZ";
     useCase.absoluteExpiration = ABSOLUTE_EXPIRATION;
@@ -88,6 +99,9 @@ class LoginUseCaseTest {
   @DisplayName("autentica, cria a sessão com expiração absoluta e last_seen_at do relógio")
   void authenticatesAndCreatesSession() throws Exception {
     InetAddress ip = InetAddress.getByName("192.168.0.10");
+    InetAddress filterIp = InetAddress.ofLiteral("203.0.113.10");
+    // O filtro do passo 302 já preencheu requestId e IP antes do caso de uso rodar.
+    operationContext.fill(null, null, null, null, null, REQUEST_ID, filterIp, OperationSource.API);
 
     LoginResult result =
         useCase.execute(
@@ -120,6 +134,98 @@ class LoginUseCaseTest {
     assertThat(userStore.successfulLoginId).isEqualTo(USER_ID);
     assertThat(userStore.successfulLoginAt).isEqualTo(NOW);
     assertThat(userStore.updatedHash).isNull();
+  }
+
+  @Test
+  @DisplayName("audita o sucesso: ator e sessão nova no contexto, preservando requestId e IP")
+  void auditsSuccessfulLogin() {
+    InetAddress filterIp = InetAddress.ofLiteral("203.0.113.11");
+    operationContext.fill(null, null, null, null, null, REQUEST_ID, filterIp, OperationSource.API);
+
+    useCase.execute(command());
+
+    Recorded event = auditRecorder.only();
+    assertThat(event.action()).isEqualTo("LOGIN_SUCCESS");
+    assertThat(event.entityType()).isEqualTo("USER");
+    assertThat(event.entityId()).isEqualTo(USER_ID);
+    assertThat(event.reason()).isNull();
+    // O ator nasce no caso de uso (a rota é pública): usuário, sessão nova, loja e caixa.
+    assertThat(operationContext.userId()).isEqualTo(USER_ID);
+    assertThat(operationContext.username()).isEqualTo(USERNAME);
+    assertThat(operationContext.authSessionId()).isEqualTo(sessionStore.generatedId);
+    assertThat(operationContext.storeId()).isEqualTo(STORE_ID);
+    assertThat(operationContext.cashRegisterId()).isNull();
+    assertThat(operationContext.source()).isEqualTo(OperationSource.TUI);
+    // O que o filtro já tinha preenchido sobrevive ao preenchimento do ator.
+    assertThat(operationContext.requestId()).isEqualTo(REQUEST_ID);
+    assertThat(operationContext.ip()).isEqualTo(filterIp);
+  }
+
+  @Test
+  @DisplayName("sessão WEB audita a origem WEB no contexto do ator")
+  void auditsWebOrigin() {
+    useCase.execute(new LoginCommand(USERNAME, PASSWORD, SessionClient.WEB, null, null, null));
+
+    assertThat(operationContext.source()).isEqualTo(OperationSource.WEB);
+    assertThat(auditRecorder.only().action()).isEqualTo("LOGIN_SUCCESS");
+  }
+
+  @Test
+  @DisplayName("audita a credencial recusada sem ator, com o username tentado em details")
+  void auditsRejectedCredentials() {
+    passwordHasher.passwordMatches = false;
+
+    assertInvalidCredentials();
+
+    Recorded event = auditRecorder.only();
+    assertThat(event.action()).isEqualTo("LOGIN_FAILED");
+    assertThat(event.entityType()).isEqualTo("USER");
+    assertThat(event.entityId()).isEqualTo(USER_ID);
+    assertThat(event.details()).containsEntry("username", USERNAME).containsEntry("client", "TUI");
+    assertThat(operationContext.userId()).as("tentativa recusada não tem ator").isNull();
+    assertThat(operationContext.authSessionId()).isNull();
+  }
+
+  @Test
+  @DisplayName("audita o username desconhecido em LOGIN_FAILED, sem entidade nem ator")
+  void auditsUnknownUsername() {
+    userStore.authState = null;
+
+    assertInvalidCredentials();
+
+    Recorded event = auditRecorder.only();
+    assertThat(event.action()).isEqualTo("LOGIN_FAILED");
+    assertThat(event.entityId()).as("não há usuário para apontar").isNull();
+    assertThat(event.details()).containsEntry("username", USERNAME);
+  }
+
+  @Test
+  @DisplayName("audita a conta bloqueada em LOGIN_LOCKED, sem ator e sem conferir a senha")
+  void auditsLockedAccount() {
+    userStore.authState =
+        authState("ACTIVE", null, MAX_ATTEMPTS, NOW.plus(Duration.ofMinutes(1)), false);
+
+    assertThatThrownBy(() -> useCase.execute(command())).isInstanceOf(BusinessException.class);
+
+    Recorded event = auditRecorder.only();
+    assertThat(event.action()).isEqualTo("LOGIN_LOCKED");
+    assertThat(event.entityId()).isEqualTo(USER_ID);
+    assertThat(event.details()).containsEntry("username", USERNAME);
+    assertThat(operationContext.userId()).isNull();
+    assertThat(passwordHasher.verifiedHash).isNull();
+  }
+
+  @Test
+  @DisplayName("a falha que atinge o limite audita LOGIN_FAILED, não LOGIN_LOCKED")
+  void auditsTheFailureThatLocks() {
+    userStore.authState = authState("ACTIVE", null, MAX_ATTEMPTS - 1, null, false);
+    passwordHasher.passwordMatches = false;
+
+    assertInvalidCredentials();
+
+    assertThat(auditRecorder.only().action())
+        .as("o 401 da tentativa que trava a conta ainda é LOGIN_FAILED")
+        .isEqualTo("LOGIN_FAILED");
   }
 
   @Test
@@ -564,4 +670,38 @@ class LoginUseCaseTest {
       throw new UnsupportedOperationException("findById não é usado por Login");
     }
   }
+
+  /**
+   * Dublê de {@link AuditRecorder}: guarda o que o login pediu para gravar, sem CDI e sem banco. A
+   * subclasse só sobrescreve {@code record} — o caminho de verdade (contexto + INSERT) é do passo
+   * 303 e tem teste próprio contra PostgreSQL.
+   */
+  private static final class FakeAuditRecorder extends AuditRecorder {
+
+    private final List<Recorded> recorded = new ArrayList<>();
+
+    @Override
+    public void record(
+        String action,
+        String entityType,
+        UUID entityId,
+        String reason,
+        Map<String, Object> details) {
+      recorded.add(new Recorded(action, entityType, entityId, reason, details));
+    }
+
+    /** Único evento do cenário; o teste falha se o caso de uso gravou zero ou dois. */
+    private Recorded only() {
+      assertThat(recorded).as("eventos de auditoria do cenário").hasSize(1);
+      return recorded.getFirst();
+    }
+  }
+
+  /** Evento como o caso de uso o entregou ao gravador. */
+  private record Recorded(
+      String action,
+      String entityType,
+      UUID entityId,
+      String reason,
+      Map<String, Object> details) {}
 }
