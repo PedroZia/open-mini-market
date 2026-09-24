@@ -367,9 +367,9 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 4 — Catálogo (produtos e categorias)
 
-- [ ] **401 — Migration `categories`**
+- [x] **401 — Migration `categories`**
   **Objetivo:** agrupar produtos. **Depende:** 004
-  **Implementar:** `V6__categories.sql` (nome único por loja, `parent_id` opcional, `active`, `sort_order`).
+  **Implementar:** `V7__categories.sql` (nome único por loja, `parent_id` opcional, `active`, `sort_order`).
   **Testes/aceite:** migration aplica; nome duplicado na mesma loja falha.
   **Commit:** `feat(catalog): cria tabela de categorias`
 
