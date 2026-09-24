@@ -4,6 +4,8 @@ import com.minimarket.catalog.application.ChangeProductPriceCommand;
 import com.minimarket.catalog.application.ChangeProductPriceUseCase;
 import com.minimarket.catalog.application.CreateProductCommand;
 import com.minimarket.catalog.application.CreateProductUseCase;
+import com.minimarket.catalog.application.DisableProductUseCase;
+import com.minimarket.catalog.application.EnableProductUseCase;
 import com.minimarket.catalog.application.GetProductByBarcodeUseCase;
 import com.minimarket.catalog.application.GetProductUseCase;
 import com.minimarket.catalog.application.ListProductsUseCase;
@@ -42,8 +44,8 @@ import java.util.UUID;
  * <p>A escrita exige {@code product.write}: sem a permissão o interceptor do {@code
  * RequirePermission} responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar. A edição
  * (passo 410) exige ainda o {@code If-Match} com a versão lida no detalhe — é o contrato do lock
- * otimista (§9.4) — e a alteração de preço (passo 411) exige {@code price.write} e o motivo no
- * corpo.
+ * otimista (§9.4) —, a alteração de preço (passo 411) exige {@code price.write} e o motivo no corpo
+ * e o ciclo de vida (passo 412) desativa e reativa com os mesmos 200 do detalhe.
  *
  * <p>O 201 devolve o produto como o banco o guardou (barcode normalizado, preço em escala 2, {@code
  * active}, timestamps e {@code version}) — os mesmos valores que o detalhe de 408 mostrará.
@@ -65,6 +67,10 @@ public class ProductsResource {
   @Inject UpdateProductUseCase updateProductUseCase;
 
   @Inject ChangeProductPriceUseCase changeProductPriceUseCase;
+
+  @Inject DisableProductUseCase disableProductUseCase;
+
+  @Inject EnableProductUseCase enableProductUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -181,6 +187,36 @@ public class ProductsResource {
     return toResponse(
         changeProductPriceUseCase.execute(
             new ChangeProductPriceCommand(id, request.price(), request.reason())));
+  }
+
+  /**
+   * Desativa o produto (passo 412): sai do catálogo sem perder histórico e libera o barcode para
+   * outro produto, como o soft delete faz no índice único parcial. Exige {@code product.write} e
+   * devolve 200 com o {@link ProductResponse} já {@code active=false}; id desconhecido ou produto
+   * já desativado → 404 {@code PRODUCT_NOT_FOUND}, como no disable de usuário (passo 112).
+   */
+  @POST
+  @Path("/{id}/disable")
+  @RequirePermission(Permission.PRODUCT_WRITE)
+  @Produces(MediaType.APPLICATION_JSON)
+  public ProductResponse disable(@PathParam("id") UUID id) {
+    return toResponse(disableProductUseCase.execute(id));
+  }
+
+  /**
+   * Reativa o produto desativado (passo 412): volta à busca padrão e ao bipe. Exige {@code
+   * product.write} e devolve 200 com o {@link ProductResponse} já {@code active=true}; id
+   * desconhecido → 404 {@code PRODUCT_NOT_FOUND}; produto já ativo é no-op e responde 200 sem
+   * evento. Se outro produto vivo já tomou o barcode liberado na desativação → 409 {@code
+   * BARCODE_ALREADY_EXISTS} e o produto continua desativado (a checagem é do banco, no flush do
+   * caso de uso).
+   */
+  @POST
+  @Path("/{id}/enable")
+  @RequirePermission(Permission.PRODUCT_WRITE)
+  @Produces(MediaType.APPLICATION_JSON)
+  public ProductResponse enable(@PathParam("id") UUID id) {
+    return toResponse(enableProductUseCase.execute(id));
   }
 
   /**

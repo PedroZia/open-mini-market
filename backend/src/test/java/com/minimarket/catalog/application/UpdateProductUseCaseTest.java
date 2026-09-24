@@ -350,6 +350,16 @@ class UpdateProductUseCaseTest {
     public boolean existsActiveBarcode(String barcode) {
       throw new UnsupportedOperationException("existsActiveBarcode não é usado por UpdateProduct");
     }
+
+    @Override
+    public Optional<ProductSummary> disable(UUID id) {
+      throw new UnsupportedOperationException("disable não é usado por UpdateProduct");
+    }
+
+    @Override
+    public Optional<ProductSummary> enable(UUID id) {
+      throw new UnsupportedOperationException("enable não é usado por UpdateProduct");
+    }
   }
 
   /**

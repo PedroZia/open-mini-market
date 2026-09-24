@@ -156,6 +156,47 @@ public class ProductRepository implements ProductStore {
   /**
    * {@inheritDoc}
    *
+   * <p>Mesmo filtro de produto vivo do {@link #softDelete} — quem decide o que fazer com o {@code
+   * active} é o caso de uso. O flush antecipado, como no {@link #update}, deixa o {@code version}
+   * novo visível na projeção devolvida e é o backstop do lock otimista: desativar um produto
+   * alterado por outra requisição entre a leitura e este flush vira {@link ConflictException} com o
+   * mesmo código do caminho comum, nunca 500.
+   */
+  @Override
+  public Optional<ProductSummary> disable(UUID id) {
+    return findEntityById(id)
+        .filter(product -> product.getDeletedAt() == null)
+        .map(
+            product -> {
+              product.markDisabled(Instant.now());
+              flushTranslatingConflicts();
+              return toSummary(product);
+            });
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Enxerga o soft-deletado — é o registro que a reativação precisa alcançar. O flush é
+   * obrigatório aqui: é ele que confronta o barcode recuperado com o índice único parcial e traduz
+   * a violação no {@code ConflictException} de {@code BARCODE_ALREADY_EXISTS} — sem o flush, o
+   * conflito estouraria só no commit da transação do caso de uso, fora do alcance desta tradução, e
+   * o produto continuaria desativado sem o cliente saber por quê.
+   */
+  @Override
+  public Optional<ProductSummary> enable(UUID id) {
+    return findEntityById(id)
+        .map(
+            product -> {
+              product.markEnabled();
+              flushTranslatingConflicts();
+              return toSummary(product);
+            });
+  }
+
+  /**
+   * {@inheritDoc}
+   *
    * <p>As cláusulas são fixas e montadas só com valores já resolvidos — o campo de ordenação vem do
    * enum {@link ProductSort}, nunca de string do cliente — e todo valor entra por parâmetro
    * nomeado. O {@code p.id} no fim da ordenação mantém a paginação estável quando o campo escolhido

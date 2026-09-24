@@ -127,6 +127,22 @@ public class ProductEntity {
     this.deletedAt = deletedAt;
   }
 
+  /**
+   * Desativação do passo 412: sai do catálogo (busca, detalhe e bipe) sem apagar o histórico e
+   * libera o barcode no índice único parcial. Diferente do {@link #markDeleted}, o {@code active}
+   * cai junto — é o estado que o caso de uso de reativar vai encontrar.
+   */
+  void markDisabled(Instant deletedAt) {
+    this.active = false;
+    markDeleted(deletedAt);
+  }
+
+  /** Reativação do passo 412: volta ao catálogo com o {@code deleted_at} limpo. */
+  void markEnabled() {
+    this.active = true;
+    this.deletedAt = null;
+  }
+
   public UUID getId() {
     return id;
   }

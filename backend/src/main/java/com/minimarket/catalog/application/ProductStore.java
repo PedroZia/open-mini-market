@@ -78,6 +78,24 @@ public interface ProductStore {
   void softDelete(UUID id);
 
   /**
+   * Desativa o produto vivo (passo 412): grava {@code active = false} e {@code deleted_at} de uma
+   * vez, o que tira o produto da busca padrão, do detalhe e do bipe — e libera o barcode para outro
+   * produto, como no índice único parcial. Vazio para id desconhecido ou produto já desativado
+   * ({@code deletedAt} preenchido) — o 404 é do caso de uso. Devolve a projeção já com o estado
+   * novo.
+   */
+  Optional<ProductSummary> disable(UUID id);
+
+  /**
+   * Reativa o produto desativado (passo 412): enxerga o soft-deletado, grava {@code active = true}
+   * e limpa {@code deleted_at}, o que devolve o produto à busca e ao bipe. A gravação é conferida
+   * contra o índice único de barcode: se outro produto vivo já tomou o código liberado na
+   * desativação, a operação falha com {@code ConflictException(BARCODE_ALREADY_EXISTS)} e nada é
+   * gravado. Vazio para id desconhecido — o 404 é do caso de uso.
+   */
+  Optional<ProductSummary> enable(UUID id);
+
+  /**
    * Indica se existe produto não deletado com o barcode informado. A checagem não filtra por loja
    * porque o índice único do banco é {@code (store_id, barcode)} e o MVP tem loja única (§5.3) —
    * cobrir a tabela inteira é o mesmo escopo da constraint.

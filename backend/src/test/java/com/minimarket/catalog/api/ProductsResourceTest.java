@@ -34,10 +34,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Produtos na API: criação (passo 406), listagem com busca e filtros (passo 407), detalhe (passo
- * 408), bipe por código de barras (passo 409), edição com {@code If-Match} (passo 410) e alteração
- * de preço auditada (passo 411) contra PostgreSQL real (Dev Services): as rotas de verdade, com o
- * ADMIN da fixture e um OPERADOR criado pelo caso de uso e autenticado por login real, como no
- * {@code PermissionMatrixTest}.
+ * 408), bipe por código de barras (passo 409), edição com {@code If-Match} (passo 410), alteração
+ * de preço auditada (passo 411) e desativação/reativação (passo 412) contra PostgreSQL real (Dev
+ * Services): as rotas de verdade, com o ADMIN da fixture e um OPERADOR criado pelo caso de uso e
+ * autenticado por login real, como no {@code PermissionMatrixTest}.
  *
  * <p>A listagem é semeada pela porta {@code ProductStore} (sem caso de uso nem auditoria, em
  * transação própria). O request HTTP commita: o {@link #removeRowsCreatedByThisTest()} apaga ao fim
@@ -901,6 +901,218 @@ class ProductsResourceTest extends IntegrationTestBase {
     assertThat(priceEventCount(id)).as("o no-op não inventa evento").isZero();
   }
 
+  @Test
+  @DisplayName(
+      "POST /api/v1/products/{id}/disable responde 200 com active=false e tira o produto do catálogo")
+  void disablesProduct() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null, STORED_BARCODE);
+
+    Response response = postStatus(adminToken(), id, "disable");
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.contentType()).contains("application/json");
+
+    Map<String, Object> json = response.jsonPath().getMap("$");
+    assertThat(json)
+        .as("contrato: nem storeId nem deletedAt vazam")
+        .containsOnlyKeys(
+            "id",
+            "name",
+            "barcode",
+            "description",
+            "categoryId",
+            "unit",
+            "price",
+            "minQuantity",
+            "active",
+            "version",
+            "createdAt",
+            "updatedAt");
+    assertThat(json.get("id")).isEqualTo(id.toString());
+    assertThat(json.get("active")).isEqualTo(false);
+    assertThat(json.get("version")).as("a desativação grava e devolve a versão nova").isEqualTo(1);
+
+    StoredProduct stored = productOf(id.toString());
+    assertThat(stored.active()).as("o banco guardou o active falso").isFalse();
+    assertThat(stored.deleted()).as("o soft delete acompanha a desativação").isTrue();
+
+    assertThat(names(list("search", SUFFIX)))
+        .as("produto desativado não aparece na busca padrão")
+        .doesNotContain(name("Arroz 5kg"));
+    assertThat(getDetail(id.toString()).statusCode()).as("o detalhe também esconde").isEqualTo(404);
+    assertThat(getByBarcode(STORED_BARCODE).statusCode())
+        .as("o bipe não resolve mais")
+        .isEqualTo(404);
+  }
+
+  @Test
+  @DisplayName(
+      "o barcode do produto desativado é liberado: o produto novo com o mesmo código dá 201")
+  void freesBarcodeAfterDisable() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null, STORED_BARCODE);
+    assertThat(postStatus(adminToken(), id, "disable").statusCode()).isEqualTo(200);
+
+    Response response = post(adminToken(), validBody(name("Arroz 1kg"), STORED_BARCODE));
+
+    assertThat(response.statusCode())
+        .as("o índice único parcial ignora o produto desativado")
+        .isEqualTo(201);
+    assertThat(response.jsonPath().getString("barcode")).isEqualTo(STORED_BARCODE);
+    assertThat(countActiveByBarcode(STORED_BARCODE)).as("só o produto novo está vivo").isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName(
+      "POST /api/v1/products/{id}/enable responde 200 com active=true e devolve o produto ao catálogo")
+  void enablesProduct() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null, STORED_BARCODE);
+    assertThat(postStatus(adminToken(), id, "disable").statusCode()).isEqualTo(200);
+
+    Response response = postStatus(adminToken(), id, "enable");
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.contentType()).contains("application/json");
+    assertThat(response.jsonPath().getMap("$"))
+        .as("contrato: nem storeId nem deletedAt vazam")
+        .containsOnlyKeys(
+            "id",
+            "name",
+            "barcode",
+            "description",
+            "categoryId",
+            "unit",
+            "price",
+            "minQuantity",
+            "active",
+            "version",
+            "createdAt",
+            "updatedAt");
+    assertThat(response.jsonPath().getBoolean("active")).isTrue();
+    assertThat(response.jsonPath().getInt("version"))
+        .as("desativar e reativar, duas gravações")
+        .isEqualTo(2);
+
+    assertThat(productOf(id.toString()).deleted()).as("deleted_at limpo").isFalse();
+    assertThat(names(list("search", SUFFIX)))
+        .as("voltou à busca padrão")
+        .contains(name("Arroz 5kg"));
+    assertThat(getByBarcode(STORED_BARCODE).jsonPath().getString("id"))
+        .as("o bipe resolve de novo")
+        .isEqualTo(id.toString());
+  }
+
+  @Test
+  @DisplayName("enable alcança o produto soft-deletado pela porta: volta à busca padrão e ao bipe")
+  void enablesSoftDeletedProduct() {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null, STORED_BARCODE);
+    softDeleteViaPort(id);
+
+    Response response = postStatus(adminToken(), id, "enable");
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.jsonPath().getBoolean("active")).isTrue();
+    assertThat(names(list("search", SUFFIX))).contains(name("Arroz 5kg"));
+    assertThat(getByBarcode(STORED_BARCODE).jsonPath().getString("id")).isEqualTo(id.toString());
+  }
+
+  @Test
+  @DisplayName("enable de produto já ativo é no-op: 200 com o produto e sem evento novo")
+  void keepsActiveProductOnEnable() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+
+    Response response = postStatus(adminToken(), id, "enable");
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.jsonPath().getBoolean("active")).isTrue();
+    assertThat(response.jsonPath().getInt("version")).as("o no-op não toca na linha").isZero();
+    assertThat(productOf(id.toString()).deleted()).isFalse();
+    assertThat(statusEventCount(id, "PRODUCT_ENABLED")).as("o no-op não inventa evento").isZero();
+  }
+
+  @Test
+  @DisplayName(
+      "disable de produto já desativado responde 404 PRODUCT_NOT_FOUND, como o disable de usuário")
+  void rejectsDisableOfDisabledProduct() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+    assertThat(postStatus(adminToken(), id, "disable").statusCode()).isEqualTo(200);
+
+    Response response = postStatus(adminToken(), id, "disable");
+
+    assertThat(response.statusCode()).isEqualTo(404);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+    assertThat(statusEventCount(id, "PRODUCT_DISABLED"))
+        .as("o 404 não inventa evento")
+        .isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("disable e enable de id inexistente respondem 404 PRODUCT_NOT_FOUND")
+  void rejectsStatusChangeOfUnknownProduct() {
+    UUID unknown = UUID.randomUUID();
+
+    for (String status : List.of("disable", "enable")) {
+      Response response = postStatus(adminToken(), unknown, status);
+
+      assertThat(response.statusCode()).as("POST %s de inexistente", status).isEqualTo(404);
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+    }
+  }
+
+  @Test
+  @DisplayName(
+      "disable e enable gravam PRODUCT_DISABLED e PRODUCT_ENABLED com o entityId do produto")
+  void auditsStatusChanges() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+    assertThat(postStatus(adminToken(), id, "disable").statusCode()).isEqualTo(200);
+    assertThat(postStatus(adminToken(), id, "enable").statusCode()).isEqualTo(200);
+
+    StatusEvent disabled = statusEventOf(id, "PRODUCT_DISABLED");
+    assertThat(disabled.entityType()).isEqualTo("PRODUCT");
+    assertThat(disabled.entityId()).as("o evento aponta o produto").isEqualTo(id.toString());
+    assertThat(disabled.source())
+        .as("evento da requisição autenticada, não de sistema")
+        .isNotEqualTo("SYSTEM");
+    assertThat(disabled.actorUsername()).isEqualTo(TestAdmin.USERNAME);
+    assertThat(disabled.beforeActive()).isEqualTo("true");
+    assertThat(disabled.afterActive()).isEqualTo("false");
+
+    StatusEvent enabled = statusEventOf(id, "PRODUCT_ENABLED");
+    assertThat(enabled.entityType()).isEqualTo("PRODUCT");
+    assertThat(enabled.entityId()).isEqualTo(id.toString());
+    assertThat(enabled.source()).isNotEqualTo("SYSTEM");
+    assertThat(enabled.actorUsername()).isEqualTo(TestAdmin.USERNAME);
+    assertThat(enabled.beforeActive()).isEqualTo("false");
+    assertThat(enabled.afterActive()).isEqualTo("true");
+  }
+
+  @Test
+  @DisplayName(
+      "enable de produto cujo barcode já foi tomado responde 409 BARCODE_ALREADY_EXISTS e o produto continua desativado")
+  void rejectsEnableWhenBarcodeAlreadyTaken() throws SQLException {
+    UUID antigo = seedProduct("Arroz 5kg", "24.90", null, STORED_BARCODE);
+    assertThat(postStatus(adminToken(), antigo, "disable").statusCode()).isEqualTo(200);
+    String novo = createdId(post(adminToken(), validBody(name("Arroz 1kg"), STORED_BARCODE)));
+
+    Response response = postStatus(adminToken(), antigo, "enable");
+
+    assertThat(response.statusCode()).isEqualTo(409);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("BARCODE_ALREADY_EXISTS");
+    assertThat(response.jsonPath().getString("detail")).contains("código de barras");
+    assertThat(statusEventCount(antigo, "PRODUCT_ENABLED")).as("o 409 não audita").isZero();
+    StoredProduct stored = productOf(antigo.toString());
+    assertThat(stored.deleted()).as("o produto continua desativado").isTrue();
+    assertThat(stored.active()).isFalse();
+    assertThat(countActiveByBarcode(STORED_BARCODE))
+        .as("o barcode continua só do produto novo")
+        .isEqualTo(1);
+    assertThat(getByBarcode(STORED_BARCODE).jsonPath().getString("id"))
+        .as("o bipe resolve o produto novo")
+        .isEqualTo(novo);
+  }
+
   /**
    * O request HTTP commita: some ao fim de cada teste o que esta classe criou — os eventos de
    * auditoria (do OPERADOR e os que apontam para os produtos criados) antes das sessões, do usuário
@@ -1041,6 +1253,17 @@ class ProductsResourceTest extends IntegrationTestBase {
   /** Corpo do PATCH de preço com o preço e o motivo informados. */
   private static String priceBody(String price, String reason) {
     return "{\"price\": %s, \"reason\": \"%s\"}".formatted(price, reason);
+  }
+
+  /** POST do ciclo de vida do produto (passo 412): {@code disable} ou {@code enable}, sem corpo. */
+  private static Response postStatus(String token, UUID id, String status) {
+    return given()
+        .header(AUTHORIZATION, "Bearer " + token)
+        .when()
+        .post(PATH + "/" + id + "/" + status)
+        .then()
+        .extract()
+        .response();
   }
 
   /** O 400 padrão da bean validation no PATCH de preço: campo apontado em {@code errors[]}. */
@@ -1246,19 +1469,21 @@ class ProductsResourceTest extends IntegrationTestBase {
     return response.jsonPath().getString("id");
   }
 
-  /** Barcode, preço (numeric textual) e active do produto no banco; falha quando não existe. */
+  /** Barcode, preço (numeric textual), active e soft delete do produto no banco. */
   private StoredProduct productOf(String id) throws SQLException {
     try (Connection connection = dataSource.getConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select barcode, price::text as price, active from products where id = ?::uuid")) {
+                "select barcode, price::text as price, active, deleted_at is not null as deleted"
+                    + " from products where id = ?::uuid")) {
       statement.setString(1, id);
       try (ResultSet resultSet = statement.executeQuery()) {
         assertThat(resultSet.next()).as("produto %s gravado", id).isTrue();
         return new StoredProduct(
             resultSet.getString("barcode"),
             resultSet.getString("price"),
-            resultSet.getBoolean("active"));
+            resultSet.getBoolean("active"),
+            resultSet.getBoolean("deleted"));
       }
     }
   }
@@ -1381,6 +1606,51 @@ class ProductsResourceTest extends IntegrationTestBase {
     }
   }
 
+  /**
+   * Evento {@code PRODUCT_DISABLED} ou {@code PRODUCT_ENABLED} do produto, com o antes/depois do
+   * {@code active} extraído do jsonb; falha se houver zero ou mais de um evento do alvo.
+   */
+  private StatusEvent statusEventOf(UUID id, String action) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select entity_type, entity_id::text as entity_id, source, actor_username,"
+                    + " details->'before'->>'active' as before_active,"
+                    + " details->'after'->>'active' as after_active"
+                    + " from audit_events where action = ? and entity_id = ?::uuid")) {
+      statement.setString(1, action);
+      statement.setString(2, id.toString());
+      try (ResultSet resultSet = statement.executeQuery()) {
+        assertThat(resultSet.next()).as("evento %s do produto %s", action, id).isTrue();
+        StatusEvent event =
+            new StatusEvent(
+                resultSet.getString("entity_type"),
+                resultSet.getString("entity_id"),
+                resultSet.getString("source"),
+                resultSet.getString("actor_username"),
+                resultSet.getString("before_active"),
+                resultSet.getString("after_active"));
+        assertThat(resultSet.next()).as("uma operação, um evento").isFalse();
+        return event;
+      }
+    }
+  }
+
+  /** Quantos eventos da ação o produto tem; o no-op e os 4xx exigem zero. */
+  private int statusEventCount(UUID id, String action) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select count(*) from audit_events where action = ? and entity_id = ?::uuid")) {
+      statement.setString(1, action);
+      statement.setString(2, id.toString());
+      try (ResultSet resultSet = statement.executeQuery()) {
+        resultSet.next();
+        return resultSet.getInt(1);
+      }
+    }
+  }
+
   /** Quantos produtos vivos existem com o barcode informado; o 409 e o 403 não podem criar. */
   private int countActiveByBarcode(String barcode) throws SQLException {
     try (Connection connection = dataSource.getConnection();
@@ -1406,7 +1676,7 @@ class ProductsResourceTest extends IntegrationTestBase {
   }
 
   /** Linha de {@code products} como o banco a guardou; preço no formato textual do numeric. */
-  private record StoredProduct(String barcode, String price, boolean active) {}
+  private record StoredProduct(String barcode, String price, boolean active, boolean deleted) {}
 
   /** Linha de {@code audit_events} do {@code PRODUCT_PRICE_CHANGED} com o antes/depois extraído. */
   private record PriceEvent(
@@ -1432,4 +1702,16 @@ class ProductsResourceTest extends IntegrationTestBase {
       String afterUnit,
       String afterDescription,
       String afterMinQuantity) {}
+
+  /**
+   * Linha de {@code audit_events} do ciclo de vida do produto (passo 412), com o antes/depois do
+   * {@code active} extraído do jsonb.
+   */
+  private record StatusEvent(
+      String entityType,
+      String entityId,
+      String source,
+      String actorUsername,
+      String beforeActive,
+      String afterActive) {}
 }

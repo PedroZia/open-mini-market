@@ -439,7 +439,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 muda preço e registra auditoria; OPERADOR recebe 403; motivo obrigatório.
   **Commit:** `feat(catalog): altera preco com motivo e auditoria`
 
-- [ ] **412 — Desativar/reativar produto**
+- [x] **412 — Desativar/reativar produto**
   **Objetivo:** sair do catálogo sem perder histórico. **Depende:** 405
   **Implementar:** `POST /products/{id}/disable` e `/enable`; soft delete libera o barcode para novo produto.
   **Testes/aceite:** produto desativado não aparece na busca padrão nem no barcode; barcode pode ser reutilizado; auditoria registrada.

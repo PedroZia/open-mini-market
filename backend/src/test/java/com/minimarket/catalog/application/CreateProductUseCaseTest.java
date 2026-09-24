@@ -294,6 +294,16 @@ class CreateProductUseCaseTest {
     public Optional<ProductSummary> updatePrice(UUID id, BigDecimal price) {
       throw new UnsupportedOperationException("updatePrice não é usado por CreateProduct");
     }
+
+    @Override
+    public Optional<ProductSummary> disable(UUID id) {
+      throw new UnsupportedOperationException("disable não é usado por CreateProduct");
+    }
+
+    @Override
+    public Optional<ProductSummary> enable(UUID id) {
+      throw new UnsupportedOperationException("enable não é usado por CreateProduct");
+    }
   }
 
   /**

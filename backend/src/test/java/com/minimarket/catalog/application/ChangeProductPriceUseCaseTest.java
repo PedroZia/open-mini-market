@@ -265,6 +265,16 @@ class ChangeProductPriceUseCaseTest {
       throw new UnsupportedOperationException(
           "existsActiveBarcode não é usado por ChangeProductPrice");
     }
+
+    @Override
+    public Optional<ProductSummary> disable(UUID id) {
+      throw new UnsupportedOperationException("disable não é usado por ChangeProductPrice");
+    }
+
+    @Override
+    public Optional<ProductSummary> enable(UUID id) {
+      throw new UnsupportedOperationException("enable não é usado por ChangeProductPrice");
+    }
   }
 
   /**

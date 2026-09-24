@@ -291,6 +291,86 @@ class ProductRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
+  @DisplayName(
+      "disable grava active=false com deleted_at, tira o produto da busca e do barcode e libera o código")
+  void disables() {
+    UUID id = insert("Arroz 5kg", "7891000000017", "24.90", null);
+    insert("Feijão 1kg", "7891000000024", "8.49", null);
+
+    assertThat(productRepository.disable(id))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.active()).isFalse();
+              assertThat(found.deletedAt()).as("soft delete acompanha a desativação").isNotNull();
+              assertThat(found.version()).as("lock otimista avançou").isEqualTo(1);
+            });
+
+    entityManager.clear();
+    assertThat(productRepository.findById(id))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.active()).isFalse();
+              assertThat(found.deletedAt()).isNotNull();
+            });
+    assertThat(productRepository.findByBarcode("7891000000017")).isEmpty();
+    assertThat(names(search(null, null, null, ProductSort.NAME, true)))
+        .containsExactly("Feijão 1kg");
+    // Desativado de novo e id desconhecido: vazio, como nas outras escritas por id.
+    assertThat(productRepository.disable(id)).isEmpty();
+    assertThat(productRepository.disable(UUID.randomUUID())).isEmpty();
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName(
+      "enable enxerga o desativado, volta o produto à busca e ao barcode e limpa o deleted_at")
+  void enables() {
+    UUID id = insert("Arroz 5kg", "7891000000017", "24.90", null);
+    productRepository.disable(id);
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(productRepository.enable(id))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.active()).isTrue();
+              assertThat(found.deletedAt()).isNull();
+              assertThat(found.version()).as("desativar e reativar, dois updates").isEqualTo(2);
+            });
+
+    entityManager.clear();
+    assertThat(productRepository.findByBarcode("7891000000017"))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.id()).isEqualTo(id);
+              assertThat(found.active()).isTrue();
+            });
+    assertThat(names(search(null, null, null, ProductSort.NAME, true)))
+        .containsExactly("Arroz 5kg");
+    assertThat(productRepository.existsActiveBarcode("7891000000017")).isTrue();
+    // Id desconhecido: vazio, como nas outras escritas por id.
+    assertThat(productRepository.enable(UUID.randomUUID())).isEmpty();
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName(
+      "enable de produto cujo barcode já foi tomado vira ConflictException(BARCODE_ALREADY_EXISTS)")
+  void translatesBarcodeConflictOnEnable() {
+    UUID antigo = insert("Arroz 5kg", "7891000000017", "24.90", null);
+    productRepository.disable(antigo);
+    entityManager.flush();
+    entityManager.clear();
+    insert("Arroz 1kg", "7891000000017", "6.90", null);
+
+    assertThatThrownBy(() -> productRepository.enable(antigo))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.BARCODE_ALREADY_EXISTS));
+  }
+
+  @Test
+  @TestTransaction
   @DisplayName("existsActiveBarcode ignora produto soft-deletado, código desconhecido e nulo")
   void checksActiveBarcode() {
     UUID id = insert("Arroz 5kg", "7891000000017", "24.90", null);
