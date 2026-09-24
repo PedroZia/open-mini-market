@@ -595,7 +595,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** integração: lock bloqueia segunda transação; saldo criado sob demanda.
   **Commit:** `feat(inventory): adiciona repositorios de estoque`
 
-- [ ] **703 — `StockService.applyMovement`**
+- [x] **703 — `StockService.applyMovement`**
   **Objetivo:** única porta de alteração de saldo. **Depende:** 702
   **Implementar:** aplica delta com lock pessimista na linha de saldo, grava movimento com `balance_after` e `reference_type/id`; se `allow_negative_stock=false` e o saldo ficaria negativo → `422 INSUFFICIENT_STOCK`; **ordenação por `product_id`** para múltiplos itens (evita deadlock).
   **Testes/aceite:** unitário/integração: entrada, saída, saldo insuficiente bloqueado, saldo insuficiente permitido com flag, `balance_after` correto em sequência de movimentos.

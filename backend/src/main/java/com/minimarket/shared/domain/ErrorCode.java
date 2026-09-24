@@ -36,6 +36,7 @@ public enum ErrorCode {
   IDEMPOTENCY_KEY_REUSED(409, "Chave de idempotência já utilizada"),
   CONCURRENT_MODIFICATION(409, "Modificação concorrente"),
   BUSINESS_ERROR(422, "Regra de negócio violada"),
+  INSUFFICIENT_STOCK(422, "Estoque insuficiente"),
   ACCOUNT_LOCKED(423, "Conta bloqueada"),
   IF_MATCH_REQUIRED(428, "Cabeçalho If-Match obrigatório"),
   RATE_LIMITED(429, "Muitas requisições"),
