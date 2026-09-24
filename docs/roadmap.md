@@ -445,7 +445,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** produto desativado não aparece na busca padrão nem no barcode; barcode pode ser reutilizado; auditoria registrada.
   **Commit:** `feat(catalog): desativa e reativa produtos`
 
-- [ ] **413 — Auditoria e autorização do catálogo**
+- [x] **413 — Auditoria e autorização do catálogo**
   **Objetivo:** fechar o módulo com garantias. **Depende:** 405–412
   **Implementar:** testes consolidados de permissões (OPERADOR só lê) e de eventos de auditoria de todas as operações do módulo.
   **Testes/aceite:** suíte de catálogo verde cobrindo permissões e auditoria.
