@@ -665,7 +665,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** duas chamadas com a mesma chave → mesma resposta e um único efeito; corpo diferente → 409 `IDEMPOTENCY_KEY_REUSED`; sem header em endpoint obrigatório → 400.
   **Commit:** `docs(shared): registra verificacao da idempotencia na API` (mecanismo veio no 607a)
 
-- [ ] **807 — API `POST /api/v1/sales`**
+- [x] **807 — API `POST /api/v1/sales`**
   **Objetivo:** abrir venda pela API/TUI. **Depende:** 805, 806
   **Implementar:** endpoint com `Idempotency-Key` obrigatória; resposta com número, status e totais zerados.
   **Testes/aceite:** 201; replay idempotente; 403 sem `sale.create`.
