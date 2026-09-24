@@ -7,6 +7,8 @@ import com.minimarket.IntegrationTestBase;
 import com.minimarket.auth.application.AuthSessionSnapshot;
 import com.minimarket.auth.domain.TokenHasher;
 import com.minimarket.auth.infrastructure.AuthSessionRepository;
+import com.minimarket.users.application.CreateUserCommand;
+import com.minimarket.users.application.CreateUserUseCase;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
@@ -19,17 +21,19 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Autenticação bearer contra PostgreSQL real (Dev Services): a política de {@code %test} protege só
- * {@link TestIdentityResource#PATH}, então cada teste prova um caminho do mecanismo. O request HTTP
- * commita de verdade e o {@link #removeUsersCreatedByThisRun()} limpa sessões, papéis e usuários ao
- * fim de cada teste (as FKs de {@code auth_sessions} e {@code user_roles} são {@code on delete
- * restrict}).
+ * Autenticação bearer contra PostgreSQL real (Dev Services): a política global (passo 307a) protege
+ * todo o {@code /api/v1/*}, então cada teste prova um caminho do mecanismo. O request HTTP commita
+ * de verdade e o {@link #removeUsersCreatedByThisRun()} limpa sessões, papéis e usuários ao fim de
+ * cada teste (as FKs de {@code auth_sessions} e {@code user_roles} são {@code on delete restrict}).
+ * O usuário de cada cenário é fixture e nasce pelo caso de uso: a API de criar usuário exige token
+ * desde o passo 307a.
  */
 @QuarkusTest
 class BearerAuthenticationTest extends IntegrationTestBase {
@@ -54,6 +58,12 @@ class BearerAuthenticationTest extends IntegrationTestBase {
    * Repositório de sessões (passo 202): envelhece {@code last_seen_at} sem SQL de coluna na mão.
    */
   @Inject AuthSessionRepository sessionRepository;
+
+  /**
+   * Caso de uso da criação de usuário (passo 107): a fixture nasce por aqui, e não pela API, que
+   * exige token com {@code user.write} desde o passo 307a.
+   */
+  @Inject CreateUserUseCase createUserUseCase;
 
   @Test
   @DisplayName("sem token o path protegido responde 401 problem+json com INVALID_CREDENTIALS")
@@ -209,7 +219,7 @@ class BearerAuthenticationTest extends IntegrationTestBase {
   }
 
   @Test
-  @DisplayName("GET /api/v1/meta continua 200 sem token: a janela da Fase 1 não foi fechada")
+  @DisplayName("GET /api/v1/meta continua 200 sem token: é exceção pública da política global")
   void keepsUnprotectedRoutesOpen() {
     Response response = given().when().get(META_PATH).then().extract().response();
 
@@ -246,23 +256,11 @@ class BearerAuthenticationTest extends IntegrationTestBase {
     }
   }
 
-  /** Cria o usuário pelo caminho que já existe ({@code POST /api/v1/users}) e devolve o id. */
-  private static String createUser(String username, String roleCode) {
-    String roleCodes = roleCode == null ? "" : ", \"roleCodes\": [\"%s\"]".formatted(roleCode);
-    return given()
-        .contentType("application/json")
-        .body(
-            """
-            {"username": "%s", "displayName": "%s", "password": "%s"%s}
-            """
-                .formatted(username, username, PASSWORD, roleCodes))
-        .when()
-        .post("/api/v1/users")
-        .then()
-        .statusCode(201)
-        .extract()
-        .jsonPath()
-        .getString("id");
+  /** Cria o usuário pelo caso de uso (passo 107) com o papel pedido; {@code null} é sem papel. */
+  private void createUser(String username, String roleCode) {
+    createUserUseCase.execute(
+        new CreateUserCommand(
+            username, username, PASSWORD, roleCode == null ? List.of() : List.of(roleCode)));
   }
 
   /** Login pela API (passo 205) sem o header {@code X-Client}: a sessão nasce WEB. */

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.minimarket.IntegrationTestBase;
 import com.minimarket.auth.application.LoginRateLimiter;
+import com.minimarket.support.TestAdmin;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
@@ -156,20 +157,24 @@ class AuthAuditEventsTest extends IntegrationTestBase {
   }
 
   @Test
-  @DisplayName("corte em massa grava um único SESSION_REVOKED por corte, com motivo e contagem")
+  @DisplayName(
+      "corte em massa por ADMIN grava um único SESSION_REVOKED por corte, com motivo e contagem")
   void auditsMassSessionRevocation() throws SQLException {
     String username = "audita.corte." + SUFFIX;
     String id = createUser(username, "Audita Corte");
-    String token = loginToken(username, PASSWORD, "TUI", null);
+    login(username, PASSWORD, "TUI", null);
     login(username, PASSWORD, "WEB", null);
     UUID userId = UUID.fromString(id);
 
-    assertThat(delete("/api/v1/users/" + id + "/sessions", token).statusCode()).isEqualTo(204);
+    // O corte em massa exige user.session.revoke (passo 307a): quem corta é o ADMIN da fixture, e o
+    // ator do evento passa a ser ele, não o dono das sessões.
+    assertThat(delete("/api/v1/users/" + id + "/sessions", adminToken()).statusCode())
+        .isEqualTo(204);
 
     // Um evento por corte, apontando o usuário afetado: não há uma sessão única para apontar.
     Event event = singleEvent("SESSION_REVOKED", userId);
     assertThat(event.entityType()).isEqualTo("USER");
-    assertThat(event.actorUserId()).isEqualTo(id);
+    assertThat(event.actorUsername()).isEqualTo(TestAdmin.USERNAME);
     assertThat(event.reason()).isEqualTo("ADMIN_REVOKE");
     assertThat(event.details())
         .contains("\"reason\": \"ADMIN_REVOKE\"")
@@ -225,9 +230,10 @@ class AuthAuditEventsTest extends IntegrationTestBase {
     loginRateLimiter.recordSuccess(LOOPBACK_V6);
   }
 
-  /** Cria o usuário pelo caminho que já existe ({@code POST /api/v1/users}) e devolve o id. */
-  private static String createUser(String username, String displayName) {
+  /** Cria o usuário pela API com o token do ADMIN da fixture (passo 307a) e devolve o id. */
+  private String createUser(String username, String displayName) {
     return given()
+        .header(AUTHORIZATION, "Bearer " + adminToken())
         .contentType("application/json")
         .body(
             """

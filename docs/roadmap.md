@@ -100,8 +100,8 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 1 — Usuários
 
-> ⚠️ Janela temporária: os endpoints desta fase ficam **sem autenticação** até a Fase 3, quando o passo 307/308
-> aplica e testa as permissões. Isso é intencional e não pode vazar para produção.
+> ✅ Janela fechada no passo **307a**: a política global exige token em toda a `/api/v1/*` e os endpoints desta fase
+> exigem `user.read`/`user.write`/`role.write`/`user.session.revoke`. A matriz de permissões por papel é do 307b.
 
 - [x] **101 — Migration `users`**
   **Objetivo:** tabela de usuários conforme §5.3. **Depende:** 004
@@ -327,14 +327,20 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** endpoint anotado responde 403 para quem não tem permissão e 200 para quem tem.
   **Commit:** `feat(auth): adiciona anotacao de permissao em endpoints`
 
-- [ ] **307 — Proteger endpoints de usuários e roles**
-  **Objetivo:** fechar a janela da Fase 1. **Depende:** 306
-  **Implementar:** aplicar permissões (`user.read`, `user.write`, `role.write`, `user.session.revoke`) em todos os endpoints da Fase 1 e 2.
-  **Testes/aceite:** matriz de permissões: OPERADOR recebe 403 em `/users`; ADMIN 200; GERENTE 403 em `role.write`.
+- [x] **307a — Fechar a janela: política global e permissões nos endpoints de usuários e papéis**
+  **Objetivo:** fechar a janela da Fase 1 — nenhuma rota de `/api/v1` sem autenticação. **Depende:** 306
+  **Implementar:** política global `authenticated` em `/api/v1/*` com exceções públicas (`/auth/login`, `/meta`, `/q/health`), no lugar das políticas por rota de `/auth/*` e das três de teste; `@RequirePermission` em `UsersResource` (`user.read`, `user.write`, `user.session.revoke`) e `RolesResource` (`user.read`, `role.write`); testes das Fases 1–2 autenticando com ADMIN real (helper `TestAdmin`) ou criando a fixture pelo caso de uso.
+  **Testes/aceite:** sem token `GET /users` → 401 `problem+json` (`INVALID_CREDENTIALS` + `traceId`); `GET /meta` → 200; `POST /auth/login` acessível; com token de ADMIN a API de usuários/papéis segue funcionando.
   **Commit:** `feat(auth): protege endpoints de usuarios e papeis`
 
+- [ ] **307b — Revogação de sessão alheia e matriz de permissões**
+  **Objetivo:** aplicar `user.session.revoke` de verdade e provar a matriz de permissões. **Depende:** 307a
+  **Implementar:** revogar sessão de outro usuário por quem tem `user.session.revoke` (hoje responde 404) e teste de matriz.
+  **Testes/aceite:** matriz de permissões: OPERADOR recebe 403 em `/users`; ADMIN 200; GERENTE 403 em `role.write`.
+  **Commit:** `feat(auth): revoga sessao alheia com permissao`
+
 - [ ] **308 — Teste global de segurança de rotas**
-  **Objetivo:** nenhum endpoint esquecido sem proteção. **Depende:** 307
+  **Objetivo:** nenhum endpoint esquecido sem proteção. **Depende:** 307a, 307b
   **Implementar:** teste que enumera as rotas registradas (`/q/openapi` ou o `Router`) e exige `401` sem token para todas as rotas de `/api/v1`, com lista explícita de exceções (`/auth/login`, `/meta`).
   **Testes/aceite:** rota nova sem proteção quebra o build; exceções justificadas no teste.
   **Commit:** `test(auth): garante autenticacao em todas as rotas`

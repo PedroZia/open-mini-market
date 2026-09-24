@@ -32,15 +32,19 @@ class ErrorHandlingTest {
   }
 
   @Test
-  @DisplayName("rota inexistente também responde no formato do problema")
+  @DisplayName(
+      "rota inexistente sob /api/v1 responde 401: a política global roda antes do roteamento")
   void unknownRouteBecomesProblemJson() {
+    // Desde o passo 307a a política global exige token em todo /api/v1: rota que não existe também
+    // paga o 401 do challenge do bearer antes de o JAX-RS procurar o recurso. Fora de /api/v1 a
+    // rota desconhecida continua sendo 404 problem+json, como o teste acima mostra.
     given()
         .when()
         .get("/api/v1/nao-existe")
         .then()
-        .statusCode(404)
+        .statusCode(401)
         .contentType(containsString("application/problem+json"))
-        .body("code", equalTo("NOT_FOUND"))
+        .body("code", equalTo("INVALID_CREDENTIALS"))
         .body("traceId", not(emptyOrNullString()));
   }
 

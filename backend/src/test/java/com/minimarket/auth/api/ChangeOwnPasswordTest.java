@@ -226,9 +226,9 @@ class ChangeOwnPasswordTest extends IntegrationTestBase {
     }
   }
 
-  /** Cria o usuário pelo caminho que já existe ({@code POST /api/v1/users}) e devolve o id. */
-  private static String createUser(String username, String displayName) {
-    return given()
+  /** Cria o usuário pela API com o token do ADMIN da fixture (passo 307a) e devolve o id. */
+  private String createUser(String username, String displayName) {
+    return asAdmin()
         .contentType("application/json")
         .body(
             """
@@ -245,8 +245,8 @@ class ChangeOwnPasswordTest extends IntegrationTestBase {
   }
 
   /** Reset de senha por ADMIN (passo 113): deixa o usuário com {@code mustChangePassword=true}. */
-  private static void resetPassword(UUID userId, String newPassword) {
-    given()
+  private void resetPassword(UUID userId, String newPassword) {
+    asAdmin()
         .contentType("application/json")
         .body(
             """

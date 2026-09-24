@@ -4,22 +4,26 @@ import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.minimarket.IntegrationTestBase;
+import com.minimarket.users.application.CreateUserCommand;
+import com.minimarket.users.application.CreateUserUseCase;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import jakarta.inject.Inject;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Porteiro declarativo contra PostgreSQL real (Dev Services): cria OPERADOR e GERENTE pelo caminho
- * que já existe ({@code POST /api/v1/users}), faz login e confere o 403/200 do {@link
- * TestRequirePermissionResource}. O request HTTP commita de verdade e o {@link
- * #removeUsersCreatedByThisRun()} limpa sessões, papéis e usuários ao fim de cada teste (as FKs são
- * {@code on delete restrict}).
+ * Porteiro declarativo contra PostgreSQL real (Dev Services): cria OPERADOR e GERENTE pelo caso de
+ * uso (a API de criar usuário exige token desde o passo 307a e aqui o usuário é fixture), faz login
+ * e confere o 403/200 do {@link TestRequirePermissionResource}. O request HTTP commita de verdade e
+ * o {@link #removeUsersCreatedByThisRun()} limpa sessões, papéis e usuários ao fim de cada teste
+ * (as FKs são {@code on delete restrict}).
  */
 @QuarkusTest
 class RequirePermissionTest extends IntegrationTestBase {
@@ -29,6 +33,9 @@ class RequirePermissionTest extends IntegrationTestBase {
   private static final String MANAGEMENT_PATH = TestRequirePermissionResource.PATH;
   private static final String AUDIT_PATH = MANAGEMENT_PATH + "/audit";
   private static final String AUTHORIZATION = "Authorization";
+
+  /** Caso de uso da criação de usuário (passo 107): a fixture nasce por aqui, não pela API. */
+  @Inject CreateUserUseCase createUserUseCase;
 
   @Test
   @DisplayName("OPERADOR sem a permissão do método recebe 403 ACCESS_DENIED em problem+json")
@@ -114,19 +121,10 @@ class RequirePermissionTest extends IntegrationTestBase {
     }
   }
 
-  /** Cria o usuário pelo caminho que já existe ({@code POST /api/v1/users}) com o papel pedido. */
-  private static void createUser(String username, String roleCode) {
-    given()
-        .contentType("application/json")
-        .body(
-            """
-            {"username": "%s", "displayName": "%s", "password": "%s", "roleCodes": ["%s"]}
-            """
-                .formatted(username, username, PASSWORD, roleCode))
-        .when()
-        .post("/api/v1/users")
-        .then()
-        .statusCode(201);
+  /** Cria o usuário pelo caso de uso (passo 107) com o papel pedido. */
+  private void createUser(String username, String roleCode) {
+    createUserUseCase.execute(
+        new CreateUserCommand(username, username, PASSWORD, List.of(roleCode)));
   }
 
   /** Login pela API (passo 205) e devolve o token em claro da sessão nova. */

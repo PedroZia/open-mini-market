@@ -1,6 +1,8 @@
 package com.minimarket.users.api;
 
 import com.minimarket.shared.api.PageResponse;
+import com.minimarket.shared.api.RequirePermission;
+import com.minimarket.shared.domain.Permission;
 import com.minimarket.users.application.CreateUserCommand;
 import com.minimarket.users.application.CreateUserResult;
 import com.minimarket.users.application.CreateUserUseCase;
@@ -33,7 +35,9 @@ import java.util.UUID;
 
 /**
  * Usuários (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a resposta — zero
- * regra de negócio aqui. A rota fica fora da autenticação até a Fase 3 (passo 307).
+ * regra de negócio aqui. A política global (passo 307a) exige token em toda a API e o {@link
+ * RequirePermission} de cada rota exige a permissão do papel: sem ela o interceptor responde 403
+ * {@code ACCESS_DENIED}.
  */
 @Path(UsersResource.PATH)
 public class UsersResource {
@@ -60,6 +64,7 @@ public class UsersResource {
   @Context UriInfo uriInfo;
 
   @POST
+  @RequirePermission(Permission.USER_WRITE)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public Response create(@Valid CreateUserRequest request) {
@@ -84,6 +89,7 @@ public class UsersResource {
 
   /** Lista paginada com busca em username/display_name e filtro de status (§9.1 e §9.3). */
   @GET
+  @RequirePermission(Permission.USER_READ)
   @Produces(MediaType.APPLICATION_JSON)
   public PageResponse<UserResponse> list(
       @QueryParam("search") String search,
@@ -113,6 +119,7 @@ public class UsersResource {
   /** Detalhe do usuário; inexistente ou soft-deletado → 404 {@code USER_NOT_FOUND}. */
   @GET
   @Path("/{id}")
+  @RequirePermission(Permission.USER_READ)
   @Produces(MediaType.APPLICATION_JSON)
   public UserResponse get(@PathParam("id") UUID id) {
     return toResponse(getUserUseCase.execute(id));
@@ -125,6 +132,7 @@ public class UsersResource {
    */
   @PUT
   @Path("/{id}")
+  @RequirePermission(Permission.USER_WRITE)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public UserResponse update(@PathParam("id") UUID id, @Valid UpdateUserRequest request) {
@@ -138,6 +146,7 @@ public class UsersResource {
    */
   @POST
   @Path("/{id}/disable")
+  @RequirePermission(Permission.USER_WRITE)
   @Produces(MediaType.APPLICATION_JSON)
   public UserResponse disable(@PathParam("id") UUID id) {
     return toResponse(disableUserUseCase.execute(id));
@@ -146,6 +155,7 @@ public class UsersResource {
   /** Reativa o usuário desativado (§9.3); id inexistente → 404 {@code USER_NOT_FOUND}. */
   @POST
   @Path("/{id}/enable")
+  @RequirePermission(Permission.USER_WRITE)
   @Produces(MediaType.APPLICATION_JSON)
   public UserResponse enable(@PathParam("id") UUID id) {
     return toResponse(enableUserUseCase.execute(id));
@@ -159,6 +169,7 @@ public class UsersResource {
    */
   @POST
   @Path("/{id}/password-reset")
+  @RequirePermission(Permission.USER_WRITE)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public UserResponse resetPassword(@PathParam("id") UUID id, @Valid ResetPasswordRequest request) {
@@ -168,11 +179,12 @@ public class UsersResource {
   /**
    * Corta todas as sessões vivas do usuário (passo 213) e responde 204 sem corpo, como manda a
    * especificação do JAX-RS para método {@code void}. Id inexistente ou soft-deletado → 404 {@code
-   * USER_NOT_FOUND}. A rota é para ADMIN na intenção, mas a permissão chega nos passos 305–307: até
-   * lá fica aberta, como as demais da Fase 1.
+   * USER_NOT_FOUND}. A rota exige {@code user.session.revoke} (passo 307a), permissão que só ADMIN
+   * tem — a revogação de sessão alheia por esse mesmo caminho é do 307b.
    */
   @DELETE
   @Path("/{id}/sessions")
+  @RequirePermission(Permission.USER_SESSION_REVOKE)
   public void revokeSessions(@PathParam("id") UUID id) {
     revokeUserSessionsUseCase.execute(id);
   }

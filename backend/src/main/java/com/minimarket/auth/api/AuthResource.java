@@ -97,9 +97,9 @@ public class AuthResource {
   }
 
   /**
-   * Sessão atual (§9.3, passo 207): o cliente valida a sessão ao abrir. As rotas de sessão ({@code
-   * /auth/me}, {@code /auth/logout}, {@code /auth/sessions}) são as únicas protegidas até aqui — as
-   * demais seguem abertas até os passos 307/308. Sem token, ou com token
+   * Sessão atual (§9.3, passo 207): o cliente valida a sessão ao abrir. O {@code @Authenticated}
+   * documenta a exigência no resource e a política global (passo 307a) garante o 401 {@code
+   * problem+json} de quem não apresenta token. Sem token, ou com token
    * desconhecido/revogado/expirado, o challenge do mecanismo bearer (passo 206) responde 401 {@code
    * problem+json}.
    */
@@ -115,8 +115,8 @@ public class AuthResource {
    * Encerra a sessão atual (§9.3, passo 208): revoga o token apresentado com o motivo {@code
    * LOGOUT} e responde 204 sem corpo (método {@code void}, como manda a especificação do JAX-RS). O
    * mesmo token deixa de autenticar na requisição seguinte — o mecanismo bearer só enxerga sessão
-   * não revogada. Sem token, a política da rota responde 401 {@code problem+json}, igual ao {@code
-   * /auth/me}.
+   * não revogada. Sem token, a política global (passo 307a) responde 401 {@code problem+json},
+   * igual ao {@code /auth/me}.
    */
   @POST
   @Path("/logout")
@@ -128,8 +128,8 @@ public class AuthResource {
   /**
    * Sessões ativas do usuário autenticado (§6.2, passo 210): o cliente mostra de onde veio cada uma
    * e qual é a atual. A lista é sempre do dono do token — não há como pedir a sessão de outro
-   * usuário. Sem token, a política da rota responde 401 {@code problem+json}, como no {@code
-   * /auth/me}.
+   * usuário. Sem token, a política global (passo 307a) responde 401 {@code problem+json}, como no
+   * {@code /auth/me}.
    */
   @GET
   @Path("/sessions")
@@ -146,8 +146,8 @@ public class AuthResource {
    * Revoga uma sessão pela lista (§6.2, passo 210): só as do próprio usuário; sessão de outro
    * usuário responde 404 pelo caso de uso, para não vazar a existência dela. Revogar a sessão atual
    * é permitido — o cliente cai junto. Responde 204 sem corpo e é idempotente como o logout: sessão
-   * já revogada ou id desconhecido também é 204. Sem token, a política da rota responde 401 {@code
-   * problem+json}.
+   * já revogada ou id desconhecido também é 204. Sem token, a política global (passo 307a) responde
+   * 401 {@code problem+json}.
    */
   @DELETE
   @Path("/sessions/{id}")
@@ -161,8 +161,8 @@ public class AuthResource {
    * {@code mustChangePassword} e derruba as outras sessões do usuário — a sessão que fez a troca
    * segue viva. Responde 204 sem corpo. Senha atual incorreta responde 400 {@code
    * INVALID_CURRENT_PASSWORD} e senha nova fora da política, 400 {@code VALIDATION_ERROR} (forma e
-   * caso de uso). Sem token, a política da rota responde 401 {@code problem+json}, como no {@code
-   * /auth/me}.
+   * caso de uso). Sem token, a política global (passo 307a) responde 401 {@code problem+json}, como
+   * no {@code /auth/me}.
    */
   @POST
   @Path("/password")

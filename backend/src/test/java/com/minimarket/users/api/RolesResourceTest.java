@@ -1,8 +1,8 @@
 package com.minimarket.users.api;
 
-import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.minimarket.IntegrationTestBase;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import java.util.List;
@@ -17,9 +17,12 @@ import org.junit.jupiter.api.Test;
  * testes de repositório, o PUT daqui commita de verdade: cada teste que muta restaura o mapa de
  * OPERADOR semeado por {@code V3__rbac.sql} no fim, para os testes de RBAC/migração/usuários que
  * rodarem depois encontrarem o banco como estava.
+ *
+ * <p>As duas rotas exigem token desde o passo 307a ({@code user.read} no GET e {@code role.write}
+ * no PUT, que só ADMIN tem): as chamadas usam o ADMIN da fixture ({@link #adminToken()}).
  */
 @QuarkusTest
-class RolesResourceTest {
+class RolesResourceTest extends IntegrationTestBase {
 
   /** Índice de OPERADOR no GET: o catálogo é ordenado por código (ADMIN, GERENTE, OPERADOR). */
   private static final int OPERADOR_INDEX = 2;
@@ -185,20 +188,20 @@ class RolesResourceTest {
     putPermissions("OPERADOR", "{\"permissions\": [%s]}".formatted(codes), 200);
   }
 
-  private static Response listRoles() {
-    return given().when().get("/api/v1/roles").then().statusCode(200).extract().response();
+  private Response listRoles() {
+    return asAdmin().when().get("/api/v1/roles").then().statusCode(200).extract().response();
   }
 
   /** Permissões de OPERADOR segundo o GET, o que confirma que a troca persistiu e é visível. */
-  private static List<String> operadorPermissionsFromList() {
+  private List<String> operadorPermissionsFromList() {
     return listRoles()
         .jsonPath()
         .getList("[%d].permissions".formatted(OPERADOR_INDEX), String.class);
   }
 
   /** PUT com corpo bruto; espera o status informado e devolve a resposta. */
-  private static Response putPermissions(String code, String body, int expectedStatus) {
-    return given()
+  private Response putPermissions(String code, String body, int expectedStatus) {
+    return asAdmin()
         .contentType("application/json")
         .body(body)
         .when()

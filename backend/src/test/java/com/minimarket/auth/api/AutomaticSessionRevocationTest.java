@@ -146,9 +146,9 @@ class AutomaticSessionRevocationTest extends IntegrationTestBase {
     }
   }
 
-  /** Cria o usuário pelo caminho que já existe ({@code POST /api/v1/users}) e devolve o id. */
-  private static String createUser(String username, String displayName) {
-    return given()
+  /** Cria o usuário pela API com o token do ADMIN da fixture (passo 307a) e devolve o id. */
+  private String createUser(String username, String displayName) {
+    return asAdmin()
         .contentType("application/json")
         .body(
             """
@@ -193,16 +193,18 @@ class AutomaticSessionRevocationTest extends IntegrationTestBase {
         .response();
   }
 
-  private static Response post(String path) {
-    return given().when().post(path).then().extract().response();
+  /** POST nas ações de ADMIN (disable/enable) com o token da fixture. */
+  private Response post(String path) {
+    return asAdmin().when().post(path).then().extract().response();
   }
 
-  private static Response delete(String path) {
-    return given().when().delete(path).then().extract().response();
+  /** DELETE de ADMIN (corte das sessões) com o token da fixture. */
+  private Response delete(String path) {
+    return asAdmin().when().delete(path).then().extract().response();
   }
 
-  private static void resetPassword(String id, String newPassword) {
-    given()
+  private void resetPassword(String id, String newPassword) {
+    asAdmin()
         .contentType("application/json")
         .body(
             """

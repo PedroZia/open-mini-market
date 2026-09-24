@@ -11,8 +11,8 @@ import java.util.UUID;
 
 /**
  * Recurso só de teste (passo 302): devolve o {@link OperationContext} preenchido durante a
- * requisição, provando o caminho identidade → contexto. O path é protegido pela política de {@code
- * %test} — a proteção das rotas reais é dos passos 307/308.
+ * requisição, provando o caminho identidade → contexto. O path é protegido pela política global de
+ * {@code /api/v1/*} (passo 307a), como qualquer rota da API.
  */
 @Path(TestOperationContextResource.PATH)
 public class TestOperationContextResource {

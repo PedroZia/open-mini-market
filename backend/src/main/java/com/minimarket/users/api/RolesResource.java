@@ -1,5 +1,7 @@
 package com.minimarket.users.api;
 
+import com.minimarket.shared.api.RequirePermission;
+import com.minimarket.shared.domain.Permission;
 import com.minimarket.users.application.ListRolesUseCase;
 import com.minimarket.users.application.ReplaceRolePermissionsUseCase;
 import com.minimarket.users.application.RoleSummary;
@@ -16,8 +18,9 @@ import java.util.List;
 
 /**
  * Papéis e mapa de permissões (§9.3 do plano, passo 114). A API valida forma, delega ao caso de uso
- * e mapeia a resposta — zero regra de negócio aqui. A rota fica fora da autenticação até a Fase 3
- * (passo 307).
+ * e mapeia a resposta — zero regra de negócio aqui. A política global (passo 307a) exige token e o
+ * {@link RequirePermission} de cada rota exige a permissão: leitura com {@code user.read} (GERENTE
+ * e ADMIN) e escrita do mapa só com {@code role.write} (ADMIN).
  */
 @Path(RolesResource.PATH)
 public class RolesResource {
@@ -31,6 +34,7 @@ public class RolesResource {
 
   /** Catálogo completo: cada role com o nome, a descrição, o {@code system} e as permissões. */
   @GET
+  @RequirePermission(Permission.USER_READ)
   @Produces(MediaType.APPLICATION_JSON)
   public List<RoleResponse> list() {
     return listRolesUseCase.execute().stream().map(RolesResource::toResponse).toList();
@@ -43,6 +47,7 @@ public class RolesResource {
    */
   @PUT
   @Path("/{code}/permissions")
+  @RequirePermission(Permission.ROLE_WRITE)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public RoleResponse replacePermissions(

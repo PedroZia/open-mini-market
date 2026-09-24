@@ -36,6 +36,9 @@ import org.junit.jupiter.api.Test;
  * verdade: cada teste usa um sufixo único da execução e o {@link #removeUsersCreatedByThisRun()}
  * apaga sessões, papéis e usuários ao fim de cada um — as FKs de {@code auth_sessions} e {@code
  * user_roles} são {@code on delete restrict}.
+ *
+ * <p>O usuário de cada cenário nasce pela API com o token do ADMIN da fixture ({@link
+ * #adminToken()}, passo 307a), que é também quem reseta senha por ADMIN.
  */
 @QuarkusTest
 class AuthResourceTest extends IntegrationTestBase {
@@ -242,7 +245,7 @@ class AuthResourceTest extends IntegrationTestBase {
   }
 
   @Test
-  @DisplayName("GET /api/v1/meta continua 200 sem token: só as rotas de sessão foram protegidas")
+  @DisplayName("GET /api/v1/meta continua 200 sem token: é exceção pública da política global")
   void keepsMetaPublic() {
     Response response = given().when().get(META_PATH).then().extract().response();
 
@@ -436,7 +439,7 @@ class AuthResourceTest extends IntegrationTestBase {
   void reportsMustChangePassword() {
     String username = "login.temp." + SUFFIX;
     String id = createUser(username, "Login Temp", null);
-    given()
+    asAdmin()
         .contentType("application/json")
         .body(
             """
@@ -661,10 +664,10 @@ class AuthResourceTest extends IntegrationTestBase {
     loginRateLimiter.recordSuccess(LOOPBACK_V6);
   }
 
-  /** Cria o usuário pelo caminho que já existe ({@code POST /api/v1/users}) e devolve o id. */
-  private static String createUser(String username, String displayName, String roleCode) {
+  /** Cria o usuário pela API com o token do ADMIN da fixture (passo 307a) e devolve o id. */
+  private String createUser(String username, String displayName, String roleCode) {
     String roleCodes = roleCode == null ? "" : ", \"roleCodes\": [\"%s\"]".formatted(roleCode);
-    return given()
+    return asAdmin()
         .contentType("application/json")
         .body(
             """

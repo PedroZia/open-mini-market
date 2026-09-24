@@ -6,6 +6,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 
 import com.minimarket.IntegrationTestBase;
+import com.minimarket.support.TestAdmin;
 import com.minimarket.users.application.PasswordHasher;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
@@ -26,6 +27,10 @@ import org.junit.jupiter.api.Test;
  * repositório, aqui o request HTTP commita de verdade: cada teste usa um sufixo único da execução e
  * o {@link #removeUsersCreatedByThisRun()} apaga o que foi criado ao fim de cada um, para não
  * sobrar linha para os testes de repositório nem para a próxima execução.
+ *
+ * <p>Todas as chamadas falam com o token do ADMIN da fixture ({@link #adminToken()}, passo 307a): a
+ * API de usuários exige {@code user.read}/{@code user.write} desde que a política global fechou a
+ * janela da Fase 1.
  */
 @QuarkusTest
 class UsersResourceTest extends IntegrationTestBase {
@@ -40,7 +45,7 @@ class UsersResourceTest extends IntegrationTestBase {
     String username = "maria.silva." + SUFFIX;
 
     Response response =
-        given()
+        asAdmin()
             .contentType("application/json")
             .body(
                 """
@@ -75,7 +80,7 @@ class UsersResourceTest extends IntegrationTestBase {
     String username = "joao.pereira." + SUFFIX;
     createUser(username, "João Pereira", "senha-secreta");
 
-    given()
+    asAdmin()
         .contentType("application/json")
         .body(
             """
@@ -102,7 +107,7 @@ class UsersResourceTest extends IntegrationTestBase {
     String username = "curta.senha." + SUFFIX;
 
     Response response =
-        given()
+        asAdmin()
             .contentType("application/json")
             .body(
                 """
@@ -128,7 +133,7 @@ class UsersResourceTest extends IntegrationTestBase {
   @DisplayName("campos obrigatórios em branco respondem 400 com errors[] em cada campo")
   void rejectsBlankRequiredFields() {
     Response response =
-        given()
+        asAdmin()
             .contentType("application/json")
             .body(
                 """
@@ -299,7 +304,7 @@ class UsersResourceTest extends IntegrationTestBase {
     String hashBefore = passwordHashOf("edita." + SUFFIX);
 
     Response response =
-        given()
+        asAdmin()
             .contentType("application/json")
             .body(
                 """
@@ -467,6 +472,10 @@ class UsersResourceTest extends IntegrationTestBase {
   void rejectsDisablingLastActiveAdmin() throws SQLException {
     String firstAdmin = createUserWithRole("admin.um." + SUFFIX, "Admin Um", "ADMIN");
     String secondAdmin = createUserWithRole("admin.dois." + SUFFIX, "Admin Dois", "ADMIN");
+    // O ADMIN da fixture (passo 307a) sai da contagem: sem isso ele seria o ADMIN que "sobra" e o
+    // 409 do último ativo nunca chegaria. O soft delete não derruba a sessão dele, que é a de quem
+    // faz as chamadas.
+    softDeleteUser(TestAdmin.USERNAME);
 
     // Com dois ADMINs ativos a desativação é permitida: ainda sobra um.
     assertThat(postUserAction(secondAdmin, "disable", 200).jsonPath().getString("status"))
@@ -630,6 +639,32 @@ class UsersResourceTest extends IntegrationTestBase {
     assertThat(columnOf(id, "must_change_password")).isEqualTo("f");
   }
 
+  @Test
+  @DisplayName("sem token a rota de usuários responde 401 problem+json da política global")
+  void rejectsRequestsWithoutToken() {
+    Response list = given().when().get("/api/v1/users").then().extract().response();
+
+    assertThat(list.statusCode()).isEqualTo(401);
+    assertThat(list.contentType()).contains("application/problem+json");
+    assertThat(list.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+    assertThat(list.jsonPath().getString("instance")).isEqualTo("/api/v1/users");
+    assertThat(list.jsonPath().getString("traceId")).isNotBlank();
+
+    // A política global vale para todos os verbos: sem token a escrita também é 401, e a validação
+    // do corpo nem chega a rodar.
+    Response create =
+        given()
+            .contentType("application/json")
+            .body("{}")
+            .when()
+            .post("/api/v1/users")
+            .then()
+            .extract()
+            .response();
+    assertThat(create.statusCode()).isEqualTo(401);
+    assertThat(create.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+  }
+
   /**
    * O request HTTP commita, então os usuários criados aqui são removidos ao fim de cada teste: os
    * testes de repositório assumem a tabela como a encontraram. A FK de {@code user_roles} é {@code
@@ -652,8 +687,8 @@ class UsersResourceTest extends IntegrationTestBase {
     }
   }
 
-  private static void createUser(String username, String displayName, String password) {
-    given()
+  private void createUser(String username, String displayName, String password) {
+    asAdmin()
         .contentType("application/json")
         .body(
             """
@@ -667,8 +702,8 @@ class UsersResourceTest extends IntegrationTestBase {
   }
 
   /** Cria o usuário com o papel informado e devolve o id gerado (para o GET por id). */
-  private static String createUserWithRole(String username, String displayName, String roleCode) {
-    return given()
+  private String createUserWithRole(String username, String displayName, String roleCode) {
+    return asAdmin()
         .contentType("application/json")
         .body(
             """
@@ -689,14 +724,14 @@ class UsersResourceTest extends IntegrationTestBase {
    * Cria usuários numerados; o SUFFIX no username/displayName deixa a busca isolar a própria
    * página.
    */
-  private static void createListingUsers(int count) {
+  private void createListingUsers(int count) {
     for (int i = 1; i <= count; i++) {
       createUser("lista%02d.%s".formatted(i, SUFFIX), "Usuario %02d".formatted(i), "senha-secreta");
     }
   }
 
-  private static Response listUsers(String... queryParams) {
-    return withQueryParams(given(), queryParams)
+  private Response listUsers(String... queryParams) {
+    return withQueryParams(asAdmin(), queryParams)
         .when()
         .get("/api/v1/users")
         .then()
@@ -705,8 +740,8 @@ class UsersResourceTest extends IntegrationTestBase {
         .response();
   }
 
-  private static Response listUsersBadRequest(String... queryParams) {
-    return withQueryParams(given(), queryParams)
+  private Response listUsersBadRequest(String... queryParams) {
+    return withQueryParams(asAdmin(), queryParams)
         .when()
         .get("/api/v1/users")
         .then()
@@ -715,13 +750,19 @@ class UsersResourceTest extends IntegrationTestBase {
         .response();
   }
 
-  private static Response getUser(String id) {
-    return given().when().get("/api/v1/users/{id}", id).then().statusCode(200).extract().response();
+  private Response getUser(String id) {
+    return asAdmin()
+        .when()
+        .get("/api/v1/users/{id}", id)
+        .then()
+        .statusCode(200)
+        .extract()
+        .response();
   }
 
   /** PUT com corpo bruto; espera o status informado e devolve a resposta. */
-  private static Response putUser(String id, String body, int expectedStatus) {
-    return given()
+  private Response putUser(String id, String body, int expectedStatus) {
+    return asAdmin()
         .contentType("application/json")
         .body(body)
         .when()
@@ -732,8 +773,14 @@ class UsersResourceTest extends IntegrationTestBase {
         .response();
   }
 
-  private static Response getUserExpectingNotFound(String id) {
-    return given().when().get("/api/v1/users/{id}", id).then().statusCode(404).extract().response();
+  private Response getUserExpectingNotFound(String id) {
+    return asAdmin()
+        .when()
+        .get("/api/v1/users/{id}", id)
+        .then()
+        .statusCode(404)
+        .extract()
+        .response();
   }
 
   /** Pares {@code nome, valor} viram query params. */
@@ -746,8 +793,8 @@ class UsersResourceTest extends IntegrationTestBase {
   }
 
   /** POST sem corpo nas ações de ciclo de vida ({@code disable}/{@code enable}) do usuário. */
-  private static Response postUserAction(String id, String action, int expectedStatus) {
-    return given()
+  private Response postUserAction(String id, String action, int expectedStatus) {
+    return asAdmin()
         .when()
         .post("/api/v1/users/{id}/{action}", id, action)
         .then()
@@ -757,8 +804,8 @@ class UsersResourceTest extends IntegrationTestBase {
   }
 
   /** POST com corpo na ação de reset de senha; espera o status informado. */
-  private static Response postPasswordReset(String id, String body, int expectedStatus) {
-    return given()
+  private Response postPasswordReset(String id, String body, int expectedStatus) {
+    return asAdmin()
         .contentType("application/json")
         .body(body)
         .when()
@@ -790,7 +837,7 @@ class UsersResourceTest extends IntegrationTestBase {
     }
   }
 
-  /** Soft delete direto no banco: a API de desativar usuário só chega no passo 112. */
+  /** Soft delete direto no banco: atalho de fixture, sem passar pelo caso de uso de desativar. */
   private void softDeleteUser(String username) throws SQLException {
     try (Connection connection = dataSource.getConnection();
         PreparedStatement statement =

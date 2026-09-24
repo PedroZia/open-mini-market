@@ -11,8 +11,8 @@ import java.util.Set;
 
 /**
  * Recurso só de teste (passo 206): expõe a identidade montada pelo mecanismo bearer para provar o
- * caminho ponta a ponta. O path é o único protegido pela política de {@code %test} — a proteção das
- * rotas reais é dos passos 307/308 e a janela da Fase 1 continua aberta.
+ * caminho ponta a ponta. Desde o passo 307a quem protege o path é a política global de {@code
+ * /api/v1/*} — este recurso não tem nada de especial.
  */
 @Path(TestIdentityResource.PATH)
 public class TestIdentityResource {

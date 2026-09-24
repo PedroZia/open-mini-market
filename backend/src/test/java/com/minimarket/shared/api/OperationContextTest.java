@@ -6,14 +6,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.minimarket.IntegrationTestBase;
 import com.minimarket.auth.api.AuthResource;
 import com.minimarket.auth.domain.TokenHasher;
+import com.minimarket.users.application.CreateUserCommand;
+import com.minimarket.users.application.CreateUserUseCase;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
+import jakarta.inject.Inject;
 import java.net.InetAddress;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -36,6 +40,9 @@ class OperationContextTest extends IntegrationTestBase {
 
   /** Domínio puro, sem estado e sem CDI (passo 203): o teste instancia o hash do token. */
   private final TokenHasher tokenHasher = new TokenHasher();
+
+  /** Caso de uso da criação de usuário (passo 107): a fixture nasce por aqui, não pela API. */
+  @Inject CreateUserUseCase createUserUseCase;
 
   @Test
   @DisplayName("sessão TUI chega no contexto com ator, sessão, loja, caixa, origem e correlação")
@@ -137,22 +144,12 @@ class OperationContextTest extends IntegrationTestBase {
     }
   }
 
-  /** Cria o usuário pelo caminho que já existe ({@code POST /api/v1/users}) e devolve o id. */
-  private static String createUser(String username) {
-    return given()
-        .contentType("application/json")
-        .body(
-            """
-            {"username": "%s", "displayName": "%s", "password": "%s", "roleCodes": ["OPERADOR"]}
-            """
-                .formatted(username, username, PASSWORD))
-        .when()
-        .post("/api/v1/users")
-        .then()
-        .statusCode(201)
-        .extract()
-        .jsonPath()
-        .getString("id");
+  /** Cria o usuário OPERADOR pelo caso de uso (passo 107) e devolve o id. */
+  private String createUser(String username) {
+    return createUserUseCase
+        .execute(new CreateUserCommand(username, username, PASSWORD, List.of("OPERADOR")))
+        .id()
+        .toString();
   }
 
   /** Login pela API com o cliente informado; {@code cashRegisterId} nulo não vai no corpo. */

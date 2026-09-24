@@ -40,16 +40,19 @@ class RequestIdFilterTest {
   }
 
   @Test
-  @DisplayName("rota inexistente também devolve o X-Request-Id")
+  @DisplayName(
+      "rota inexistente sob /api/v1 também devolve o X-Request-Id: o challenge ecoa o header")
   void unknownRouteAlsoEchoesRequestId() {
     String requestId = UUID.randomUUID().toString();
 
+    // O 401 da política global nasce no challenge do bearer (passo 307a), que roda antes do filtro
+    // de correlação do JAX-RS e por isso ecoa o header por conta própria.
     given()
         .header(RequestIdFilter.REQUEST_ID_HEADER, requestId)
         .when()
         .get("/api/v1/nao-existe")
         .then()
-        .statusCode(404)
+        .statusCode(401)
         .header(RequestIdFilter.REQUEST_ID_HEADER, equalTo(requestId))
         .body("traceId", equalTo(requestId));
   }

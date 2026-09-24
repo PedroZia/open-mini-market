@@ -13,7 +13,7 @@ import jakarta.ws.rs.core.MediaType;
  * Recurso só de teste (passo 306): prova o porteiro declarativo ponta a ponta. A anotação da classe
  * exige {@code user.write} (só ADMIN) e a do método exige {@code audit.read} (GERENTE e ADMIN), o
  * que separa os papéis e prova que a anotação do método vence a da classe. O path é protegido pela
- * política de {@code %test} — a proteção das rotas reais é dos passos 307/308.
+ * política global de {@code /api/v1/*} (passo 307a), como qualquer rota da API.
  */
 @Path(TestRequirePermissionResource.PATH)
 @RequirePermission(Permission.USER_WRITE)
