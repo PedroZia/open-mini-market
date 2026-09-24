@@ -12,6 +12,7 @@ import com.minimarket.shared.domain.NotFoundException;
 import com.minimarket.shared.domain.Store;
 import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -69,6 +70,18 @@ class CreateProductUseCaseTest {
                 new BigDecimal("1.000")));
 
     assertThat(result.id()).isEqualTo(productStore.generatedId);
+    assertThat(result.product())
+        .as("a resposta relê o produto gravado, com os defaults que o banco completou")
+        .satisfies(
+            product -> {
+              assertThat(product.id()).isEqualTo(productStore.generatedId);
+              assertThat(product.barcode()).isEqualTo("7891000000017");
+              assertThat(product.price()).isEqualByComparingTo("24.90");
+              assertThat(product.active()).isTrue();
+              assertThat(product.deletedAt()).isNull();
+              assertThat(product.version()).isZero();
+              assertThat(product.createdAt()).isEqualTo(FakeProductStore.CREATED_AT);
+            });
     assertThat(productStore.inserted.storeId())
         .as("loja vem da configuração, não do comando")
         .isEqualTo(storeLookup.storeId);
@@ -103,11 +116,12 @@ class CreateProductUseCaseTest {
   @Test
   @DisplayName("barcode em branco vira nulo sem checar duplicidade; categoria nula é aceita")
   void normalizesBlankBarcodeAndAllowsNoCategory() {
-    useCase.execute(command("   ", null));
+    CreateProductResult result = useCase.execute(command("   ", null));
 
     assertThat(productStore.inserted.barcode()).isNull();
     assertThat(productStore.barcodeChecked).as("sem barcode não há duplicidade a checar").isFalse();
     assertThat(productStore.inserted.categoryId()).isNull();
+    assertThat(result.product().barcode()).as("o resultado relê o barcode nulo do banco").isNull();
     assertThat(categoryStore.existenceChecked)
         .as("sem categoria não há existência a checar")
         .isFalse();
@@ -191,6 +205,9 @@ class CreateProductUseCaseTest {
   /** Dublê de {@link ProductStore}: guarda a última inserção e simula barcodes já em uso. */
   private static final class FakeProductStore implements ProductStore {
 
+    /** Instante fixo do "banco" do dublê: o resultado da criação é conferido campo a campo. */
+    private static final Instant CREATED_AT = Instant.parse("2026-01-02T03:04:05Z");
+
     private final Set<String> existingBarcodes = new HashSet<>();
     private final UUID generatedId = UUID.randomUUID();
     private NewProduct inserted;
@@ -208,9 +225,31 @@ class CreateProductUseCaseTest {
       return existingBarcodes.contains(barcode);
     }
 
+    /**
+     * O que o adaptador JPA devolveria na releitura pós-insert: o produto gravado com os defaults
+     * que o banco completou — ativo, sem deletedAt, {@code version} 0 e timestamps.
+     */
     @Override
     public Optional<ProductSummary> findById(UUID id) {
-      throw new UnsupportedOperationException("findById não é usado por CreateProduct");
+      if (inserted == null || !generatedId.equals(id)) {
+        return Optional.empty();
+      }
+      return Optional.of(
+          new ProductSummary(
+              generatedId,
+              inserted.storeId(),
+              inserted.barcode(),
+              inserted.name(),
+              inserted.description(),
+              inserted.categoryId(),
+              inserted.unit(),
+              inserted.price(),
+              inserted.minQuantity(),
+              true,
+              CREATED_AT,
+              CREATED_AT,
+              null,
+              0L));
     }
 
     @Override

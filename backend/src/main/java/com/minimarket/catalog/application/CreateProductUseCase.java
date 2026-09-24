@@ -31,6 +31,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  *
  * <p>Auditoria (passo 405): a criação vira {@code PRODUCT_CREATED} na mesma transação, com o id
  * criado em {@code entityId} e name/barcode/price em {@code details} — o "after" da operação.
+ *
+ * <p>O resultado carrega o produto relido da porta (passo 406): a resposta 201 devolve o que o
+ * banco guardou — defaults como {@code active}, timestamps e {@code version} — sem a API
+ * renormalizar nada por conta própria.
  */
 @ApplicationScoped
 public class CreateProductUseCase {
@@ -87,7 +91,16 @@ public class CreateProductUseCase {
         null,
         details(command.name(), barcode, price));
 
-    return new CreateProductResult(id);
+    return new CreateProductResult(id, storedProduct(id));
+  }
+
+  /** O produto recém-inserido, com os defaults que o banco completou; o insert commita junto. */
+  private ProductSummary storedProduct(UUID id) {
+    return productStore
+        .findById(id)
+        .orElseThrow(
+            () ->
+                new IllegalStateException("produto %s não encontrado após o insert".formatted(id)));
   }
 
   /**

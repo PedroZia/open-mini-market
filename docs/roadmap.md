@@ -403,7 +403,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitários das validações + teste de auditoria.
   **Commit:** `feat(catalog): adiciona caso de uso de criacao de produto`
 
-- [ ] **406 — API `POST /api/v1/products`**
+- [x] **406 — API `POST /api/v1/products`**
   **Objetivo:** cadastrar produto pela API. **Depende:** 405
   **Implementar:** request/response + validação + `201` + `Location`; permissão `product.write`.
   **Testes/aceite:** 201; 409 `BARCODE_ALREADY_EXISTS`; 400 validações; 403 OPERADOR.

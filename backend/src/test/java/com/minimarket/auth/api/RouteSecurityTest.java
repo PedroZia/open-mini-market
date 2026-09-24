@@ -123,6 +123,7 @@ class RouteSecurityTest {
           new Route("POST", "/api/v1/categories"),
           new Route("PUT", "/api/v1/categories/{id}"),
           new Route("DELETE", "/api/v1/categories/{id}"),
+          new Route("POST", "/api/v1/products"),
           // Resources só de teste (passos 206, 302, 306): protegidos pela política global como
           // qualquer rota da API em %test.
           new Route("GET", "/api/v1/test/identity"),
