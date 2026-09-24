@@ -811,7 +811,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** venda com 6 eventos aparece em ordem cronológica com ator e motivo.
   **Commit:** `feat(audit): adiciona historico por entidade`
 
-- [ ] **1003 — Índices e desempenho da auditoria**
+- [x] **1003 — Índices e desempenho da auditoria**
   **Objetivo:** consulta rápida com volume. **Depende:** 1001
   **Implementar:** validar índices de §5.3 com `EXPLAIN` em base com 100 k eventos; ajustar se necessário.
   **Testes/aceite:** consultas por entidade e por período usam índice (sem seq scan).
