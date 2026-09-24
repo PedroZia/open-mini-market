@@ -113,7 +113,8 @@ public class OpenCashSessionUseCase {
         CASH_SESSION_ENTITY_TYPE,
         sessionId,
         null,
-        details(cashRegisterId, openingAmount));
+        details(cashRegisterId, openingAmount),
+        sessionId);
 
     return storedSession(sessionId);
   }

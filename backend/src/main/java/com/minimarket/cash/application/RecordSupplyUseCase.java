@@ -103,7 +103,8 @@ public class RecordSupplyUseCase {
         CASH_SESSION_ENTITY_TYPE,
         session.id(),
         reason,
-        details(amount, expectedBefore, expectedAfter));
+        details(amount, expectedBefore, expectedAfter),
+        session.id());
 
     return new CashMovementResult(
         session.id(),

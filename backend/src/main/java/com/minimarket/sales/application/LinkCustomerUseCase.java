@@ -94,7 +94,12 @@ public class LinkCustomerUseCase {
     sale.linkCustomer(customerId);
     saleStore.update(sale);
     auditRecorder.record(
-        SALE_CUSTOMER_LINKED_ACTION, SALE_ENTITY_TYPE, sale.id(), null, details(customer));
+        SALE_CUSTOMER_LINKED_ACTION,
+        SALE_ENTITY_TYPE,
+        sale.id(),
+        null,
+        details(customer),
+        sale.cashSessionId());
 
     return sale;
   }

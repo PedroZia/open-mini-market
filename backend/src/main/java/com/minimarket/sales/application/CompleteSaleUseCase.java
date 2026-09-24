@@ -131,7 +131,12 @@ public class CompleteSaleUseCase {
     sale.complete(completedAt);
     saleStore.update(sale);
     auditRecorder.record(
-        SALE_COMPLETED_ACTION, SALE_ENTITY_TYPE, sale.id(), null, details(sale, payments));
+        SALE_COMPLETED_ACTION,
+        SALE_ENTITY_TYPE,
+        sale.id(),
+        null,
+        details(sale, payments),
+        sale.cashSessionId());
 
     return sale;
   }

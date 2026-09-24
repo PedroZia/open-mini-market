@@ -63,7 +63,12 @@ public class RemoveSaleItemUseCase {
     sale.removeItem(command.productId());
     saleStore.update(sale);
     auditRecorder.record(
-        SALE_ITEM_REMOVED_ACTION, SALE_ENTITY_TYPE, sale.id(), null, details(removed, sale));
+        SALE_ITEM_REMOVED_ACTION,
+        SALE_ENTITY_TYPE,
+        sale.id(),
+        null,
+        details(removed, sale),
+        sale.cashSessionId());
 
     return sale;
   }

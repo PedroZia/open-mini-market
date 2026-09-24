@@ -73,7 +73,12 @@ public class UnlinkCustomerUseCase {
     sale.unlinkCustomer();
     saleStore.update(sale);
     auditRecorder.record(
-        SALE_CUSTOMER_UNLINKED_ACTION, SALE_ENTITY_TYPE, sale.id(), null, details(customerId));
+        SALE_CUSTOMER_UNLINKED_ACTION,
+        SALE_ENTITY_TYPE,
+        sale.id(),
+        null,
+        details(customerId),
+        sale.cashSessionId());
 
     return sale;
   }

@@ -112,7 +112,8 @@ public class ApplyDiscountUseCase {
         SALE_ENTITY_TYPE,
         sale.id(),
         sale.discountReason(),
-        details(sale));
+        details(sale),
+        sale.cashSessionId());
 
     return sale;
   }

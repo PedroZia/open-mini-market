@@ -831,7 +831,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Hardening pós-backend (autorizado pelo dono)
 
-- [ ] **1006 — Auditoria com sessão de caixa e troca de senha**
+- [x] **1006 — Auditoria com sessão de caixa e troca de senha**
   **Objetivo:** preencher `cash_session_id` nos eventos de caixa, venda e pagamento e auditar a troca de senha. **Depende:** 1005
   **Implementar:** overload `record(..., UUID cashSessionId)` no `AuditRecorder` (o método atual delega com `null`); casos de uso que conhecem a sessão passam o id explicitamente (sem query por request no filtro); preencher em caixa (`CASH_SESSION_OPENED` com a sessão criada, `CLOSED`/`WITHDRAWAL`/`SUPPLY` com a sessão), vendas (`SALE_CREATED`, `SALE_ITEM_ADDED`, `SALE_ITEM_QUANTITY_CHANGED`, `SALE_ITEM_REMOVED`, `SALE_DISCOUNT_APPLIED`/`REMOVED`, `SALE_CUSTOMER_LINKED`/`UNLINKED`, `SALE_CANCELLED`, `SALE_COMPLETED`) e pagamentos (`PAYMENT_ADDED`/`CANCELLED`); demais eventos ficam `null` (estoque manual, usuários, auth); `PASSWORD_CHANGED` no `ChangeOwnPasswordUseCase` (entityType `USER`, entityId = usuário da sessão, `details {username}`; nunca senha/hash); atualizar `docs/auditoria.md` (ação nova e campo agora preenchido — o doc diz 38 ações).
   **Testes/aceite:** `GET /api/v1/audit-events?cashSessionId=<id>` devolve os eventos da sessão (abertura, venda, fechamento) no fluxo real; `PASSWORD_CHANGED` exatamente 1, sem credencial em `details`.

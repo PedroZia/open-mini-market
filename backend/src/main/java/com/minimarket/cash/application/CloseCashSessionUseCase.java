@@ -105,7 +105,8 @@ public class CloseCashSessionUseCase {
         CASH_SESSION_ENTITY_TYPE,
         lockedSession.id(),
         null,
-        details(countedAmount, expectedAmount, differenceAmount));
+        details(countedAmount, expectedAmount, differenceAmount),
+        lockedSession.id());
 
     return closedSession;
   }

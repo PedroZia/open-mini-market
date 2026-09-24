@@ -4,6 +4,7 @@ import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.minimarket.IntegrationTestBase;
+import com.minimarket.audit.api.AuditEventsResource;
 import com.minimarket.auth.application.LoginRateLimiter;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
@@ -13,6 +14,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -81,6 +83,22 @@ class ChangeOwnPasswordTest extends IntegrationTestBase {
     Response oldPassword = login(username, PASSWORD, null);
     assertThat(oldPassword.statusCode()).isEqualTo(401);
     assertThat(oldPassword.jsonPath().getString("code")).isEqualTo("INVALID_CREDENTIALS");
+
+    // A troca deixa um evento de auditoria do usuário (passo 1006): o username em details e nada de
+    // credencial — nem a senha, nem o hash.
+    Response audit = auditEvents(userId, PASSWORD_CHANGED);
+    assertThat(audit.jsonPath().getLong("totalItems")).as("uma troca, um evento").isEqualTo(1);
+    Map<String, Object> event = audit.jsonPath().getMap("items[0]");
+    assertThat(event.get("action")).isEqualTo(PASSWORD_CHANGED);
+    assertThat(event.get("entityType")).isEqualTo("USER");
+    assertThat(event.get("entityId")).isEqualTo(userId.toString());
+    assertThat(event.get("actorUserId"))
+        .as("o ator é o dono da sessão")
+        .isEqualTo(userId.toString());
+    assertThat(event.get("details")).isEqualTo(Map.of("username", username));
+    assertThat(String.valueOf(event.get("details")))
+        .as("details nunca leva senha nem hash")
+        .doesNotContain(PASSWORD, NEW_PASSWORD, "$argon2");
   }
 
   @Test
@@ -196,7 +214,8 @@ class ChangeOwnPasswordTest extends IntegrationTestBase {
   /**
    * O request HTTP commita, então o que este teste cria é removido ao fim de cada teste: os testes
    * de repositório assumem as tabelas como as encontraram. As FKs são {@code on delete restrict},
-   * por isso sessões e papéis saem antes do usuário.
+   * por isso sessões e papéis saem antes do usuário; os eventos de auditoria do usuário (login e a
+   * troca de senha, passo 1006) saem junto — o log não tem FK, mas o teste limpa o que comitou.
    */
   @AfterEach
   void removeUsersCreatedByThisRun() throws SQLException {
@@ -205,6 +224,15 @@ class ChangeOwnPasswordTest extends IntegrationTestBase {
     loginRateLimiter.recordSuccess(LOOPBACK_V4);
     loginRateLimiter.recordSuccess(LOOPBACK_V6);
     try (Connection connection = dataSource.getConnection()) {
+      try (PreparedStatement statement =
+          connection.prepareStatement(
+              "delete from audit_events where actor_user_id in"
+                  + " (select id from users where username like ?)"
+                  + " or entity_id in (select id from users where username like ?)")) {
+        statement.setString(1, "%" + SUFFIX);
+        statement.setString(2, "%" + SUFFIX);
+        statement.executeUpdate();
+      }
       try (PreparedStatement statement =
           connection.prepareStatement(
               "delete from auth_sessions where user_id in"
@@ -303,6 +331,23 @@ class ChangeOwnPasswordTest extends IntegrationTestBase {
         .header(AUTHORIZATION, "Bearer " + token)
         .when()
         .get(ME_PATH)
+        .then()
+        .extract()
+        .response();
+  }
+
+  /**
+   * Eventos de auditoria do usuário para a ação informada, com o token do ADMIN da suíte — o dono
+   * de {@code audit.read} (passo 1001). A consulta é a do §7.3, filtrada por {@code entityId} e
+   * {@code action}.
+   */
+  private Response auditEvents(UUID userId, String action) {
+    return given()
+        .header(AUTHORIZATION, "Bearer " + adminToken())
+        .queryParam("entityId", userId.toString())
+        .queryParam("action", action)
+        .when()
+        .get(AuditEventsResource.PATH)
         .then()
         .extract()
         .response();

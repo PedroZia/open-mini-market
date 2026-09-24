@@ -69,7 +69,8 @@ public class ChangeSaleItemQuantityUseCase {
         SALE_ENTITY_TYPE,
         sale.id(),
         null,
-        details(command.productId(), previousQuantity, sale));
+        details(command.productId(), previousQuantity, sale),
+        sale.cashSessionId());
 
     return sale;
   }

@@ -101,6 +101,9 @@ class CreateSaleUseCaseTest {
     assertThat(event.action()).isEqualTo("SALE_CREATED");
     assertThat(event.entityType()).isEqualTo("SALE");
     assertThat(event.entityId()).isEqualTo(sale.id());
+    assertThat(event.cashSessionId())
+        .as("a sessão aberta vai no evento, não só em details (passo 1006)")
+        .isEqualTo(CASH_SESSION_ID);
     assertThat(event.reason()).isNull();
     assertThat(event.details())
         .containsEntry("number", 42L)
@@ -306,8 +309,9 @@ class CreateSaleUseCaseTest {
 
   /**
    * Dublê de {@link AuditRecorder}: guarda o que o caso de uso pediu para gravar, sem CDI e sem
-   * banco. A subclasse só sobrescreve {@code record} — o caminho de verdade (contexto + INSERT) é
-   * do passo 303 e tem teste próprio contra PostgreSQL.
+   * banco. A subclasse sobrescreve o overload com a sessão de caixa (passo 1006) — o sem sessão
+   * delega para ele —, e o caminho de verdade (contexto + INSERT) é do passo 303 e tem teste
+   * próprio contra PostgreSQL.
    */
   private static final class FakeAuditRecorder extends AuditRecorder {
 
@@ -319,8 +323,9 @@ class CreateSaleUseCaseTest {
         String entityType,
         UUID entityId,
         String reason,
-        Map<String, Object> details) {
-      recorded.add(new Recorded(action, entityType, entityId, reason, details));
+        Map<String, Object> details,
+        UUID cashSessionId) {
+      recorded.add(new Recorded(action, entityType, entityId, reason, details, cashSessionId));
     }
 
     /** Único evento do cenário; o teste falha se o caso de uso gravou zero ou dois. */
@@ -336,5 +341,6 @@ class CreateSaleUseCaseTest {
       String entityType,
       UUID entityId,
       String reason,
-      Map<String, Object> details) {}
+      Map<String, Object> details,
+      UUID cashSessionId) {}
 }

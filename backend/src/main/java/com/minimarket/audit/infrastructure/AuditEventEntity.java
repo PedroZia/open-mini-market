@@ -20,8 +20,8 @@ import org.hibernate.type.SqlTypes;
  * AuditEventSummary} (§2.2).
  *
  * <p>Sem FK e sem associação de propósito (a migration explica): o log não bloqueia nem é bloqueado
- * pela operação de negócio, e os ids guardados são históricos. {@code cash_session_id} fica nula
- * até a Fase 6 — o recorder não inventa de onde tirá-la.
+ * pela operação de negócio, e os ids guardados são históricos. {@code cash_session_id} é preenchido
+ * pelo recorder quando o caso de uso conhece a sessão de caixa (passo 1006).
  */
 @Entity
 @Table(name = "audit_events")
@@ -52,7 +52,7 @@ public class AuditEventEntity {
   @Column(name = "auth_session_id")
   private UUID authSessionId;
 
-  /** Nula até a Fase 6: a sessão de caixa nasce com o módulo {@code cash}. */
+  /** Sessão de caixa da operação (passo 1006); nula nas ações que não pertencem a um caixa. */
   @Column(name = "cash_session_id")
   private UUID cashSessionId;
 
@@ -99,6 +99,7 @@ public class AuditEventEntity {
       UUID actorUserId,
       String actorUsername,
       UUID authSessionId,
+      UUID cashSessionId,
       UUID cashRegisterId,
       String action,
       String entityType,
@@ -112,6 +113,7 @@ public class AuditEventEntity {
     this.actorUserId = actorUserId;
     this.actorUsername = actorUsername;
     this.authSessionId = authSessionId;
+    this.cashSessionId = cashSessionId;
     this.cashRegisterId = cashRegisterId;
     this.action = action;
     this.entityType = entityType;

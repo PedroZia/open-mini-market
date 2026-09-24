@@ -89,7 +89,8 @@ public class CreateSaleUseCase {
             null,
             clock.instant());
     saleStore.insert(sale);
-    auditRecorder.record(SALE_CREATED_ACTION, SALE_ENTITY_TYPE, sale.id(), null, details(sale));
+    auditRecorder.record(
+        SALE_CREATED_ACTION, SALE_ENTITY_TYPE, sale.id(), null, details(sale), cashSessionId);
 
     return sale;
   }

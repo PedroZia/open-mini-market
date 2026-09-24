@@ -28,6 +28,7 @@ public class AuditEventRepository implements AuditEventStore {
             event.actorUserId(),
             event.actorUsername(),
             event.authSessionId(),
+            event.cashSessionId(),
             event.cashRegisterId(),
             event.action(),
             event.entityType(),

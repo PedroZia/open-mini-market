@@ -1,5 +1,6 @@
 package com.minimarket.auth.application;
 
+import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.users.application.PasswordHasher;
@@ -9,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.time.Clock;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -28,6 +30,11 @@ import java.util.UUID;
  * <p>A sessão que fez a troca sobrevive — derrubá-la obrigaria o usuário a logar de novo logo
  * depois de provar que conhece a senha atual; as demais caem com o motivo {@code PASSWORD_CHANGED},
  * como manda a revogação por troca de senha (§6.2).
+ *
+ * <p>Auditoria (§7.2): a troca vira {@code PASSWORD_CHANGED} na mesma transação, com o usuário da
+ * sessão em {@code entityId} e só o {@code username} em {@code details} — senha e hash nunca entram
+ * no evento. O corte em massa continua sem evento próprio: o rastro dele é o {@code revoked_reason}
+ * das sessões derrubadas.
  */
 @ApplicationScoped
 public class ChangeOwnPasswordUseCase {
@@ -40,6 +47,15 @@ public class ChangeOwnPasswordUseCase {
   /** Motivo gravado em {@code revoked_reason} das sessões derrubadas pela troca de senha. */
   public static final String PASSWORD_CHANGED_REASON = "PASSWORD_CHANGED";
 
+  /**
+   * Ação da troca de senha (§7.2). O valor é o mesmo do motivo da revogação — o §6.2 nomeia a troca
+   * assim dos dois lados; a constante separada mantém cada uso com o seu significado.
+   */
+  private static final String PASSWORD_CHANGED_ACTION = "PASSWORD_CHANGED";
+
+  /** Alvo do evento da troca: o usuário dono da sessão. */
+  private static final String USER_ENTITY_TYPE = "USER";
+
   /** Mensagem única da senha atual recusada; não revela nada além disso (§6.3.4). */
   private static final String INVALID_CURRENT_PASSWORD_DETAIL = "senha atual incorreta";
 
@@ -48,6 +64,9 @@ public class ChangeOwnPasswordUseCase {
   @Inject AuthSessionStore sessionStore;
 
   @Inject PasswordHasher passwordHasher;
+
+  /** Auditoria da troca (§7.2), na transação da senha nova e da revogação. */
+  @Inject AuditRecorder auditRecorder;
 
   /** Relógio da aplicação: o instante da revogação é decisão do caso de uso. */
   @Inject Clock clock;
@@ -73,6 +92,12 @@ public class ChangeOwnPasswordUseCase {
     userStore.changeOwnPassword(user.id(), passwordHasher.hash(newPassword));
     sessionStore.revokeAllByUserExcept(
         user.id(), sessionId, PASSWORD_CHANGED_REASON, clock.instant());
+    auditRecorder.record(
+        PASSWORD_CHANGED_ACTION,
+        USER_ENTITY_TYPE,
+        user.id(),
+        null,
+        Map.of("username", user.username()));
   }
 
   private static void requireValidPassword(String password) {

@@ -102,7 +102,8 @@ public class AddSaleItemUseCase {
         SALE_ENTITY_TYPE,
         sale.id(),
         null,
-        details(product, command.quantity(), sale));
+        details(product, command.quantity(), sale),
+        sale.cashSessionId());
 
     return sale;
   }

@@ -9,9 +9,10 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Dublê de {@link AuditRecorder} dos unitários das operações de item (passos 808/809): guarda o que
- * o caso de uso pediu para gravar, sem CDI e sem banco. A subclasse só sobrescreve {@code record} —
- * o caminho de verdade (contexto + INSERT) é do passo 303 e tem teste próprio contra PostgreSQL.
+ * Dublê de {@link AuditRecorder} das operações da venda: guarda o que o caso de uso pediu para
+ * gravar, sem CDI e sem banco. A subclasse sobrescreve o overload com a sessão de caixa (passo
+ * 1006) — o sem sessão delega para ele —, e o caminho de verdade (contexto + INSERT) é do passo
+ * 303, com teste próprio contra PostgreSQL.
  */
 final class FakeAuditRecorder extends AuditRecorder {
 
@@ -20,8 +21,13 @@ final class FakeAuditRecorder extends AuditRecorder {
 
   @Override
   public void record(
-      String action, String entityType, UUID entityId, String reason, Map<String, Object> details) {
-    recorded.add(new Event(action, entityType, entityId, reason, details));
+      String action,
+      String entityType,
+      UUID entityId,
+      String reason,
+      Map<String, Object> details,
+      UUID cashSessionId) {
+    recorded.add(new Event(action, entityType, entityId, reason, details, cashSessionId));
   }
 
   /** Único evento do cenário; o teste falha se o caso de uso gravou zero ou dois. */
@@ -36,5 +42,6 @@ final class FakeAuditRecorder extends AuditRecorder {
       String entityType,
       UUID entityId,
       String reason,
-      Map<String, Object> details) {}
+      Map<String, Object> details,
+      UUID cashSessionId) {}
 }

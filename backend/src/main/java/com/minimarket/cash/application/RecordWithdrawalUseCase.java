@@ -103,7 +103,8 @@ public class RecordWithdrawalUseCase {
         CASH_SESSION_ENTITY_TYPE,
         session.id(),
         reason,
-        details(amount, expectedBefore, expectedAfter, aboveExpected));
+        details(amount, expectedBefore, expectedAfter, aboveExpected),
+        session.id());
 
     return new CashMovementResult(
         session.id(),

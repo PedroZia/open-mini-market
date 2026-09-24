@@ -88,7 +88,12 @@ public class CancelSaleUseCase {
     sale.cancel(reason, command.cancelledByUserId(), clock.instant());
     saleStore.update(sale);
     auditRecorder.record(
-        SALE_CANCELLED_ACTION, SALE_ENTITY_TYPE, sale.id(), sale.cancelReason(), details(sale));
+        SALE_CANCELLED_ACTION,
+        SALE_ENTITY_TYPE,
+        sale.id(),
+        sale.cancelReason(),
+        details(sale),
+        sale.cashSessionId());
 
     return sale;
   }

@@ -94,7 +94,8 @@ public class RemoveDiscountUseCase {
         SALE_ENTITY_TYPE,
         sale.id(),
         removedReason,
-        details(removedType, removedValue, removedAmount, sale));
+        details(removedType, removedValue, removedAmount, sale),
+        sale.cashSessionId());
 
     return sale;
   }

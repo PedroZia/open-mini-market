@@ -5,7 +5,7 @@ cada `action` significa, quais campos vêm em `details` e como investigar uma op
 O plano está em [`plano-tecnico.md`](plano-tecnico.md) §7; aqui é o catálogo conferido contra o código
 de `backend/src/main/java`.
 
-**Última conferência:** 38 ações distintas emitidas no código e 38 documentadas neste arquivo — a
+**Última conferência:** 39 ações distintas emitidas no código e 39 documentadas neste arquivo — a
 conferência, nos dois sentidos e com os comandos de busca, está em [Manutenção](#6-manutenção).
 
 ## 1. Visão geral
@@ -22,12 +22,14 @@ histórico).
 | **Origem (`source`)** | `TUI`/`WEB` = cliente da sessão autenticada; `API` = requisição HTTP sem sessão de PDV (login, meta — é o valor do login que falha); `SYSTEM` = operação que não nasceu de requisição nenhuma (tarefas internas e inicializadores). O `check` da coluna aceita os quatro. |
 | **`id` e `occurred_at`** | O `id` é `bigint identity` (exceção ao UUIDv7: o log é sequencial) e o `occurred_at` é o `now()` do PostgreSQL, não o relógio da aplicação: **todos os eventos de uma mesma transação compartilham o mesmo instante**. A ordem fina é o `id` — a consulta ordena por `occurred_at` e desempata por `id`. |
 | **Idempotência** | Replay de `Idempotency-Key` devolve a resposta original sem reexecutar o caso de uso: **não gera evento novo**. |
+| **Sessão de caixa** | `cash_session_id` é preenchido quando o caso de uso conhece a sessão (caixa, venda e pagamento — passo 1006): é o id explícito que o `AuditRecorder` recebe, nunca uma consulta por requisição. Usuários, auth e estoque manual continuam com a coluna nula, porque não pertencem a um turno de caixa. |
 | **Movimentos internos** | Baixa de estoque da venda e entrada de dinheiro da venda são movimentos de ledger/estoque, não eventos de auditoria próprios: o rastro da venda é o `SALE_COMPLETED` (com `paymentsByMethod`) mais os movimentos consultáveis de estoque e caixa. |
 
 O caso de uso chama o recorder assim:
 
 ```java
-auditRecorder.record(action, entityType, entityId, reason, details);
+auditRecorder.record(action, entityType, entityId, reason, details);            // sem sessão de caixa
+auditRecorder.record(action, entityType, entityId, reason, details, cashSessionId);  // passo 1006
 ```
 
 - `entityType`/`entityId`: o alvo do evento (`SALE`, `PRODUCT`, `CASH_SESSION`, `USER`, `AUTH_SESSION`,
@@ -55,11 +57,17 @@ Uma tabela por módulo. `entityId` é o alvo do evento citado na coluna `entityT
 | `LOGOUT` | `LogoutUseCase.execute` — encerramento da própria sessão | `AUTH_SESSION` / id da sessão encerrada | — | — (`{}`) |
 | `SESSION_REVOKED` | `RevokeSessionUseCase.execute` — revogação de uma sessão específica (o dono ou quem tem `user.session.revoke`) | `AUTH_SESSION` / id da sessão alvo | — | — (`{}`) |
 | `SESSION_REVOKED` | `UserAccessChangedObserver` — corte em massa, disparado por `DisableUserUseCase` (`USER_DISABLED`), `ResetPasswordUseCase` (`PASSWORD_RESET`) e `RevokeUserSessionsUseCase` (`ADMIN_REVOKE`) | `USER` / id do usuário afetado | motivo do corte (`USER_DISABLED`, `PASSWORD_RESET`, `ADMIN_REVOKE`) | `reason`, `revokedCount` |
+| `PASSWORD_CHANGED` | `ChangeOwnPasswordUseCase.execute` — troca da própria senha (passo 1006: exige a senha atual, grava o hash novo e derruba as demais sessões) | `USER` / id do usuário da sessão | — | `username` |
 
 > O corte em massa grava **um** evento por execução, apontando o usuário (não há uma sessão única a
 > apontar); o `revokedCount` pode ser `0` quando não havia sessão viva. `LOGIN_FAILED`/`LOGIN_LOCKED`
 > não têm ator na gravação (a rota é pública e o contexto chega anônimo): o username tentado fica em
 > `details` e o IP/`requestId` no contexto da requisição.
+>
+> A troca da própria senha (`PASSWORD_CHANGED`) é o evento do usuário que a pediu — a sessão que fez
+> a troca sobrevive e as demais caem com `revoked_reason = PASSWORD_CHANGED`, mas o corte em si não
+> tem evento próprio: o rastro dele é a coluna `revoked_reason` de cada sessão derrubada. `details`
+> leva só o `username` — senha e hash nunca entram no log.
 
 ### users
 
@@ -108,7 +116,8 @@ O alvo é o **produto**, não o movimento: para ver o saldo e os movimentos do l
 `expectedBefore`/`expectedAfter` são o esperado da sessão antes e depois do movimento (regra de
 `CashSessionAmounts`); `aboveExpected` marca a sangria maior que o saldo esperado — o alerta que a
 investigação procura. A coluna `cash_register_id` do evento é o caixa **da sessão autenticada**
-(vem do `OperationContext`), não o caixa do path.
+(vem do `OperationContext`), não o caixa do path. `cash_session_id` é a sessão do evento (passo 1006):
+é ela que o filtro `cashSessionId` usa para trazer o turno inteiro, com vendas e pagamentos junto.
 
 ### sales
 
@@ -130,7 +139,9 @@ investigação procura. A coluna `cash_register_id` do evento é o caixa **da se
 Todos os eventos de item, pagamento e desconto apontam para a **venda** (é ela o agregado): o
 `paymentId` identifica a linha do pagamento dentro de `details`, e os totais de cada evento são o
 estado recalculado pelo servidor (BR-12), com o preço como snapshot do item capturado quando ele
-entrou na venda (BR-01) — nunca o preço atual do produto.
+entrou na venda (BR-01) — nunca o preço atual do produto. Todos eles, mais o `SALE_CREATED` e o
+`SALE_COMPLETED`, gravam também o `cash_session_id` da venda (passo 1006): é o vínculo com o turno do
+caixa, que o filtro `cashSessionId` usa (§3.5).
 
 ### customers
 
@@ -210,7 +221,8 @@ Leitura do evento `CASH_WITHDRAWAL`: `reason` = `"depósito bancário"`; `detail
 `amount`); `details.aboveExpected` = `true` se a sangria passou do esperado — o sinal de alerta.
 `actorUserId`/`actorUsername` identificam quem sangrou e `cashRegisterId` mostra o caixa da sessão.
 Consultar a sessão inteira (só `entityId`, sem `action`) traz `CASH_SESSION_OPENED`, os
-`CASH_SUPPLY`/`CASH_WITHDRAWAL` e o `CASH_SESSION_CLOSED` dela na mesma linha do tempo.
+`CASH_SUPPLY`/`CASH_WITHDRAWAL` e o `CASH_SESSION_CLOSED` dela na mesma linha do tempo; o
+`cashSessionId` da §3.5 é o mesmo recorte, com as vendas e pagamentos junto.
 
 ### 3.3 Alteração de preço — o antes e o depois
 
@@ -256,6 +268,20 @@ venda de outro caixa). O ator, a sessão, a loja e o IP vêm do `OperationContex
 recusada — diferente do `LOGIN_FAILED`, aqui o 403 pressupõe identidade autenticada (ou, no caso de
 `audit.read`, um OPERADOR autenticado tentando ler o log).
 
+### 3.5 Turno do caixa — o que aconteceu na sessão
+
+```http
+GET /api/v1/audit-events?cashSessionId={cashSessionId}&sort=occurredat,asc&size=100
+```
+
+O filtro por sessão (passo 1006) responde "o que aconteceu neste turno": a abertura
+(`CASH_SESSION_OPENED`), cada venda com os itens, descontos e pagamentos dela (`SALE_*`/`PAYMENT_*`) e
+o fechamento (`CASH_SESSION_CLOSED`). Leitura: todos os eventos do recorte têm o mesmo `cashSessionId`
+e o mesmo operador; o `entityType` diz se o alvo é a sessão (`CASH_SESSION`) ou a venda (`SALE`), e o
+`entityId` continua sendo o alvo do evento — a consulta por sessão não substitui o §3.1, é o recorte
+do turno inteiro. Eventos sem caixa (login, usuários, estoque manual) não aparecem, porque a coluna é
+nula neles.
+
 ## 4. Como consultar
 
 ```http
@@ -269,7 +295,7 @@ Authorization: Bearer <token>        # exige audit.read
 | `entityId` | UUID do alvo; o par `entityType`+`entityId` é a consulta "histórico desta entidade" (§7.3) |
 | `actorUserId` | UUID de quem operou — "o que este operador fez" |
 | `action` | Uma ação do catálogo; em branco = sem filtro |
-| `cashSessionId` | Filtro por sessão de caixa — **ver a limitação na §5** |
+| `cashSessionId` | Sessão de caixa (turno): é o filtro que traz a abertura, as vendas, os pagamentos e o fechamento de um caixa de uma vez |
 | `from` | Início do período, **inclusivo**; ISO-8601 com offset (`2026-09-24T00:00:00Z`) |
 | `to` | Fim do período, **exclusivo**; ISO-8601 com offset |
 | `sort` | `occurredat` com `,asc`/`,desc` opcional; default `occurredat,desc` (mais recente primeiro). A ordem é `occurredAt` e o desempate por `id` na mesma direção |
@@ -290,7 +316,7 @@ Todos os filtros são opcionais e combináveis. `from`/`to` sem hora e offset (`
       "actorUserId": "0198...",
       "actorUsername": "maria.gerente",
       "authSessionId": "0198...",
-      "cashSessionId": null,
+      "cashSessionId": "0198...",
       "cashRegisterId": "0198...",
       "action": "SALE_DISCOUNT_APPLIED",
       "entityType": "SALE",
@@ -310,8 +336,9 @@ Todos os filtros são opcionais e combináveis. `from`/`to` sem hora e offset (`
 ```
 
 `occurredAt` vem em UTC; a conversão de fuso é da apresentação. Campo nulo é normal e esperado, não
-erro: `cashSessionId` vem sempre nulo no fluxo atual (§5); `actorUserId`, `actorUsername`,
-`authSessionId`, `storeId` e `cashRegisterId` ficam nulos no login que falhou (rota anônima); e
+erro: `cashSessionId` é nulo nas ações fora de um caixa (usuários, auth, estoque manual) e preenchido
+nas de caixa, venda e pagamento (passo 1006); `actorUserId`, `actorUsername`, `authSessionId`,
+`storeId` e `cashRegisterId` ficam nulos no login que falhou (rota anônima); e
 `entityType`/`entityId`/`reason` vêm nulos com `details` = `{}` nas ações sem alvo ou sem motivo (ex.:
 `ACCESS_DENIED`). Sempre leia o `action` antes de interpretar o resto.
 
@@ -333,23 +360,20 @@ erro: `cashSessionId` vem sempre nulo no fluxo atual (§5); `actorUserId`, `acto
 
 **Limitações conhecidas (registradas de propósito, não são bugs escondidos)**
 
-- **`audit_events.cash_session_id` não é preenchido pelo fluxo atual.** O `AuditRecorder` monta o
-  `NewAuditEvent` sem sessão de caixa (o campo nem existe no record de aplicação; a coluna fica nula).
-  Consequência prática: o filtro `cashSessionId` da consulta existe, mas **não encontra os eventos das
-  operações do fluxo** — só linhas gravadas fora dele (SQL manual, carga, teste). Para investigar por
-  caixa, use `details.cashRegisterId` (abertura), o `cashSessionId` em `details` (`SALE_CREATED`) e os
-  ids de sessão que aparecem nos eventos de venda — ou o caixa/sessão das rotas de caixa. Preencher a
-  coluna é trabalho futuro, fora do escopo do passo 1005.
 - **`ACCESS_DENIED` é gravado em transação própria** (`REQUIRES_NEW`): o 403 já derrubou a transação
   da operação, então o evento não comita junto com nada. É a única ação sem operação de
   negócio correspondente — e a falha ao gravá-la ainda derruba a requisição (§7.1).
 - **Replay de idempotência não audita de novo:** a segunda chamada com a mesma `Idempotency-Key`
   devolve a resposta armazenada e não gera evento.
-- **`ChangeOwnPasswordUseCase` revoga as demais sessões sem evento de auditoria:** a troca da própria
-  senha derruba as outras sessões com `revoked_reason = PASSWORD_CHANGED`, mas não chama o recorder
-  nem publica o evento de corte que gera `SESSION_REVOKED` — o rastro existe no estado da sessão
-  (`auth_sessions.revoked_reason`), não no log de auditoria. Lacuna observada na conferência deste
-  catálogo; resolver é passo futuro, não deste documento.
+- **`cash_session_id` só é preenchido nas ações que conhecem a sessão** (passo 1006): caixa
+  (`CASH_SESSION_OPENED`/`CLOSED`/`CASH_SUPPLY`/`CASH_WITHDRAWAL`), vendas e pagamentos. Usuários,
+  auth e estoque manual gravam a coluna nula de propósito — a sessão não é consultada por requisição
+  para "adivinhar" o turno. Para o rastro fora do turno, use `actorUserId`, `entityType`/`entityId` ou
+  o período.
+- **A troca da própria senha revoga as demais sessões sem `SESSION_REVOKED`:** o evento
+  `PASSWORD_CHANGED` grava a troca do usuário da sessão, mas o corte em massa do
+  `ChangeOwnPasswordUseCase` não publica o evento que gera `SESSION_REVOKED` — o rastro das sessões
+  derrubadas é `auth_sessions.revoked_reason = PASSWORD_CHANGED`, não uma linha do log.
 
 ## 6. Manutenção
 
@@ -389,10 +413,10 @@ A conferência é nos **dois sentidos**:
    Variável usada como ação (`LoginUseCase`) e emissores que não chamam o `record` diretamente
    (`AccessDeniedAuditRecorder`, chamado pelo observer) entram na conta manualmente.
 
-**Conferência de 2026-09-24 (passo 1005):** 38 chamadas de `auditRecorder.record(` e 38 valores de
-ação distintos — `LOGIN_FAILED`/`LOGIN_LOCKED` saem da mesma chamada de `LoginUseCase`, e
-`SESSION_REVOKED` tem dois emissores (`RevokeSessionUseCase` e `UserAccessChangedObserver`). As 38
-ações estão documentadas na §2, e nenhuma das 38 constantes `*_ACTION` do código ficou sem emissão
-(0 declaradas-sem-emissão, 0 emitidas-sem-documentação). O único ponto de gravação é o
-`AuditRecorder` → `AuditEventStore.insert` (`AuditEventRepository`): não há INSERT em
-`audit_events` fora desse caminho.
+**Conferência de 2026-09-24 (passos 1005/1006):** 39 chamadas de `auditRecorder.record(` e 39 valores
+de ação distintos — `LOGIN_FAILED`/`LOGIN_LOCKED` saem da mesma chamada de `LoginUseCase`,
+`SESSION_REVOKED` tem dois emissores (`RevokeSessionUseCase` e `UserAccessChangedObserver`) e
+`PASSWORD_CHANGED` (passo 1006) é a ação nova da troca de senha. As 39 ações estão documentadas na §2,
+e nenhuma das 39 constantes `*_ACTION` do código ficou sem emissão (0 declaradas-sem-emissão, 0
+emitidas-sem-documentação). O único ponto de gravação é o `AuditRecorder` → `AuditEventStore.insert`
+(`AuditEventRepository`): não há INSERT em `audit_events` fora desse caminho.

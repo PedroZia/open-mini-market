@@ -99,6 +99,9 @@ class AddSaleItemUseCaseTest {
     assertThat(event.action()).isEqualTo("SALE_ITEM_ADDED");
     assertThat(event.entityType()).isEqualTo("SALE");
     assertThat(event.entityId()).isEqualTo(SALE_ID);
+    assertThat(event.cashSessionId())
+        .as("a sessão de caixa da venda vai no evento (passo 1006)")
+        .isEqualTo(CASH_SESSION_ID);
     assertThat(event.reason()).isNull();
     assertThat(event.details())
         .containsEntry("productId", PRODUCT_ID)

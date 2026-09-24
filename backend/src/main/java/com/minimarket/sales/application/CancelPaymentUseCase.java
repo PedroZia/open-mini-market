@@ -98,7 +98,12 @@ public class CancelPaymentUseCase {
     sale.applyPaymentTotals(PaymentTotals.of(payments));
     saleStore.update(sale);
     auditRecorder.record(
-        PAYMENT_CANCELLED_ACTION, SALE_ENTITY_TYPE, sale.id(), null, details(payment, sale));
+        PAYMENT_CANCELLED_ACTION,
+        SALE_ENTITY_TYPE,
+        sale.id(),
+        null,
+        details(payment, sale),
+        sale.cashSessionId());
 
     return sale;
   }

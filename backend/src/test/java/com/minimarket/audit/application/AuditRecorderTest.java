@@ -85,7 +85,9 @@ class AuditRecorderTest extends IntegrationTestBase {
     assertThat(event.actorUsername()).isEqualTo(ACTOR);
     assertThat(event.authSessionId()).isEqualTo(actor.sessionId().toString());
     assertThat(event.cashRegisterId()).isEqualTo(actor.cashRegisterId().toString());
-    assertThat(event.cashSessionId()).as("sessão de caixa só nasce na Fase 6").isNull();
+    assertThat(event.cashSessionId())
+        .as("o overload sem sessão de caixa grava a coluna nula (passo 1006)")
+        .isNull();
     assertThat(event.source()).as("origem vem do cliente da sessão").isEqualTo("TUI");
     assertThat(event.requestId()).isEqualTo(actor.requestId());
     assertThat(event.reason()).isEqualTo("venda aberta no caixa");
@@ -96,6 +98,30 @@ class AuditRecorderTest extends IntegrationTestBase {
     assertThat(event.occurredAt().toInstant())
         .as("occurred_at preenchido pelo default now() do banco")
         .isBetween(before, Instant.now().plusSeconds(5));
+  }
+
+  @Test
+  @DisplayName("overload com a sessão de caixa grava cash_session_id no evento")
+  void recordsCashSessionIdFromTheOverload() throws SQLException {
+    UUID entityId = newEntityId();
+    UUID cashSessionId = UUID.randomUUID();
+
+    inRequestContext(
+        () -> {
+          fillContext(new Actor());
+          QuarkusTransaction.requiringNew()
+              .run(
+                  () ->
+                      recorder.record(
+                          "CASH_SESSION_OPENED",
+                          "CASH_SESSION",
+                          entityId,
+                          null,
+                          null,
+                          cashSessionId));
+        });
+
+    assertThat(eventOf(entityId).cashSessionId()).isEqualTo(cashSessionId.toString());
   }
 
   @Test

@@ -112,7 +112,12 @@ public class AddPaymentUseCase {
     sale.applyPaymentTotals(PaymentTotals.of(payments));
     saleStore.update(sale);
     auditRecorder.record(
-        PAYMENT_ADDED_ACTION, SALE_ENTITY_TYPE, sale.id(), null, details(payment, sale));
+        PAYMENT_ADDED_ACTION,
+        SALE_ENTITY_TYPE,
+        sale.id(),
+        null,
+        details(payment, sale),
+        sale.cashSessionId());
 
     return sale;
   }
