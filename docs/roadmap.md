@@ -671,7 +671,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 201; replay idempotente; 403 sem `sale.create`.
   **Commit:** `feat(sales): expoe abertura de venda`
 
-- [ ] **808 — Caso de uso `AddSaleItem`**
+- [x] **808 — Caso de uso `AddSaleItem`**
   **Objetivo:** bipe vira item. **Depende:** 802, 404
   **Implementar:** resolve produto por `barcode` **bruto** (GTIN, código interno ou etiqueta de balança — BR-14) ou por `productId`; recusa produto inativo (422 `PRODUCT_INACTIVE`); soma quantidade se o item já existe (regra definida: sim, soma); snapshot de preço; recalcula totais; auditoria `SALE_ITEM_ADDED`.
   **Testes/aceite:** adiciona item novo; soma item repetido; produto inexistente → 404; venda concluída → 409 `SALE_NOT_OPEN`.
