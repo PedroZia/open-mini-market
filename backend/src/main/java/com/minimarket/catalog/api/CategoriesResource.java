@@ -23,6 +23,9 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import java.util.List;
 import java.util.UUID;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 /**
  * Categorias (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a resposta — zero
@@ -67,6 +70,10 @@ public class CategoriesResource {
   @RequirePermission(Permission.CATEGORY_WRITE)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Categoria criada",
+      content = @Content(schema = @Schema(implementation = CategoryResponse.class)))
   public Response create(@Valid CategoryRequest request) {
     CategorySummary created =
         createCategoryUseCase.execute(request.name(), request.parentId(), sortOrderOf(request));

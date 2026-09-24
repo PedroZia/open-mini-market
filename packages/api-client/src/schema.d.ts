@@ -114,8 +114,8 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Created */
-                201: {
+                /** @description Sessão encerrada */
+                204: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -216,8 +216,8 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Created */
-                201: {
+                /** @description Senha alterada */
+                204: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -415,13 +415,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
+                /** @description Sessão de caixa fechada */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["CashSessionDetailResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -504,13 +504,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Sessão de caixa aberta */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["CashSessionResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -555,13 +555,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Suprimento registrado */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["CashMovementResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -606,13 +606,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Sangria registrada */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["CashMovementResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -749,13 +749,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Categoria criada */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["CategoryResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -889,13 +889,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Cliente criado */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["CustomerResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -1108,13 +1108,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Produto criado */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["ProductResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -1495,13 +1495,13 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Venda aberta */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["SaleResponse"];
                     };
                 };
             };
@@ -1591,13 +1591,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
+                /** @description Venda cancelada */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["SaleDetailResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -1638,13 +1638,13 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description OK */
+                /** @description Venda concluída */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["SaleDetailResponse"];
                     };
                 };
             };
@@ -1939,13 +1939,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Pagamento registrado */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["SaleDetailResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -2108,13 +2108,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Ajuste registrado */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["StockAdjustmentResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -2159,13 +2159,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Entrada de mercadoria registrada */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["StockReceiptResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -2232,13 +2232,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Usuário criado */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": unknown;
+                        "application/json": components["schemas"]["UserResponse"];
                     };
                 };
                 /** @description Bad Request */
@@ -2517,6 +2517,17 @@ export interface components {
             amount: number;
             reason: string;
         };
+        CashMovementResponse: {
+            sessionId?: components["schemas"]["UUID"];
+            type?: components["schemas"]["CashMovementType"];
+            amount?: number;
+            reason?: string;
+            expectedBefore?: number;
+            expectedAfter?: number;
+            aboveExpected?: boolean;
+        };
+        /** @enum {string} */
+        CashMovementType: "OPENING" | "SALE" | "WITHDRAWAL" | "SUPPLY";
         CashRegisterResponse: {
             id?: components["schemas"]["UUID"];
             code?: string;
@@ -2537,6 +2548,14 @@ export interface components {
             expectedAmount?: number;
             differenceAmount?: number;
             closingNotes?: string;
+        };
+        CashSessionResponse: {
+            id?: components["schemas"]["UUID"];
+            cashRegisterId?: components["schemas"]["UUID"];
+            status?: components["schemas"]["CashSessionStatus"];
+            openedAt?: components["schemas"]["Instant"];
+            openedByUserId?: components["schemas"]["UUID"];
+            openingAmount?: number;
         };
         /** @enum {string} */
         CashSessionStatus: "OPEN" | "CLOSED";
@@ -2851,6 +2870,21 @@ export interface components {
             amount: number;
             tenderedAmount?: number;
         };
+        SaleResponse: {
+            id?: components["schemas"]["UUID"];
+            /** Format: int64 */
+            number?: number;
+            status?: components["schemas"]["SaleStatus"];
+            cashSessionId?: components["schemas"]["UUID"];
+            cashRegisterId?: components["schemas"]["UUID"];
+            operatorUserId?: components["schemas"]["UUID"];
+            subtotal?: number;
+            discountAmount?: number;
+            total?: number;
+            /** Format: int32 */
+            itemCount?: number;
+            createdAt?: components["schemas"]["Instant"];
+        };
         /** @enum {string} */
         SaleStatus: "OPEN" | "COMPLETED" | "CANCELLED";
         SaleSummaryResponse: {
@@ -2875,6 +2909,13 @@ export interface components {
         StockAdjustmentRequest: {
             quantityDelta: number;
             reason: string;
+        };
+        StockAdjustmentResponse: {
+            movementId?: components["schemas"]["UUID"];
+            productId?: components["schemas"]["UUID"];
+            quantityDelta?: number;
+            balanceBefore?: number;
+            balanceAfter?: number;
         };
         StockDetailResponse: {
             productId?: components["schemas"]["UUID"];
@@ -2913,6 +2954,14 @@ export interface components {
             quantity: number;
             unitCost?: number;
             reason?: string;
+        };
+        StockReceiptResponse: {
+            movementId?: components["schemas"]["UUID"];
+            productId?: components["schemas"]["UUID"];
+            quantity?: number;
+            unitCost?: number;
+            balanceBefore?: number;
+            balanceAfter?: number;
         };
         StoreRef: {
             code?: string;

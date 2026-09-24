@@ -34,6 +34,7 @@ import jakarta.ws.rs.core.MediaType;
 import java.net.InetAddress;
 import java.util.List;
 import java.util.UUID;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 /**
  * Login, sessão atual e sessões do PDV (§9.3 do plano). A API valida forma, delega ao caso de uso e
@@ -121,6 +122,7 @@ public class AuthResource {
   @POST
   @Path("/logout")
   @Authenticated
+  @APIResponse(responseCode = "204", description = "Sessão encerrada")
   public void logout() {
     logoutUseCase.execute(currentSessionId());
   }
@@ -170,6 +172,7 @@ public class AuthResource {
   @Path("/password")
   @Authenticated
   @Consumes(MediaType.APPLICATION_JSON)
+  @APIResponse(responseCode = "204", description = "Senha alterada")
   public void changePassword(@Valid ChangePasswordRequest request) {
     if (request == null) {
       // Sem corpo o leitor entrega null: é erro de forma (400), não erro interno.

@@ -889,6 +889,12 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes com servidor fake: sucesso, 401, 409 com `code`, timeout, retry de GET e **não** retry de POST.
   **Commit:** `feat(tui): adiciona client de API tipado`
 
+- [x] **1102b — Respostas no OpenAPI: DTO real nas rotas que devolvem `Response`**
+  **Objetivo:** o `packages/api-client/src/schema.d.ts` deixa de sair `unknown` nos corpos das rotas cujo método devolve `jakarta.ws.rs.core.Response` (o scanner do OpenAPI não infere o corpo). Veio da **PERGUNTA 1 da onda 3** — hardening do contrato, sem mudança de comportamento. **Depende:** 1102
+  **Implementar:** `@APIResponse` do MicroProfile OpenAPI (`responseCode`, `description` e `content = @Content(schema = @Schema(implementation = …))`; o `mediaType` do corpo sai do `@Produces` do método) nas 14 rotas, com o status e o DTO que o código realmente responde: `CustomersResource.create` (201 `CustomerResponse`), `CategoriesResource.create` (201 `CategoryResponse`), `ProductsResource.create` (201 `ProductResponse`), `UsersResource.create` (201 `UserResponse`), `CashRegistersResource.open` (201 `CashSessionResponse`), `close` (200 `CashSessionDetailResponse`), `withdraw`/`supply` (201 `CashMovementResponse`), `StockResource.adjust` (201 `StockAdjustmentResponse`), `receive` (201 `StockReceiptResponse`), `SalesResource.create` (201 `SaleResponse`), `cancel` (200 `SaleDetailResponse`), `addPayment` (201 `SaleDetailResponse`) e `complete` (200 `SaleDetailResponse`); corrige também o status documentado de `AuthResource.logout` e `changePassword`, que respondem 204 e o scanner documentava como 201; regenerar `packages/api-client/src/schema.d.ts` a partir do `/q/openapi` do dev mode (8081). **Sem** mudança de comportamento: nenhum status, DTO, validação ou corpo de resposta muda.
+  **Testes/aceite:** `./mvnw verify` verde (nenhum teste de API muda); o `schema.d.ts` regenerado traz os 14 corpos com o DTO no lugar de `unknown` e os 2 status 204; `npm test` + `tsc --noEmit` verdes no `packages/api-client` e na raiz.
+  **Commit:** `docs(shared): documenta as respostas dos endpoints no OpenAPI`
+
 - [x] **1103 — Núcleo da TUI: máquina de estados**
   **Objetivo:** lógica pura e testável. **Depende:** 1101
   **Implementar:** `core/state.ts` (união discriminada: `Login`, `OpeningCash`, `SaleOpen`, `Paying`, `ClosingCash`, `Error`) + `core/reducer.ts` (transições puras a partir de ações: bipe, tecla, resposta da API).

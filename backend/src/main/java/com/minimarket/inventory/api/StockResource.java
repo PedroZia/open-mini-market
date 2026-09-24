@@ -36,6 +36,9 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import java.net.URI;
 import java.util.UUID;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 /**
  * Estoque (§9.3 do plano): leitura dos saldos com busca, filtro de estoque baixo e paginação (passo
@@ -143,6 +146,10 @@ public class StockResource {
   @RequirePermission(Permission.STOCK_ADJUST)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Ajuste registrado",
+      content = @Content(schema = @Schema(implementation = StockAdjustmentResponse.class)))
   public Response adjust(
       @PathParam("productId") UUID productId,
       @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
@@ -181,6 +188,10 @@ public class StockResource {
   @RequirePermission(Permission.STOCK_RECEIVE)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Entrada de mercadoria registrada",
+      content = @Content(schema = @Schema(implementation = StockReceiptResponse.class)))
   public Response receive(
       @PathParam("productId") UUID productId,
       @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,

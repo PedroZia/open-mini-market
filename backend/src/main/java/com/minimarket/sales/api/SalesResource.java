@@ -61,6 +61,9 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.UUID;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 /**
  * Vendas (§9.3 do plano): a abertura da venda pela API/TUI (passo 807) e as operações de item —
@@ -219,6 +222,10 @@ public class SalesResource {
   @POST
   @RequirePermission(Permission.SALE_CREATE)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Venda aberta",
+      content = @Content(schema = @Schema(implementation = SaleResponse.class)))
   public Response create(@HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey) {
     return idempotencyGuard.execute(idempotencyKey, HttpMethod.POST, PATH, null, this::openSale);
   }
@@ -424,6 +431,10 @@ public class SalesResource {
   @RequirePermission(Permission.SALE_CANCEL)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "200",
+      description = "Venda cancelada",
+      content = @Content(schema = @Schema(implementation = SaleDetailResponse.class)))
   public Response cancel(
       @PathParam("id") UUID id,
       @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
@@ -468,6 +479,10 @@ public class SalesResource {
   @RequirePermission(Permission.PAYMENT_ADD)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Pagamento registrado",
+      content = @Content(schema = @Schema(implementation = SaleDetailResponse.class)))
   public Response addPayment(
       @PathParam("id") UUID id,
       @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
@@ -550,6 +565,10 @@ public class SalesResource {
   @Path("/{id}/complete")
   @RequirePermission(Permission.SALE_COMPLETE)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "200",
+      description = "Venda concluída",
+      content = @Content(schema = @Schema(implementation = SaleDetailResponse.class)))
   public Response complete(
       @PathParam("id") UUID id, @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey) {
     return idempotencyGuard.execute(

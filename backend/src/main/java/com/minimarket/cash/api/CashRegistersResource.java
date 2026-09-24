@@ -35,6 +35,9 @@ import jakarta.ws.rs.core.UriInfo;
 import java.net.URI;
 import java.util.List;
 import java.util.UUID;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 /**
  * Caixas físicos (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a resposta —
@@ -107,6 +110,10 @@ public class CashRegistersResource {
   @RequirePermission(Permission.CASH_OPEN)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Sessão de caixa aberta",
+      content = @Content(schema = @Schema(implementation = CashSessionResponse.class)))
   public Response open(
       @PathParam("id") UUID id,
       @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
@@ -133,6 +140,10 @@ public class CashRegistersResource {
   @RequirePermission(Permission.CASH_CLOSE)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "200",
+      description = "Sessão de caixa fechada",
+      content = @Content(schema = @Schema(implementation = CashSessionDetailResponse.class)))
   public Response close(
       @PathParam("id") UUID id,
       @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
@@ -178,6 +189,10 @@ public class CashRegistersResource {
   @RequirePermission(Permission.CASH_WITHDRAWAL)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Sangria registrada",
+      content = @Content(schema = @Schema(implementation = CashMovementResponse.class)))
   public Response withdraw(
       @PathParam("id") UUID id,
       @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
@@ -206,6 +221,10 @@ public class CashRegistersResource {
   @RequirePermission(Permission.CASH_SUPPLY)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Suprimento registrado",
+      content = @Content(schema = @Schema(implementation = CashMovementResponse.class)))
   public Response supply(
       @PathParam("id") UUID id,
       @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,

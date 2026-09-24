@@ -38,6 +38,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import java.util.UUID;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 /**
  * Produtos (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a resposta — zero
@@ -86,6 +89,10 @@ public class ProductsResource {
   @RequirePermission(Permission.PRODUCT_WRITE)
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Produto criado",
+      content = @Content(schema = @Schema(implementation = ProductResponse.class)))
   public Response create(@Valid CreateProductRequest request) {
     ProductSummary created =
         createProductUseCase
