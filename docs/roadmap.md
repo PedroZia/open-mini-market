@@ -607,7 +607,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** saldo correto após movimentos; filtro de estoque baixo funciona.
   **Commit:** `feat(inventory): consulta saldos e movimentos`
 
-- [ ] **705 — Ajuste manual de estoque**
+- [x] **705 — Ajuste manual de estoque**
   **Objetivo:** corrigir divergência com rastro. **Depende:** 703
   **Implementar:** `POST /stock/{productId}/adjustments` `{quantityDelta, reason}`; permissão `stock.adjust`; motivo obrigatório; auditoria `STOCK_ADJUSTED` com saldo antes/depois.
   **Testes/aceite:** ajuste positivo/negativo grava movimento e auditoria; OPERADOR → 403; motivo vazio → 400.
