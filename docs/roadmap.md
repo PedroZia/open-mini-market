@@ -321,7 +321,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitário com identidade fake: permissão presente passa, ausente lança 403.
   **Commit:** `feat(auth): adiciona verificacao de permissoes`
 
-- [ ] **306 — `@RequirePermission`**
+- [x] **306 — `@RequirePermission`**
   **Objetivo:** porteiro declarativo nos endpoints. **Depende:** 305
   **Implementar:** anotação + interceptor CDI aplicado a resources; sem anotação e sem `@Authenticated` → acesso negado por padrão.
   **Testes/aceite:** endpoint anotado responde 403 para quem não tem permissão e 200 para quem tem.
