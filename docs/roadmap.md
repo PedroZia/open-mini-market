@@ -647,7 +647,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** round-trip agregado→banco→agregado preserva totais e itens; busca por período/status.
   **Commit:** `feat(sales): adiciona persistencia de vendas`
 
-- [ ] **804 — Alocador de número da venda**
+- [x] **804 — Alocador de número da venda**
   **Objetivo:** número sequencial por loja. **Depende:** 801
   **Implementar:** `SaleNumberAllocator` usando `document_sequences` com `UPDATE ... RETURNING next_value`; inicialização automática da linha.
   **Testes/aceite:** 50 alocações concorrentes → 50 números únicos e sem buraco (teste com threads).
