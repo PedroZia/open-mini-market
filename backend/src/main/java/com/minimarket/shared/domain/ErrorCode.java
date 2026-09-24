@@ -25,6 +25,7 @@ public enum ErrorCode {
   USERNAME_ALREADY_EXISTS(409, "Username já está em uso"),
   CATEGORY_NAME_ALREADY_EXISTS(409, "Nome de categoria já está em uso"),
   BARCODE_ALREADY_EXISTS(409, "Código de barras já está em uso"),
+  TAX_ID_ALREADY_EXISTS(409, "CPF já está em uso"),
   CONCURRENT_MODIFICATION(409, "Modificação concorrente"),
   BUSINESS_ERROR(422, "Regra de negócio violada"),
   ACCOUNT_LOCKED(423, "Conta bloqueada"),

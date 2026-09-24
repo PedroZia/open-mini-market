@@ -467,10 +467,16 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** migration aplica; CPF duplicado ativo falha.
   **Commit:** `feat(customers): cria tabela de clientes`
 
-- [ ] **502 — Cliente: repositório + CRUD**
-  **Objetivo:** manter clientes. **Depende:** 501
-  **Implementar:** entidade + repo (`search` por nome/CPF/telefone) + `GET/POST/PUT /api/v1/customers` + disable; permissões `customer.read`/`customer.write`.
-  **Testes/aceite:** CRUD na API; busca por nome parcial e por CPF; validação de CPF (dígitos verificadores) rejeitando inválido; auditoria registrada.
+- [x] **502a — Cliente: entidade, repositório e validação de CPF**
+  **Objetivo:** persistir clientes. **Depende:** 501
+  **Implementar:** `CustomerEntity` em `customers/infrastructure`, porta `CustomerStore` em `customers/application`, `CustomerRepository` (insert com UUIDv7 e loja resolvida pelo caso de uso, `findById`, `search` por nome/CPF/telefone com paginação, `update`, `disable` com soft delete, checagem de tax_id duplicado entre vivos); validação de CPF (normalização para dígitos + 2 dígitos verificadores) em `customers/application`; violação 23505 do `ux_customers_tax_id` traduzida para `ConflictException(TAX_ID_ALREADY_EXISTS)`. Passo dividido do 502 original (diff estimado acima de ~300 linhas); o restante é o 502b.
+  **Testes/aceite:** integração do repositório (busca por nome parcial, CPF e telefone; CPF duplicado ativo falha; soft delete libera o tax_id) + unitário do validador de CPF.
+  **Commit:** `feat(customers): adiciona entidade e repositorio de clientes`
+
+- [ ] **502b — Cliente: casos de uso e CRUD na API**
+  **Objetivo:** manter clientes pela API. **Depende:** 502a
+  **Implementar:** casos de uso (listar/buscar, criar, detalhar, atualizar, desativar) + `GET/POST /api/v1/customers`, `GET/PUT /api/v1/customers/{id}` e `POST /api/v1/customers/{id}/disable` com `customer.read`/`customer.write`; `CUSTOMER_NOT_FOUND`; auditoria `CUSTOMER_CREATED`/`CUSTOMER_UPDATED`/`CUSTOMER_DISABLED`; rotas novas na lista `API_ROUTES` do `RouteSecurityTest`.
+  **Testes/aceite:** CRUD na API; busca por nome parcial e por CPF; CPF inválido rejeitado; CPF duplicado → 409; auditoria registrada; OPERADOR escreve (a matriz de clientes dá `customer.write` ao operador).
   **Commit:** `feat(customers): adiciona cadastro e busca de clientes`
 
 ---
