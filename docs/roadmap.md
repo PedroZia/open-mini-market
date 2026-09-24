@@ -379,7 +379,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes de integração de cada método; nome duplicado na mesma loja falha.
   **Commit:** `feat(catalog): adiciona entidade e repositorio de categorias`
 
-- [ ] **402b — Categoria: casos de uso e CRUD na API**
+- [x] **402b — Categoria: casos de uso e CRUD na API**
   **Objetivo:** manter categorias. **Depende:** 402a, 306
   **Implementar:** casos de uso (listar, criar, atualizar, desativar) + `GET/POST/PUT/DELETE /api/v1/categories` (delete = desativar) com `product.read`/`category.write`; `CATEGORY_NOT_FOUND`; rotas novas na lista `API_ROUTES` do `RouteSecurityTest`.
   **Testes/aceite:** CRUD completo na API; 403 para OPERADOR escrevendo; 409 nome duplicado.

@@ -18,6 +18,7 @@ public enum ErrorCode {
   NOT_FOUND(404, "Recurso não encontrado"),
   USER_NOT_FOUND(404, "Usuário não encontrado"),
   ROLE_NOT_FOUND(404, "Papel não encontrado"),
+  CATEGORY_NOT_FOUND(404, "Categoria não encontrada"),
   METHOD_NOT_ALLOWED(405, "Método não permitido"),
   CONFLICT(409, "Conflito de estado"),
   USERNAME_ALREADY_EXISTS(409, "Username já está em uso"),
