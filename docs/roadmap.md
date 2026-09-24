@@ -489,7 +489,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** existe 1 caixa ativo com código `CAIXA-01`.
   **Commit:** `feat(cash): cria tabela de caixas e seed do caixa 1`
 
-- [ ] **602 — API `GET /api/v1/cash-registers`**
+- [x] **602 — API `GET /api/v1/cash-registers`**
   **Objetivo:** TUI escolhe o caixa no login. **Depende:** 601
   **Implementar:** lista de caixas ativos com status atual (aberto/fechado) e operador; permissão `cash.read`.
   **Testes/aceite:** 200 com status correto após abrir/fechar (teste preparado para fase seguinte).
