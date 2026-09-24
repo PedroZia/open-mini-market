@@ -355,18 +355,16 @@ class SaleConcurrencyTest extends IntegrationTestBase {
     try (Connection connection = dataSource.getConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select line_number, product_id, quantity, unit_price, line_total"
-                    + " from sale_items where sale_id = ? order by line_number")) {
+                "select product_id, quantity, line_total from sale_items"
+                    + " where sale_id = ? order by line_number")) {
       statement.setObject(1, saleId);
       try (ResultSet resultSet = statement.executeQuery()) {
         List<ItemRow> rows = new ArrayList<>();
         while (resultSet.next()) {
           rows.add(
               new ItemRow(
-                  resultSet.getInt("line_number"),
                   resultSet.getObject("product_id", UUID.class),
                   resultSet.getBigDecimal("quantity"),
-                  resultSet.getBigDecimal("unit_price"),
                   resultSet.getBigDecimal("line_total")));
         }
         return rows;
@@ -473,13 +471,8 @@ class SaleConcurrencyTest extends IntegrationTestBase {
     return storeId;
   }
 
-  /** Linha de {@code sale_items} como o banco a guardou. */
-  private record ItemRow(
-      int lineNumber,
-      UUID productId,
-      BigDecimal quantity,
-      BigDecimal unitPrice,
-      BigDecimal lineTotal) {}
+  /** Linha de {@code sale_items} reduzida ao que as invariantes conferem. */
+  private record ItemRow(UUID productId, BigDecimal quantity, BigDecimal lineTotal) {}
 
   /** Cabeçalho de {@code sales} como o banco o guardou. */
   private record SaleRow(BigDecimal subtotal, BigDecimal total, int itemCount, long version) {}
