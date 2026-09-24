@@ -507,7 +507,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de integração das operações; `lockById` bloqueia concorrente (teste com duas threads).
   **Commit:** `feat(cash): adiciona repositorios de sessao e movimentos`
 
-- [ ] **605 — Domínio `CashSession`**
+- [x] **605 — Domínio `CashSession`**
   **Objetivo:** regras de caixa em código puro. **Depende:** 604
   **Implementar:** objeto de domínio com: `expectedAmount` (abertura + suprimentos + entradas − sangrias − saídas), validações (valor > 0, motivo obrigatório em sangria/suprimento, não fechar sessão já fechada) + testes unitários puros.
   **Testes/aceite:** 6+ testes unitários de cálculo e invariantes, sem Quarkus.
