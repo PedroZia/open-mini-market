@@ -71,6 +71,13 @@ public interface ProductStore {
   Optional<ProductSummary> updatePrice(UUID id, BigDecimal price);
 
   /**
+   * Grava o custo do produto não deletado (passo 706) — preço de venda, cadastro, barcode e status
+   * não passam por aqui. Id desconhecido ou soft-deletado é no-op: o 404 é do caso de uso, que já
+   * conferiu o produto vivo antes.
+   */
+  void updateCostPrice(UUID id, BigDecimal costPrice);
+
+  /**
    * Soft delete: grava {@code deleted_at} e nada mais (o {@code active} é regra do caso de uso de
    * desativar/reativar) e libera o barcode para outro produto, como no índice único parcial. Id
    * desconhecido é no-op.

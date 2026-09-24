@@ -26,8 +26,8 @@ import org.hibernate.exception.ConstraintViolationException;
  *
  * <p>{@link #findById} devolve também produto soft-deletado — quem decide o que fazer com {@code
  * deletedAt} é o caso de uso (o passo 412 precisa reativar o registro); {@link #findByBarcode},
- * {@link #search}, {@link #update}, {@link #updatePrice} e {@link #existsActiveBarcode} sempre
- * ignoram deletados.
+ * {@link #search}, {@link #update}, {@link #updatePrice}, {@link #updateCostPrice} e {@link
+ * #existsActiveBarcode} sempre ignoram deletados.
  *
  * <p>Implementa a porta {@link ProductStore}: é por ela que {@code application} grava produto sem
  * tocar em JPA.
@@ -139,6 +139,25 @@ public class ProductRepository implements ProductStore {
               product.updatePrice(price);
               flushTranslatingConflicts();
               return toSummary(product);
+            });
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>O flush antecipado, como no {@link #updatePrice}, deixa o {@code version} novo visível e é o
+   * backstop do lock otimista: se outra requisição gravar o produto entre a leitura do caso de uso
+   * e este flush, o {@code update ... where version = ?} com a versão velha não acha a linha e o
+   * Hibernate sinaliza o stale — traduzido para {@link ConflictException}, nunca 500.
+   */
+  @Override
+  public void updateCostPrice(UUID id, BigDecimal costPrice) {
+    findEntityById(id)
+        .filter(product -> product.getDeletedAt() == null)
+        .ifPresent(
+            product -> {
+              product.updateCostPrice(costPrice);
+              flushTranslatingConflicts();
             });
   }
 

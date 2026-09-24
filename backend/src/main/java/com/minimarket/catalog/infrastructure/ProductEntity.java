@@ -16,8 +16,7 @@ import java.util.UUID;
  * chega pronto do {@link ProductRepository} e os valores são gravados como vieram — quem valida
  * forma é o caso de uso. A entidade não sai do módulo — nada de JPA em JSON.
  *
- * <p>Só as colunas usadas hoje: {@code sku} e {@code cost_price} ficam sem mapeamento até existir
- * caso de uso que as leia.
+ * <p>Só as colunas usadas hoje: {@code sku} fica sem mapeamento até existir caso de uso que o leia.
  */
 @Entity
 @Table(name = "products")
@@ -47,6 +46,10 @@ public class ProductEntity {
 
   @Column(name = "price")
   private BigDecimal price;
+
+  /** Custo de compra; nulo enquanto nenhuma entrada informou custo (passo 706 escreve). */
+  @Column(name = "cost_price")
+  private BigDecimal costPrice;
 
   /** Ponto de reposição; nulo quando o produto não controla mínimo (passo 410 edita). */
   @Column(name = "min_quantity")
@@ -121,6 +124,11 @@ public class ProductEntity {
   /** Preço novo do passo 411; cadastro, barcode e status não mudam por aqui. */
   void updatePrice(BigDecimal price) {
     this.price = price;
+  }
+
+  /** Custo novo do passo 706; preço de venda, cadastro, barcode e status não mudam por aqui. */
+  void updateCostPrice(BigDecimal costPrice) {
+    this.costPrice = costPrice;
   }
 
   void markDeleted(Instant deletedAt) {

@@ -198,6 +198,11 @@ class ChangeProductPriceUseCaseTest {
       return Optional.of(stored);
     }
 
+    @Override
+    public void updateCostPrice(UUID id, BigDecimal costPrice) {
+      throw new UnsupportedOperationException("updateCostPrice não é usado por ChangeProductPrice");
+    }
+
     /** O updatePrice do "banco" do dublê: troca o preço e avança a versão. */
     private static ProductSummary withPrice(ProductSummary product, BigDecimal price) {
       return new ProductSummary(

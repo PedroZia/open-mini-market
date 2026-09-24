@@ -613,7 +613,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** ajuste positivo/negativo grava movimento e auditoria; OPERADOR → 403; motivo vazio → 400.
   **Commit:** `feat(inventory): permite ajuste manual de estoque`
 
-- [ ] **706 — Entrada de mercadoria**
+- [x] **706 — Entrada de mercadoria**
   **Objetivo:** repor estoque com custo. **Depende:** 705
   **Implementar:** `POST /stock/{productId}/receipts` `{quantity, unitCost, reason}` → movimento `PURCHASE_IN`, atualização opcional de `cost_price`; permissão `stock.receive`; auditoria.
   **Testes/aceite:** saldo sobe; custo atualizado quando informado; auditoria registrada.

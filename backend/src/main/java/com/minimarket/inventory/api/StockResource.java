@@ -3,8 +3,11 @@ package com.minimarket.inventory.api;
 import com.minimarket.inventory.application.AdjustStockCommand;
 import com.minimarket.inventory.application.AdjustStockUseCase;
 import com.minimarket.inventory.application.AppliedStockAdjustment;
+import com.minimarket.inventory.application.AppliedStockReceipt;
 import com.minimarket.inventory.application.GetStockUseCase;
 import com.minimarket.inventory.application.ListStockUseCase;
+import com.minimarket.inventory.application.RegisterStockReceiptCommand;
+import com.minimarket.inventory.application.RegisterStockReceiptUseCase;
 import com.minimarket.inventory.application.StockDetail;
 import com.minimarket.inventory.application.StockItemSummary;
 import com.minimarket.inventory.application.StockMovementSummary;
@@ -35,14 +38,14 @@ import java.util.UUID;
 
 /**
  * Estoque (§9.3 do plano): leitura dos saldos com busca, filtro de estoque baixo e paginação (passo
- * 704) e o ajuste manual (passo 705). A API valida forma, delega ao caso de uso e mapeia a resposta
- * — zero regra de negócio aqui; o recebimento de mercadoria é do passo 706.
+ * 704), o ajuste manual (passo 705) e a entrada de mercadoria (passo 706). A API valida forma,
+ * delega ao caso de uso e mapeia a resposta — zero regra de negócio aqui.
  *
- * <p>A leitura exige {@code stock.read} e o ajuste {@code stock.adjust}: sem a permissão o
- * interceptor do {@code RequirePermission} responde 403 {@code ACCESS_DENIED} antes de o corpo do
- * método rodar. O detalhe de id desconhecido, de produto soft-deletado ou desativado responde 404
- * {@code PRODUCT_NOT_FOUND}; a listagem devolve o envelope {@link PageResponse} e produto sem
- * movimento aparece com saldo zero.
+ * <p>A leitura exige {@code stock.read}, o ajuste {@code stock.adjust} e o recebimento {@code
+ * stock.receive}: sem a permissão o interceptor do {@code RequirePermission} responde 403 {@code
+ * ACCESS_DENIED} antes de o corpo do método rodar. O detalhe de id desconhecido, de produto
+ * soft-deletado ou desativado responde 404 {@code PRODUCT_NOT_FOUND}; a listagem devolve o envelope
+ * {@link PageResponse} e produto sem movimento aparece com saldo zero.
  */
 @Path(StockResource.PATH)
 public class StockResource {
@@ -56,6 +59,9 @@ public class StockResource {
 
   /** Ajuste manual de estoque (passo 705): a rota que o expõe nasce neste passo. */
   @Inject AdjustStockUseCase adjustStockUseCase;
+
+  /** Entrada de mercadoria (passo 706): a rota que a expõe nasce neste passo. */
+  @Inject RegisterStockReceiptUseCase registerStockReceiptUseCase;
 
   /** Idempotência da operação de estoque (§8, passo 607a). */
   @Inject IdempotencyGuard idempotencyGuard;
@@ -148,6 +154,55 @@ public class StockResource {
         .build();
   }
 
+  /**
+   * Entrada de mercadoria (passo 706): repõe o saldo com o movimento {@code PURCHASE_IN} e, quando
+   * o custo unitário vem informado, atualiza o {@code cost_price} do produto; devolve 201 com o
+   * movimento gravado. Exige {@code stock.receive} — sem a permissão o interceptor responde 403
+   * {@code ACCESS_DENIED} antes de o corpo do método rodar — e é operação de estoque idempotente
+   * por contrato (§8, BR-13): o {@link IdempotencyGuard} exige o header {@code Idempotency-Key}
+   * (sem ele, 400 {@code IDEMPOTENCY_KEY_REQUIRED}) e o retry com a mesma chave devolve a resposta
+   * gravada com {@code Idempotency-Replayed: true}, sem dar entrada de novo.
+   *
+   * <p>A forma é validada antes ({@code quantity} ausente → 400; quantidade não positiva ou custo
+   * negativo → 400 {@code VALIDATION_ERROR} do caso de uso); produto inexistente ou soft-deletado é
+   * 404 {@code PRODUCT_NOT_FOUND}. O {@code Location} aponta para o detalhe do estoque (rota do
+   * passo 704), onde o efeito é visível.
+   */
+  @POST
+  @Path("/{productId}/receipts")
+  @RequirePermission(Permission.STOCK_RECEIVE)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response receive(
+      @PathParam("productId") UUID productId,
+      @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
+      @Valid StockReceiptRequest request) {
+    return idempotencyGuard.execute(
+        idempotencyKey,
+        HttpMethod.POST,
+        receiptPath(productId),
+        request,
+        () -> receiptCreated(productId, receiveStock(productId, request)));
+  }
+
+  /** Ação idempotente: dá entrada com o ator da requisição e monta o 201 com o {@code Location}. */
+  private Response receiptCreated(UUID productId, AppliedStockReceipt receipt) {
+    return Response.created(stockDetailLocation(productId))
+        .entity(toReceiptResponse(receipt))
+        .build();
+  }
+
+  /** Dá entrada com o ator da requisição: quantidade, custo e motivo vêm do corpo validado. */
+  private AppliedStockReceipt receiveStock(UUID productId, StockReceiptRequest request) {
+    return registerStockReceiptUseCase.execute(
+        new RegisterStockReceiptCommand(
+            productId,
+            request.quantity(),
+            request.unitCost(),
+            request.reason(),
+            operationContext.userId()));
+  }
+
   /** Ajusta com o ator da requisição: o delta e o motivo vêm do corpo validado. */
   private AppliedStockAdjustment adjustStock(UUID productId, StockAdjustmentRequest request) {
     return adjustStockUseCase.execute(
@@ -160,10 +215,15 @@ public class StockResource {
     return PATH + "/" + productId + "/adjustments";
   }
 
+  /** O caminho concreto da requisição: é ele que a chave de idempotência identifica (§8). */
+  private static String receiptPath(UUID productId) {
+    return PATH + "/" + productId + "/receipts";
+  }
+
   /**
-   * Onde o cliente lê o efeito do ajuste: o detalhe do estoque do produto (rota do passo 704), não
-   * a rota do ajuste. O replay não regrava o {@code Location} — o corpo com o id é o que o cliente
-   * precisa.
+   * Onde o cliente lê o efeito da operação de estoque: o detalhe do estoque do produto (rota do
+   * passo 704), não a rota do ajuste nem a da entrada. O replay não regrava o {@code Location} — o
+   * corpo com o id é o que o cliente precisa.
    */
   private URI stockDetailLocation(UUID productId) {
     return uriInfo.getBaseUriBuilder().path(PATH).path(productId.toString()).build();
@@ -176,6 +236,16 @@ public class StockResource {
         adjustment.quantityDelta(),
         adjustment.balanceBefore(),
         adjustment.balanceAfter());
+  }
+
+  private static StockReceiptResponse toReceiptResponse(AppliedStockReceipt receipt) {
+    return new StockReceiptResponse(
+        receipt.movementId(),
+        receipt.productId(),
+        receipt.quantity(),
+        receipt.unitCost(),
+        receipt.balanceBefore(),
+        receipt.balanceAfter());
   }
 
   private static StockItemResponse toItemResponse(StockItemSummary item) {
