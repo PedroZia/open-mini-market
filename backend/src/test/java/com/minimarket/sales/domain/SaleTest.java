@@ -246,6 +246,58 @@ class SaleTest {
   }
 
   @Test
+  @DisplayName("removeDiscount zera o desconto e o total volta ao subtotal (BR-02/BR-03)")
+  void removeDiscountRestoresSubtotal() {
+    Sale sale = openSale();
+    sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("25.00"), new BigDecimal("2"));
+    sale.applyDiscount(DiscountType.PERCENT, new BigDecimal("10"), "cliente fidelidade");
+
+    sale.removeDiscount();
+
+    assertThat(sale.discountType()).as("tipo, valor e motivo voltam a nulo").isNull();
+    assertThat(sale.discountValue()).isNull();
+    assertThat(sale.discountReason()).isNull();
+    assertThat(sale.discountAmount()).isEqualTo(new BigDecimal("0.00"));
+    assertThat(sale.subtotal())
+        .as("o subtotal não muda: depende só dos itens")
+        .isEqualTo(new BigDecimal("50.00"));
+    assertThat(sale.total())
+        .as("sem desconto o total é o subtotal")
+        .isEqualTo(new BigDecimal("50.00"));
+  }
+
+  @Test
+  @DisplayName("removeDiscount em venda sem desconto é no-op de estado")
+  void removeDiscountWithoutDiscountChangesNothing() {
+    Sale sale = openSale();
+    sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("25.00"), new BigDecimal("2"));
+
+    sale.removeDiscount();
+
+    assertThat(sale.discountType()).isNull();
+    assertThat(sale.discountAmount()).isEqualTo(new BigDecimal("0.00"));
+    assertThat(sale.total()).isEqualTo(new BigDecimal("50.00"));
+    assertThat(sale.itemCount()).isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("venda concluída não aceita removeDiscount (BR-07)")
+  void rejectsRemoveDiscountAfterCompletion() {
+    Sale sale = openSale();
+    sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("10.00"), BigDecimal.ONE);
+    sale.applyDiscount(DiscountType.VALUE, new BigDecimal("1.00"), "cortesia");
+    sale.complete(Instant.parse("2026-09-24T12:30:00Z"));
+
+    assertBusinessError(sale::removeDiscount, "não aceita alteração");
+
+    assertThat(sale.discountType())
+        .as("o desconto da venda concluída fica onde está")
+        .isEqualTo(DiscountType.VALUE);
+    assertThat(sale.discountAmount()).isEqualTo(new BigDecimal("1.00"));
+    assertThat(sale.total()).isEqualTo(new BigDecimal("9.00"));
+  }
+
+  @Test
   @DisplayName("recalculate é idempotente")
   void recalculateIsIdempotent() {
     Sale sale = openSale();

@@ -42,6 +42,7 @@ public enum ErrorCode {
   BUSINESS_ERROR(422, "Regra de negócio violada"),
   INSUFFICIENT_STOCK(422, "Estoque insuficiente"),
   PRODUCT_INACTIVE(422, "Produto inativo"),
+  DISCOUNT_LIMIT_EXCEEDED(422, "Desconto acima do limite da loja"),
   ACCOUNT_LOCKED(423, "Conta bloqueada"),
   IF_MATCH_REQUIRED(428, "Cabeçalho If-Match obrigatório"),
   RATE_LIMITED(429, "Muitas requisições"),

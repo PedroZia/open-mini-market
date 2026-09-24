@@ -689,7 +689,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 com totais recalculados nos três; 403 em venda de outro caixa; 404 item inexistente; 409 venda concluída; 400 forma inválida; 401 sem token nas 3 rotas.
   **Commit:** `feat(sales): expoe inclusao, alteracao e remocao de itens`
 
-- [ ] **810 — Caso de uso `ApplyDiscount`**
+- [x] **810 — Caso de uso `ApplyDiscount`**
   **Objetivo:** desconto com controle. **Depende:** 802, 305
   **Implementar:** permissão `sale.discount.apply`, motivo obrigatório, limite `max_discount_percent` da loja, tipos `VALUE`/`PERCENT`; auditoria `SALE_DISCOUNT_APPLIED` com valor e motivo; remoção do desconto.
   **Testes/aceite:** aplica percentual e valor; acima do limite → 403/422; OPERADOR → 403; remover desconto volta ao subtotal.

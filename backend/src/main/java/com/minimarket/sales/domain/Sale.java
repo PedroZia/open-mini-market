@@ -265,6 +265,22 @@ public final class Sale {
   }
 
   /**
+   * Tira o desconto da venda: tipo, valor e motivo voltam a nulo e o total volta a ser o subtotal
+   * (BR-02/BR-03) — quem recalcula é {@link #recalculate()}, como em qualquer mutação do agregado.
+   * A permissão de quem remove e o evento de auditoria são do caso de uso (passo 810); remover
+   * venda sem desconto é no-op de estado (nada a zerar), e quem decide não gravar é o caso de uso.
+   *
+   * @throws BusinessException se a venda não estiver aberta
+   */
+  public void removeDiscount() {
+    requireOpen();
+    this.discountType = null;
+    this.discountValue = null;
+    this.discountReason = null;
+    recalculate();
+  }
+
+  /**
    * Deriva do estado atual os totais que ninguém escreve de fora: {@code subtotal} (Σ das linhas),
    * {@code item_count}, {@code discount_amount} (do tipo e do valor, BR-03) e {@code total}
    * (BR-02). É idempotente — repetir não muda nada, porque só lê itens e desconto.
