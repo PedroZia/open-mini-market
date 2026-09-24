@@ -3,17 +3,21 @@ package com.minimarket.sales.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.minimarket.catalog.application.BarcodeResolver;
 import com.minimarket.catalog.application.NewProduct;
 import com.minimarket.catalog.application.ProductSort;
 import com.minimarket.catalog.application.ProductStore;
 import com.minimarket.catalog.application.ProductSummary;
 import com.minimarket.sales.domain.Sale;
 import com.minimarket.sales.domain.SaleItem;
+import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.ForbiddenException;
 import com.minimarket.shared.domain.NotFoundException;
+import com.minimarket.shared.domain.ScaleEmbeddedField;
+import com.minimarket.shared.domain.Store;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -41,12 +45,31 @@ class AddSaleItemUseCaseTest {
       UUID.fromString("0199a2b3-0000-7000-8000-000000000010");
   private static final UUID ANOTHER_REGISTER_ID =
       UUID.fromString("0199a2b3-0000-7000-8000-000000000011");
+
+  /** Rótulo da etiqueta de balança do cenário: prefixo "2" + código interno + valor embutido. */
+  private static final String INTERNAL_CODE = "00042";
+
   private static final UUID OPERATOR_ID = UUID.fromString("0199a2b3-0000-7000-8000-000000000001");
   private static final Instant NOW = Instant.parse("2026-09-24T13:00:00Z");
   private static final String BARCODE = "7891000100103";
+  private static final String STORE_CODE = "MATRIZ";
+
+  /** Loja do cenário: os parâmetros da etiqueta de balança (passo 1104b1) moram nela. */
+  private static final Store STORE =
+      new Store(
+          STORE_ID,
+          STORE_CODE,
+          "Minimercado Matriz",
+          false,
+          new BigDecimal("100.00"),
+          "2",
+          5,
+          ScaleEmbeddedField.WEIGHT,
+          3);
 
   private final FakeSaleStore saleStore = new FakeSaleStore();
   private final FakeProductStore productStore = new FakeProductStore();
+  private final FakeStoreLookup storeLookup = new FakeStoreLookup();
   private final FakeAuditRecorder auditRecorder = new FakeAuditRecorder();
 
   private AddSaleItemUseCase useCase;
@@ -59,6 +82,7 @@ class AddSaleItemUseCaseTest {
     useCase.saleAccessGuard = saleAccessGuard;
     useCase.saleStore = saleStore;
     useCase.productStore = productStore;
+    useCase.barcodeResolver = new BarcodeResolver(productStore, storeLookup, STORE_CODE);
     useCase.auditRecorder = auditRecorder;
     saleStore.sale = openSale();
   }
@@ -159,6 +183,34 @@ class AddSaleItemUseCaseTest {
     assertThat(sale.total()).isEqualByComparingTo("49.50");
     assertThat(saleStore.updateCount).as("as duas inclusões passam pelo update").isEqualTo(2);
     assertThat(auditRecorder.recorded).hasSize(2);
+  }
+
+  @Test
+  @DisplayName(
+      "etiqueta de balança: item em kg com a quantidade do servidor, ignorando a do comando")
+  void addsWeightLabelUsingServerQuantity() {
+    productStore.byInternalCode = product(null, "Banana prata", "KG", "9.90", true, null);
+
+    Sale sale =
+        useCase.execute(
+            new AddSaleItemCommand(
+                SALE_ID,
+                CASH_REGISTER_ID,
+                "2" + INTERNAL_CODE + "0001234",
+                null,
+                new BigDecimal("3")));
+
+    SaleItem item = sale.items().getFirst();
+    assertThat(item.quantity())
+        .as("1,234 kg da etiqueta, não os 3 do cliente")
+        .isEqualByComparingTo("1.234");
+    assertThat(item.unit()).isEqualTo("KG");
+    assertThat(item.lineTotal()).as("round(1.234 × 9.90, 2)").isEqualByComparingTo("12.22");
+    assertThat(sale.total()).isEqualByComparingTo("12.22");
+
+    assertThat(auditRecorder.only().details())
+        .as("a auditoria também reflete a quantidade efetiva")
+        .containsEntry("quantity", new BigDecimal("1.234"));
   }
 
   @Test
@@ -359,6 +411,7 @@ class AddSaleItemUseCaseTest {
   private static final class FakeProductStore implements ProductStore {
 
     private ProductSummary byBarcode;
+    private ProductSummary byInternalCode;
     private ProductSummary byId;
     private String lookedUpBarcode;
 
@@ -370,7 +423,7 @@ class AddSaleItemUseCaseTest {
 
     @Override
     public Optional<ProductSummary> findByInternalCode(String internalCode) {
-      throw new UnsupportedOperationException("findByInternalCode não é usado por AddSaleItem");
+      return Optional.ofNullable(byInternalCode);
     }
 
     @Override
@@ -439,6 +492,23 @@ class AddSaleItemUseCaseTest {
     @Override
     public boolean existsActiveBarcode(String barcode) {
       throw new UnsupportedOperationException("existsActiveBarcode não é usado por AddSaleItem");
+    }
+  }
+
+  /**
+   * Dublê da {@code StoreLookup}: a loja do cenário é a do código configurado e carrega os
+   * parâmetros da etiqueta de balança que o resolver usa no parse (passo 1104b3).
+   */
+  private static final class FakeStoreLookup implements StoreLookup {
+
+    @Override
+    public Optional<Store> findByCode(String code) {
+      return STORE_CODE.equals(code) ? Optional.of(STORE) : Optional.empty();
+    }
+
+    @Override
+    public Optional<Store> findById(UUID id) {
+      throw new UnsupportedOperationException("findById não é usado pelo resolver");
     }
   }
 }

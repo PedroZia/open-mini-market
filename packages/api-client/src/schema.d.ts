@@ -2761,6 +2761,7 @@ export interface components {
             name?: string;
             price?: number;
             unit?: string;
+            quantity?: number;
         };
         ProductResponse: {
             id?: components["schemas"]["UUID"];

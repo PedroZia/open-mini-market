@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -64,6 +65,14 @@ class ProductsResourceTest extends IntegrationTestBase {
 
   /** O barcode como o caso de uso o guarda: sem espaços — o que o 201 precisa devolver. */
   private static final String STORED_BARCODE = "7891000" + SUFFIX + "17";
+
+  /** Código interno do produto pesável: 5 dígitos, o tamanho que a loja configura na etiqueta. */
+  private static final String INTERNAL_CODE =
+      String.format("%05d", ThreadLocalRandom.current().nextInt(100_000));
+
+  /** Código interno que nenhum produto do teste tem: o 404 do bipe por PLU desconhecido. */
+  private static final String UNKNOWN_INTERNAL_CODE =
+      String.format("%05d", ThreadLocalRandom.current().nextInt(100_000));
 
   /** Caso de uso da criação de usuário: o OPERADOR é fixture, não o alvo do teste. */
   @Inject CreateUserUseCase createUserUseCase;
@@ -435,7 +444,7 @@ class ProductsResourceTest extends IntegrationTestBase {
   }
 
   @Test
-  @DisplayName("GET /api/v1/products/barcode/{barcode} devolve 200 com os cinco campos do bipe")
+  @DisplayName("GET /api/v1/products/barcode/{barcode} devolve 200 com os campos do bipe")
   void resolvesActiveProductByBarcode() {
     UUID id = seedProduct("Refrigerante 2L", "7.50", null, STORED_BARCODE);
 
@@ -447,12 +456,109 @@ class ProductsResourceTest extends IntegrationTestBase {
     Map<String, Object> json = response.jsonPath().getMap("$");
     assertThat(json)
         .as("contrato do bipe: resposta enxuta, sem cadastro completo nem estoque")
-        .containsOnlyKeys("id", "barcode", "name", "price", "unit");
+        .containsOnlyKeys("id", "barcode", "name", "price", "unit", "quantity");
     assertThat(json.get("id")).isEqualTo(id.toString());
     assertThat(json.get("barcode")).isEqualTo(STORED_BARCODE);
     assertThat(json.get("name")).isEqualTo(name("Refrigerante 2L"));
     assertThat(number(json.get("price"))).isEqualByComparingTo("7.50");
     assertThat(json.get("unit")).isEqualTo("UN");
+    assertThat(json.get("quantity"))
+        .as("GTIN não embute quantidade: o campo existe, mas vem nulo (1104b3)")
+        .isNull();
+  }
+
+  @Test
+  @DisplayName(
+      "GET /api/v1/products/barcode/{barcode} de código interno digitado resolve sem quantidade")
+  void resolvesInternalCodeTypedWithoutQuantity() {
+    UUID id = seedProduct("Banana prata", "7.49", "KG", null, null, INTERNAL_CODE);
+
+    Response response = getByBarcode(INTERNAL_CODE);
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    Map<String, Object> json = response.jsonPath().getMap("$");
+    assertThat(json.get("id")).isEqualTo(id.toString());
+    assertThat(json.get("barcode")).as("produto pesável pode não ter GTIN").isNull();
+    assertThat(json.get("unit")).isEqualTo("KG");
+    assertThat(json.get("quantity"))
+        .as("PLU digitado não embute quantidade: quem manda é o cliente")
+        .isNull();
+  }
+
+  @Test
+  @DisplayName("etiqueta de peso no bipe: 200 com a quantidade em kg que o código embute")
+  void resolvesWeightLabelWithSuggestedQuantity() {
+    UUID id = seedProduct("Banana prata", "7.49", "KG", null, null, INTERNAL_CODE);
+
+    Response response = getByBarcode(weightLabel());
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    Map<String, Object> json = response.jsonPath().getMap("$");
+    assertThat(json.get("id")).isEqualTo(id.toString());
+    assertThat(json.get("unit")).isEqualTo("KG");
+    assertThat(number(json.get("quantity")))
+        .as("0001234 com 3 casas = 1,234 kg")
+        .isEqualByComparingTo("1.234");
+  }
+
+  @Test
+  @DisplayName("etiqueta de preço no bipe: 200 com a quantidade derivada do preço vigente")
+  void resolvesPriceLabelDerivingQuantityFromPrice() throws SQLException {
+    setStoreScale("PRICE", 2);
+    UUID id = seedProduct("Uva itália", "9.99", "KG", null, null, INTERNAL_CODE);
+
+    Response response = getByBarcode(priceLabel());
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.jsonPath().getString("id")).isEqualTo(id.toString());
+    assertThat(number(response.jsonPath().getMap("$").get("quantity")))
+        .as("R$ 19,99 embutidos a R$ 9,99/kg = 2,001 kg")
+        .isEqualByComparingTo("2.001");
+  }
+
+  @Test
+  @DisplayName("etiqueta malformada no bipe: 422 INVALID_INTERNAL_BARCODE, não 404")
+  void rejectsMalformedLabel() {
+    Response response = getByBarcode("2000000000000");
+
+    assertThat(response.statusCode())
+        .as("valor embutido zero é defeito da balança, não código desconhecido")
+        .isEqualTo(422);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("INVALID_INTERNAL_BARCODE");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Código interno inválido");
+  }
+
+  @Test
+  @DisplayName("código interno digitado e etiqueta de produto inexistente: 404 PRODUCT_NOT_FOUND")
+  void returnsNotFoundForUnknownInternalCodeAndLabel() {
+    Response typed = getByBarcode(UNKNOWN_INTERNAL_CODE);
+    Response label = getByBarcode("2" + UNKNOWN_INTERNAL_CODE + "0001234");
+
+    for (Response response : List.of(typed, label)) {
+      assertThat(response.statusCode()).isEqualTo(404);
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+    }
+  }
+
+  @Test
+  @DisplayName("barcode exato vence o parse: código no formato da etiqueta resolve pelo barcode")
+  void exactBarcodeTakesPrecedenceOverLabelParsing() {
+    String label = weightLabel();
+    UUID byExactBarcode = seedProduct("Arroz 5kg", "24.90", "UN", null, label, null);
+    seedProduct("Banana prata", "7.49", "KG", null, null, INTERNAL_CODE);
+
+    Response response = getByBarcode(label);
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    Map<String, Object> json = response.jsonPath().getMap("$");
+    assertThat(json.get("id"))
+        .as("o barcode exato vence a interpretação de etiqueta")
+        .isEqualTo(byExactBarcode.toString());
+    assertThat(json.get("quantity"))
+        .as("resolvido pelo barcode, o código não sugere quantidade")
+        .isNull();
   }
 
   @Test
@@ -1138,6 +1244,7 @@ class ProductsResourceTest extends IntegrationTestBase {
    */
   @AfterEach
   void removeRowsCreatedByThisTest() throws SQLException {
+    setStoreScale("WEIGHT", 3);
     String suffixLike = "%" + SUFFIX;
     try (Connection connection = dataSource.getConnection()) {
       delete(
@@ -1347,6 +1454,20 @@ class ProductsResourceTest extends IntegrationTestBase {
    * Produto da fixture com barcode gravado: o bipe precisa do código na linha, como o 405 grava.
    */
   private UUID seedProduct(String base, String price, UUID categoryId, String barcode) {
+    return seedProduct(base, price, "UN", categoryId, barcode, null);
+  }
+
+  /**
+   * Produto da fixture com barcode, unidade e código interno (1104b1) gravados: o código interno é
+   * o PLU que a etiqueta de balança embute e o cenário do 1104b3 precisa dele na linha.
+   */
+  private UUID seedProduct(
+      String base,
+      String price,
+      String unit,
+      UUID categoryId,
+      String barcode,
+      String internalCode) {
     return QuarkusTransaction.requiringNew()
         .call(
             () ->
@@ -1355,11 +1476,40 @@ class ProductsResourceTest extends IntegrationTestBase {
                         storeId(),
                         name(base),
                         barcode,
+                        internalCode,
                         "descrição de " + base,
                         categoryId,
-                        "UN",
+                        unit,
                         new BigDecimal(price),
                         null)));
+  }
+
+  /** Etiqueta de peso da loja: prefixo "2" + código interno + o valor embutido de 1,234 kg. */
+  private static String weightLabel() {
+    return "2" + INTERNAL_CODE + "0001234";
+  }
+
+  /** Etiqueta de preço da loja: prefixo "2" + código interno + R$ 19,99 embutidos (2 casas). */
+  private static String priceLabel() {
+    return "2" + INTERNAL_CODE + "0001999";
+  }
+
+  /**
+   * Troca os parâmetros da etiqueta da loja (passo 1104b1) direto no banco: a MATRIZ nasce com peso
+   * e 3 casas e a etiqueta de preço precisa da loja configurada para preço. O {@code
+   * removeRowsCreatedByThisTest} restaura ao fim de cada teste.
+   */
+  private void setStoreScale(String field, int decimals) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "update stores set scale_embedded_field = ?, scale_embedded_decimals = ?"
+                    + " where code = ?")) {
+      statement.setString(1, field);
+      statement.setInt(2, decimals);
+      statement.setString(3, defaultStoreCode);
+      statement.executeUpdate();
+    }
   }
 
   /** Soft delete pela porta, como o caso de uso do passo 412 fará — sem auditoria aqui. */

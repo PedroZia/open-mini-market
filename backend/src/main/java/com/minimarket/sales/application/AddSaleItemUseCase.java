@@ -2,6 +2,8 @@ package com.minimarket.sales.application;
 
 import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.catalog.application.BarcodeNormalizer;
+import com.minimarket.catalog.application.BarcodeResolution;
+import com.minimarket.catalog.application.BarcodeResolver;
 import com.minimarket.catalog.application.ProductStore;
 import com.minimarket.catalog.application.ProductSummary;
 import com.minimarket.sales.domain.Sale;
@@ -17,16 +19,19 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Bipe vira item (passo 808): resolve o produto, inclui o item na venda aberta com o snapshot do
- * momento (BR-01), recalcula os totais pelo agregado (BR-02) e audita {@code SALE_ITEM_ADDED}. Uma
- * execução = uma transação (§2.2, regra 6): linha do item, totais da venda e evento saem juntos ou
- * não saem.
+ * Bipe vira item (passo 808, etiqueta de balança no 1104b3): resolve o produto, inclui o item na
+ * venda aberta com o snapshot do momento (BR-01), recalcula os totais pelo agregado (BR-02) e
+ * audita {@code SALE_ITEM_ADDED}. Uma execução = uma transação (§2.2, regra 6): linha do item,
+ * totais da venda e evento saem juntos ou não saem.
  *
- * <p>A resolução é do servidor (BR-14): o barcode chega bruto e passa pela normalização única do
- * {@link BarcodeNormalizer} (passo 1104b1) — trim e sem espaços internos, que o leitor às vezes
- * insere — e vai à porta {@link ProductStore#findByBarcode}, que não enxerga o soft-deletado. Sem
- * barcode, o produto vem do id ({@link ProductStore#findById}, que enxerga o soft-deletado de
- * propósito). Código interno e etiqueta de balança ficam para o 1104b3: aqui é só o código exato.
+ * <p>A resolução é do servidor (BR-14) e a ordem — GTIN, etiqueta de balança, código interno — mora
+ * no {@link BarcodeResolver}, o mesmo do bipe. Sem barcode, o produto vem do id ({@link
+ * ProductStore#findById}, que enxerga o soft-deletado de propósito).
+ *
+ * <p>A quantidade também é do servidor quando a etiqueta embute peso ou preço (BR-14): o
+ * multiplicador {@code 3*} que a TUI manda não vale para etiqueta — o item entra com a quantidade
+ * que o código carrega (peso em kg ou total dividido pelo preço). Nos demais códigos vale a
+ * quantidade do comando, como sempre.
  *
  * <p>Produto inexistente — ou soft-deletado, que o barcode não alcança — é 404 {@code
  * PRODUCT_NOT_FOUND}, o mesmo do bipe. Produto <em>inativo</em> é 422 {@code PRODUCT_INACTIVE}: a
@@ -50,8 +55,8 @@ import java.util.UUID;
  * subtotal e total são sempre do servidor (BR-02).
  *
  * <p>Auditoria (§7.2): {@code SALE_ITEM_ADDED} na mesma transação, com a venda em {@code entityId}
- * e produto, barcode, quantidade e os totais/itemCount resultantes em {@code details}. Devolve o
- * agregado atualizado — quem monta a resposta é a API (passo 809b).
+ * e produto, barcode, quantidade efetiva e os totais/itemCount resultantes em {@code details}.
+ * Devolve o agregado atualizado — quem monta a resposta é a API (passo 809b).
  */
 @ApplicationScoped
 public class AddSaleItemUseCase {
@@ -74,6 +79,12 @@ public class AddSaleItemUseCase {
   /** Porta do catálogo: o produto vem por barcode (409) ou por id, nunca do cliente. */
   @Inject ProductStore productStore;
 
+  /**
+   * Resolução única do código lido (BR-14, passo 1104b3): a mesma ordem do bipe, com a etiqueta de
+   * balança incluída.
+   */
+  @Inject BarcodeResolver barcodeResolver;
+
   /** Auditoria da inclusão (§7.2), na transação do item. */
   @Inject AuditRecorder auditRecorder;
 
@@ -81,62 +92,61 @@ public class AddSaleItemUseCase {
    * 404 {@code SALE_NOT_FOUND} para venda inexistente; 403 {@code ACCESS_DENIED} para venda de
    * outro caixa; 409 {@code SALE_NOT_OPEN} para venda concluída; 400 {@code VALIDATION_ERROR} sem
    * barcode e sem produto; 404 {@code PRODUCT_NOT_FOUND} para produto inexistente; 422 {@code
-   * PRODUCT_INACTIVE} para produto desativado. Devolve o agregado com o item incluído e os totais
-   * recalculados.
+   * PRODUCT_INACTIVE} para produto desativado e 422 {@code INVALID_INTERNAL_BARCODE} para etiqueta
+   * de balança malformada. Devolve o agregado com o item incluído e os totais recalculados.
    */
   @Transactional
   public Sale execute(AddSaleItemCommand command) {
     Sale sale =
         SaleAccessGuard.requireOpen(
             saleAccessGuard.requireOwned(command.saleId(), command.cashRegisterId()));
-    ProductSummary product = resolveProduct(command);
+    ResolvedItem resolved = resolveItem(command);
+    ProductSummary product = requireActive(resolved.product());
     sale.addItem(
         product.id(),
         product.barcode(),
         product.name(),
         product.unit(),
         product.price(),
-        command.quantity());
+        resolved.quantity());
     saleStore.update(sale);
     auditRecorder.record(
         SALE_ITEM_ADDED_ACTION,
         SALE_ENTITY_TYPE,
         sale.id(),
         null,
-        details(product, command.quantity(), sale),
+        details(product, resolved.quantity(), sale),
         sale.cashSessionId());
 
     return sale;
   }
 
   /**
-   * Produto do item, na ordem do comando: barcode preenchido manda (é o caminho do bipe), senão o
+   * Item do comando, na ordem do comando: barcode preenchido manda (é o caminho do bipe), senão o
    * id; os dois ausentes é 400 — sem produto não há item. O snapshot que o agregado guarda é o da
    * projeção — inclusive o barcode, que pode ser nulo para produto sem código —, nunca a string
-   * digitada no leitor.
+   * digitada no leitor. Quando o código é etiqueta de balança, a quantidade vem do servidor e
+   * ignora a do comando (BR-14).
    */
-  private ProductSummary resolveProduct(AddSaleItemCommand command) {
+  private ResolvedItem resolveItem(AddSaleItemCommand command) {
     String barcode = BarcodeNormalizer.normalize(command.barcode());
     if (barcode != null) {
-      return productStore
-          .findByBarcode(barcode)
-          .map(AddSaleItemUseCase::requireActive)
-          .orElseThrow(
-              () ->
-                  new NotFoundException(
-                      ErrorCode.PRODUCT_NOT_FOUND,
-                      "produto com código de barras %s não encontrado".formatted(barcode)));
+      BarcodeResolution resolution = barcodeResolver.resolve(barcode);
+      return new ResolvedItem(
+          resolution.product(),
+          resolution.quantity() == null ? command.quantity() : resolution.quantity());
     }
     if (command.productId() != null) {
       UUID productId = command.productId();
-      return productStore
-          .findById(productId)
-          .map(AddSaleItemUseCase::requireActive)
-          .orElseThrow(
-              () ->
-                  new NotFoundException(
-                      ErrorCode.PRODUCT_NOT_FOUND,
-                      "produto %s não encontrado".formatted(productId)));
+      ProductSummary product =
+          productStore
+              .findById(productId)
+              .orElseThrow(
+                  () ->
+                      new NotFoundException(
+                          ErrorCode.PRODUCT_NOT_FOUND,
+                          "produto %s não encontrado".formatted(productId)));
+      return new ResolvedItem(product, command.quantity());
     }
     throw new BusinessException(
         ErrorCode.VALIDATION_ERROR, "código de barras ou id do produto é obrigatório");
@@ -154,6 +164,12 @@ public class AddSaleItemUseCase {
     }
     return product;
   }
+
+  /**
+   * Item resolvido: o produto e a quantidade efetiva — a que o servidor derivou da etiqueta de
+   * balança quando ela embutiu peso ou preço, senão a do comando.
+   */
+  private record ResolvedItem(ProductSummary product, BigDecimal quantity) {}
 
   /**
    * Details do evento: o produto e o que a inclusão deixou na venda — quantidade desta chamada (a

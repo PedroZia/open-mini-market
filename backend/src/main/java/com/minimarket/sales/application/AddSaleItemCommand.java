@@ -12,8 +12,9 @@ import java.util.UUID;
  * <p>O barcode tem precedência quando preenchido: é o caminho quente do PDV (409) e vem resolvido
  * pelo mesmo {@code ProductStore#findByBarcode} do bipe. Sem barcode, o produto vem do id — é o
  * caminho da TUI/web para produto sem código. Os dois ausentes é comando inválido: 400 {@code
- * VALIDATION_ERROR} no caso de uso. Código interno e etiqueta de balança (BR-14) ficam para o passo
- * 1104b.
+ * VALIDATION_ERROR} no caso de uso. Código interno e etiqueta de balança (BR-14) são resolvidos
+ * pelo mesmo caminho do bipe (passo 1104b3), e na etiqueta a quantidade do comando é ignorada em
+ * favor da que o servidor deriva do código.
  *
  * <p>{@code cashRegisterId} é o caixa da sessão autenticada, montado pela API (passo 809b) do
  * {@code OperationContext} — nunca do corpo: a {@link SaleAccessGuard} só deixa a operação seguir
@@ -25,7 +26,8 @@ import java.util.UUID;
  * @param barcode código de barras lido, como veio do leitor; nulo ou em branco quando o produto vem
  *     pelo id
  * @param productId produto escolhido; ignorado quando há barcode
- * @param quantity quantidade vendida, maior que zero
+ * @param quantity quantidade vendida, maior que zero; ignorada quando o código é etiqueta de
+ *     balança (a quantidade é do servidor, BR-14)
  */
 public record AddSaleItemCommand(
     UUID saleId, UUID cashRegisterId, String barcode, UUID productId, BigDecimal quantity) {}

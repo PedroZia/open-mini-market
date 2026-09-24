@@ -1,5 +1,6 @@
 package com.minimarket.catalog.api;
 
+import com.minimarket.catalog.application.BarcodeResolution;
 import com.minimarket.catalog.application.ChangeProductPriceCommand;
 import com.minimarket.catalog.application.ChangeProductPriceUseCase;
 import com.minimarket.catalog.application.CreateProductCommand;
@@ -229,10 +230,12 @@ public class ProductsResource {
   }
 
   /**
-   * Bipe do PDV (passo 409): resolve o produto pelo barcode lido, com a normalização do caso de
-   * uso. Produto inativo, soft-deletado ou código desconhecido → 404 {@code PRODUCT_NOT_FOUND}. O
-   * segmento literal {@code barcode} tem prioridade sobre {@code /{id}} no JAX-RS: um código
-   * não-UUID nunca cai no detalhe de 408.
+   * Bipe do PDV (passo 409, estendido no 1104b3): resolve o produto pelo código lido — GTIN, código
+   * interno digitado ou etiqueta de balança (BR-14) — com a normalização do caso de uso, e devolve
+   * a {@code quantity} sugerida quando a etiqueta embute peso ou preço. Produto inativo,
+   * soft-deletado ou código desconhecido → 404 {@code PRODUCT_NOT_FOUND}; etiqueta malformada → 422
+   * {@code INVALID_INTERNAL_BARCODE} do parser. O segmento literal {@code barcode} tem prioridade
+   * sobre {@code /{id}} no JAX-RS: um código não-UUID nunca cai no detalhe de 408.
    */
   @GET
   @Path("/barcode/{barcode}")
@@ -258,10 +261,19 @@ public class ProductsResource {
         product.updatedAt());
   }
 
-  /** Só os cinco campos do bipe; o resto do cadastro fica no detalhe (passo 408). */
-  private static ProductBarcodeResponse toBarcodeResponse(ProductSummary product) {
+  /**
+   * Só os campos do bipe; o resto do cadastro fica no detalhe (passo 408). A {@code quantity} vem
+   * da resolução (1104b3): nula fora da etiqueta de balança.
+   */
+  private static ProductBarcodeResponse toBarcodeResponse(BarcodeResolution resolution) {
+    ProductSummary product = resolution.product();
     return new ProductBarcodeResponse(
-        product.id(), product.barcode(), product.name(), product.price(), product.unit());
+        product.id(),
+        product.barcode(),
+        product.name(),
+        product.price(),
+        product.unit(),
+        resolution.quantity());
   }
 
   /**

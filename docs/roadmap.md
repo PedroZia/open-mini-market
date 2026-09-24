@@ -913,7 +913,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitário puro das etiquetas de peso e de preço nas configurações da loja; etiqueta fora do formato recusada.
   **Commit:** `feat(catalog): interpreta etiqueta de balanca`
 
-- [ ] **1104b3 — Etiqueta de balança no bipe e no item da venda**
+- [x] **1104b3 — Etiqueta de balança no bipe e no item da venda**
   **Objetivo:** vender a granel com etiqueta impressa pela balança. **Depende:** 1104b2, 1104a
   **Implementar:** resolução e cálculo de quantidade **no servidor** (BR-14) no `GET /products/barcode/{barcode}` (devolve a `quantity` sugerida) e no `POST /sales/{id}/items` (etiqueta vira item em kg com o total correto); código inválido → 422 `INVALID_INTERNAL_BARCODE` (código novo em `ErrorCode`); TUI apenas envia a string bruta.
   **Testes/aceite:** etiqueta de peso gera item em kg com total correto; etiqueta de preço gera total igual ao embutido (tolerância R$ 0,01); código inválido → 422 `INVALID_INTERNAL_BARCODE`; testes com etiquetas reais das balanças da loja.

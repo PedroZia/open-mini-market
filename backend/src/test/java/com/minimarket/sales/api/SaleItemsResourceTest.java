@@ -2,6 +2,7 @@ package com.minimarket.sales.api;
 
 import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 import com.minimarket.IntegrationTestBase;
 import com.minimarket.catalog.application.NewProduct;
@@ -32,9 +33,11 @@ import org.junit.jupiter.api.Test;
 /**
  * Rotas de item da venda na API (passo 809b) contra PostgreSQL real (Dev Services): o operador
  * nasce pelo caso de uso, o login vincula a sessão ao {@code CAIXA-01} do seed, o caixa e a venda
- * abrem pela própria API (passos 607 e 807) e o produto é semeado pela porta do catálogo — o alvo é
- * o contrato das rotas, não o cadastro. O 401 sem token é do {@code RouteSecurityTest}; a posse da
- * venda e a recusa por estado são dos casos de uso (passo 809a) e a resolução do produto, do 808.
+ * abrem pela própria API (passos 607 e 807) e os produtos são semeados pela porta do catálogo — o
+ * alvo é o contrato das rotas, não o cadastro. O 401 sem token é do {@code RouteSecurityTest}; a
+ * posse da venda e a recusa por estado são dos casos de uso (passo 809a) e a resolução do produto,
+ * do 808 — com a etiqueta de balança do 1104b3 (peso e preço), que também troca a configuração da
+ * MATRIZ no banco e a restaura no fim de cada teste.
  *
  * <p>O request HTTP comita, então o teste confere por SQL o que ficou no banco (linhas de {@code
  * sale_items}, totais de {@code sales} e eventos de auditoria) e limpa tudo o que comitou ao final,
@@ -63,6 +66,22 @@ class SaleItemsResourceTest extends IntegrationTestBase {
       "7891000" + String.format("%04d", ThreadLocalRandom.current().nextInt(10_000)) + "17";
 
   private static final String PRODUCT_NAME = "Arroz 5kg";
+
+  /** Produto pesável do cenário da etiqueta de peso: vendido a granel e com PLU. */
+  private static final String WEIGHT_PRODUCT_NAME = "Banana prata";
+
+  /** Produto do cenário da etiqueta de preço (loja configurada para preço embutido). */
+  private static final String PRICE_PRODUCT_NAME = "Uva itália";
+
+  /** Código interno do produto pesável: 5 dígitos, como a etiqueta da loja embute. */
+  private static final String WEIGHT_CODE =
+      String.format("%05d", ThreadLocalRandom.current().nextInt(100_000));
+
+  /**
+   * Código interno do produto da etiqueta de preço: um a mais, para nunca empatar com o do peso.
+   */
+  private static final String PRICE_CODE =
+      String.format("%05d", (Integer.parseInt(WEIGHT_CODE) + 1) % 100_000);
 
   /** Caso de uso da criação de usuário (passo 107): os atores do teste são fixture, não o alvo. */
   @Inject CreateUserUseCase createUserUseCase;
@@ -95,6 +114,10 @@ class SaleItemsResourceTest extends IntegrationTestBase {
 
   private UUID productId;
 
+  private UUID weightProductId;
+
+  private UUID priceProductId;
+
   @BeforeEach
   void openSaleWithProduct() throws SQLException {
     String username = "itens.api." + SUFFIX + "." + UUID.randomUUID().toString().substring(0, 6);
@@ -103,7 +126,9 @@ class SaleItemsResourceTest extends IntegrationTestBase {
     token = login(username, registerId);
     cashSessionIds.add(open(registerId, token));
     saleId = createSale(token);
-    productId = seedProduct();
+    productId = seedProduct(PRODUCT_NAME, BARCODE, "UN", "9.90", null);
+    weightProductId = seedProduct(WEIGHT_PRODUCT_NAME, null, "KG", "9.90", WEIGHT_CODE);
+    priceProductId = seedProduct(PRICE_PRODUCT_NAME, null, "KG", "9.99", PRICE_CODE);
   }
 
   @Test
@@ -191,6 +216,83 @@ class SaleItemsResourceTest extends IntegrationTestBase {
     assertThat(rows.getFirst().quantity()).isEqualTo("3.500");
     assertThat(saleTotals(saleId).total()).isEqualTo("34.65");
     assertThat(auditEventCount(saleId, "SALE_ITEM_ADDED")).isEqualTo(2);
+  }
+
+  @Test
+  @DisplayName("POST item por etiqueta de peso: quantidade do servidor em kg e total correto")
+  void addsWeightLabelItemWithServerQuantity() throws SQLException {
+    Response response = postItem(token, barcodeBody(weightLabel(), "3"));
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    Map<String, Object> item = firstItem(response);
+    assertThat(item.get("productId")).isEqualTo(weightProductId.toString());
+    assertThat(item.get("unit")).isEqualTo("KG");
+    assertThat(decimal(item, "unitPrice")).isEqualByComparingTo("9.90");
+    assertThat(decimal(item, "quantity"))
+        .as("o multiplicador 3* do cliente não vale para etiqueta (BR-14)")
+        .isEqualByComparingTo("1.234");
+    assertThat(decimal(item, "lineTotal")).isEqualByComparingTo("12.22");
+    assertThat(decimal(response.jsonPath().getMap("$"), "total")).isEqualByComparingTo("12.22");
+
+    List<ItemRow> rows = itemRows(saleId);
+    assertThat(rows).as("uma linha em kg com a quantidade da etiqueta").hasSize(1);
+    assertThat(rows.getFirst().quantity()).isEqualTo("1.234");
+    assertThat(rows.getFirst().lineTotal()).isEqualTo("12.22");
+    assertThat(auditQuantity(saleId, "SALE_ITEM_ADDED"))
+        .as("a auditoria guarda a quantidade efetiva, não a do cliente")
+        .isEqualByComparingTo("1.234");
+  }
+
+  @Test
+  @DisplayName("POST item por etiqueta de preço: total igual ao embutido, tolerância de R$ 0,01")
+  void addsPriceLabelItemWithEmbeddedTotal() throws SQLException {
+    setStoreScale("PRICE", 2);
+
+    Response response = postItem(token, barcodeBody(priceLabel(), "1"));
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    Map<String, Object> item = firstItem(response);
+    assertThat(item.get("productId")).isEqualTo(priceProductId.toString());
+    assertThat(decimal(item, "quantity"))
+        .as("R$ 19,99 embutidos a R$ 9,99/kg = 2,001 kg")
+        .isEqualByComparingTo("2.001");
+    assertThat(decimal(item, "lineTotal"))
+        .as("o total da linha é o preço que a balança embutiu na etiqueta")
+        .isCloseTo(new BigDecimal("19.99"), within(new BigDecimal("0.01")));
+    assertThat(decimal(response.jsonPath().getMap("$"), "total"))
+        .isCloseTo(new BigDecimal("19.99"), within(new BigDecimal("0.01")));
+
+    assertThat(saleTotals(saleId).total())
+        .as("no banco o total também é o da etiqueta, na tolerância do arredondamento")
+        .isEqualTo("19.99");
+  }
+
+  @Test
+  @DisplayName("POST item por código interno: vale a quantidade do cliente, como no GTIN")
+  void addsItemByInternalCodeUsingClientQuantity() throws SQLException {
+    Response response = postItem(token, barcodeBody(WEIGHT_CODE, "2"));
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(decimal(firstItem(response), "quantity")).isEqualByComparingTo("2.000");
+    assertThat(decimal(response.jsonPath().getMap("$"), "total")).isEqualByComparingTo("19.80");
+    assertThat(itemRows(saleId).getFirst().quantity()).isEqualTo("2.000");
+    assertThat(auditQuantity(saleId, "SALE_ITEM_ADDED")).isEqualByComparingTo("2");
+  }
+
+  @Test
+  @DisplayName(
+      "POST item por etiqueta malformada: 422 INVALID_INTERNAL_BARCODE, sem tocar na venda")
+  void rejectsMalformedLabel() throws SQLException {
+    Response response = postItem(token, barcodeBody("2000000000000", "1"));
+
+    assertThat(response.statusCode())
+        .as("valor embutido zero é defeito da balança, não produto desconhecido")
+        .isEqualTo(422);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("INVALID_INTERNAL_BARCODE");
+
+    assertThat(itemRows(saleId)).as("a recusa não deixa item").isEmpty();
+    assertThat(auditEventCount(saleId, "SALE_ITEM_ADDED")).isZero();
   }
 
   @Test
@@ -323,6 +425,7 @@ class SaleItemsResourceTest extends IntegrationTestBase {
    */
   @AfterEach
   void removeCommittedFixture() throws SQLException {
+    setStoreScale("WEIGHT", 3);
     try (Connection connection = dataSource.getConnection()) {
       for (String key : idempotencyKeys) {
         execute(connection, "delete from idempotency_keys where key = ?", key);
@@ -396,8 +499,13 @@ class SaleItemsResourceTest extends IntegrationTestBase {
     return id;
   }
 
-  /** Produto do cenário pela porta do catálogo, em transação própria como o 405 o grava. */
-  private UUID seedProduct() throws SQLException {
+  /**
+   * Produto do cenário pela porta do catálogo, em transação própria como o 405 o grava. O código
+   * interno (1104b1) é o PLU que a etiqueta de balança embute.
+   */
+  private UUID seedProduct(
+      String name, String barcode, String unit, String price, String internalCode)
+      throws SQLException {
     UUID store = storeId();
     UUID id =
         QuarkusTransaction.requiringNew()
@@ -406,15 +514,60 @@ class SaleItemsResourceTest extends IntegrationTestBase {
                     productStore.insert(
                         new NewProduct(
                             store,
-                            PRODUCT_NAME,
-                            BARCODE,
+                            name,
+                            barcode,
+                            internalCode,
                             null,
                             null,
-                            "UN",
-                            new BigDecimal("9.90"),
+                            unit,
+                            new BigDecimal(price),
                             null)));
     productIds.add(id);
     return id;
+  }
+
+  /** Etiqueta de peso da loja: prefixo "2" + código interno + o valor embutido de 1,234 kg. */
+  private static String weightLabel() {
+    return "2" + WEIGHT_CODE + "0001234";
+  }
+
+  /** Etiqueta de preço da loja: prefixo "2" + código interno + R$ 19,99 embutidos (2 casas). */
+  private static String priceLabel() {
+    return "2" + PRICE_CODE + "0001999";
+  }
+
+  /**
+   * Troca os parâmetros da etiqueta da loja (passo 1104b1) direto no banco: a MATRIZ nasce com peso
+   * e 3 casas e a etiqueta de preço precisa da loja configurada para preço. O {@code
+   * removeCommittedFixture} restaura ao fim de cada teste.
+   */
+  private void setStoreScale(String field, int decimals) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "update stores set scale_embedded_field = ?, scale_embedded_decimals = ?"
+                    + " where code = ?")) {
+      statement.setString(1, field);
+      statement.setInt(2, decimals);
+      statement.setString(3, "MATRIZ");
+      statement.executeUpdate();
+    }
+  }
+
+  /** Quantidade gravada no {@code details} do evento — a efetiva, não a que o cliente mandou. */
+  private BigDecimal auditQuantity(UUID entityId, String action) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select (details->>'quantity')::numeric as quantity from audit_events"
+                    + " where entity_id = ? and action = ?")) {
+      statement.setObject(1, entityId);
+      statement.setString(2, action);
+      try (ResultSet resultSet = statement.executeQuery()) {
+        assertThat(resultSet.next()).as("evento %s gravado para %s", action, entityId).isTrue();
+        return resultSet.getBigDecimal("quantity");
+      }
+    }
   }
 
   /** Id da loja do seed, direto do banco: o produto precisa de uma loja real (FK restrict). */

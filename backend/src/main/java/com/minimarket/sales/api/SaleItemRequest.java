@@ -14,7 +14,9 @@ import java.util.UUID;
  * <p>A forma é validada aqui ({@code quantity} ausente ou não positiva → 400 {@code
  * VALIDATION_ERROR}); {@code barcode} e {@code productId} são opcionais individualmente e a regra
  * "um dos dois" é do caso de uso, que responde 400 quando faltam os dois — a API não a repete.
- * Código interno e etiqueta de balança (BR-14) ficam para o passo 1104b.
+ * Código interno e etiqueta de balança (BR-14) são resolvidos pelo caso de uso (passo 1104b3): na
+ * etiqueta, a quantidade vem do servidor e a daqui é ignorada; a forma continua sendo validada para
+ * não afrouxar o contrato.
  */
 public record SaleItemRequest(
     String barcode,
