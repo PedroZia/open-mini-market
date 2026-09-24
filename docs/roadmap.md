@@ -385,9 +385,9 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** CRUD completo na API; 403 para OPERADOR escrevendo; 409 nome duplicado.
   **Commit:** `feat(catalog): expoe CRUD de categorias`
 
-- [ ] **403 — Migration `products`**
+- [x] **403 — Migration `products`**
   **Objetivo:** cadastro de produtos com barcode e preço. **Depende:** 401
-  **Implementar:** `V7__products.sql` conforme §5.3, incluindo índice único parcial de barcode e checks de preço.
+  **Implementar:** `V8__products.sql` conforme §5.3, incluindo índice único parcial de barcode e checks de preço.
   **Testes/aceite:** barcode duplicado ativo falha; barcode igual em produto deletado é permitido; preço negativo rejeitado.
   **Commit:** `feat(catalog): cria tabela de produtos`
 
