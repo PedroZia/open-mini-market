@@ -30,9 +30,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Produtos na API: criação (passo 406) e listagem com busca e filtros (passo 407) contra PostgreSQL
- * real (Dev Services): as rotas de verdade, com o ADMIN da fixture e um OPERADOR criado pelo caso
- * de uso e autenticado por login real, como no {@code PermissionMatrixTest}.
+ * Produtos na API: criação (passo 406), listagem com busca e filtros (passo 407) e detalhe (passo
+ * 408) contra PostgreSQL real (Dev Services): as rotas de verdade, com o ADMIN da fixture e um
+ * OPERADOR criado pelo caso de uso e autenticado por login real, como no {@code
+ * PermissionMatrixTest}.
  *
  * <p>A listagem é semeada pela porta {@code ProductStore} (sem caso de uso nem auditoria, em
  * transação própria). O request HTTP commita: o {@link #removeRowsCreatedByThisTest()} apaga ao fim
@@ -329,6 +330,73 @@ class ProductsResourceTest extends IntegrationTestBase {
         .containsExactly(name("Arroz 5kg"), name("Detergente 500ml"));
   }
 
+  @Test
+  @DisplayName(
+      "GET /api/v1/products/{id} devolve 200 com o produto completo, sem storeId nem deletedAt")
+  void returnsProductDetail() {
+    UUID categoryId = seedCategory("Bebidas");
+    UUID id = seedProduct("Refrigerante 2L", "7.50", categoryId);
+
+    Response response = getDetail(id.toString());
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.contentType()).contains("application/json");
+
+    Map<String, Object> json = response.jsonPath().getMap("$");
+    assertThat(json)
+        .as("contrato: nem storeId nem deletedAt vazam")
+        .containsOnlyKeys(
+            "id",
+            "name",
+            "barcode",
+            "description",
+            "categoryId",
+            "unit",
+            "price",
+            "minQuantity",
+            "active",
+            "version",
+            "createdAt",
+            "updatedAt");
+    assertThat(json.get("id")).isEqualTo(id.toString());
+    assertThat(json.get("name")).isEqualTo(name("Refrigerante 2L"));
+    assertThat(json.get("barcode")).as("sem barcode no cadastro").isNull();
+    assertThat(json.get("description")).isEqualTo("descrição de Refrigerante 2L");
+    assertThat(json.get("categoryId")).isEqualTo(categoryId.toString());
+    assertThat(json.get("unit")).isEqualTo("UN");
+    assertThat(number(json.get("price"))).isEqualByComparingTo("7.50");
+    assertThat(json.get("minQuantity")).as("sem mínimo no cadastro").isNull();
+    assertThat(json.get("active")).isEqualTo(true);
+    assertThat(json.get("version")).as("primeira versão do lock otimista").isEqualTo(0);
+    assertThat(json.get("createdAt")).isNotNull();
+    assertThat(json.get("updatedAt")).isNotNull();
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/products/{id} de id inexistente responde 404 PRODUCT_NOT_FOUND")
+  void returnsNotFoundForUnknownId() {
+    Response response = getDetailExpectingNotFound(UUID.randomUUID().toString());
+
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/product-not-found");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Produto não encontrado");
+    assertThat(response.jsonPath().getInt("status")).isEqualTo(404);
+    assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+  }
+
+  @Test
+  @DisplayName("GET /api/v1/products/{id} de produto soft-deletado responde 404 PRODUCT_NOT_FOUND")
+  void hidesSoftDeletedProductFromDetail() {
+    UUID id = seedProduct("Detergente 500ml", "3.79", null);
+    softDeleteViaPort(id);
+
+    Response response = getDetailExpectingNotFound(id.toString());
+
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+  }
+
   /**
    * O request HTTP commita: some ao fim de cada teste o que esta classe criou — os eventos de
    * auditoria (do OPERADOR e os que apontam para os produtos criados) antes das sessões, do usuário
@@ -417,6 +485,25 @@ class ProductsResourceTest extends IntegrationTestBase {
         .response();
   }
 
+  /** GET no detalhe como ADMIN. */
+  private Response getDetail(String id) {
+    return given()
+        .header(AUTHORIZATION, "Bearer " + adminToken())
+        .when()
+        .get(PATH + "/" + id)
+        .then()
+        .extract()
+        .response();
+  }
+
+  /** GET no detalhe como ADMIN exigindo 404; o formato do problem fica com cada teste. */
+  private Response getDetailExpectingNotFound(String id) {
+    Response response = getDetail(id);
+
+    assertThat(response.statusCode()).as("detalhe de %s precisa ser 404", id).isEqualTo(404);
+    return response;
+  }
+
   /** Nomes dos itens da página, na ordem devolvida. */
   private static List<String> names(Response response) {
     return response.jsonPath().getList("items.name", String.class);
@@ -450,6 +537,11 @@ class ProductsResourceTest extends IntegrationTestBase {
                         "UN",
                         new BigDecimal(price),
                         null)));
+  }
+
+  /** Soft delete pela porta, como o caso de uso do passo 412 fará — sem auditoria aqui. */
+  private void softDeleteViaPort(UUID id) {
+    QuarkusTransaction.requiringNew().run(() -> productStore.softDelete(id));
   }
 
   /** {@code count} produtos de preço fixo, numa transação só: a paginação precisa de massa. */

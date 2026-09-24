@@ -415,7 +415,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** busca por trecho do nome; filtro por categoria; paginação correta.
   **Commit:** `feat(catalog): lista e busca produtos`
 
-- [ ] **408 — API `GET /api/v1/products/{id}`**
+- [x] **408 — API `GET /api/v1/products/{id}`**
   **Objetivo:** detalhe do produto. **Depende:** 404
   **Implementar:** resposta completa com categoria, unidade, preço, status.
   **Testes/aceite:** 200; 404 `PRODUCT_NOT_FOUND`.

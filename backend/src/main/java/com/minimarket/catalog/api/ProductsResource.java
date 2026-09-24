@@ -2,6 +2,7 @@ package com.minimarket.catalog.api;
 
 import com.minimarket.catalog.application.CreateProductCommand;
 import com.minimarket.catalog.application.CreateProductUseCase;
+import com.minimarket.catalog.application.GetProductUseCase;
 import com.minimarket.catalog.application.ListProductsUseCase;
 import com.minimarket.catalog.application.ProductPage;
 import com.minimarket.catalog.application.ProductSummary;
@@ -15,6 +16,7 @@ import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
@@ -42,6 +44,8 @@ public class ProductsResource {
   @Inject CreateProductUseCase createProductUseCase;
 
   @Inject ListProductsUseCase listProductsUseCase;
+
+  @Inject GetProductUseCase getProductUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -97,6 +101,18 @@ public class ProductsResource {
         products.size(),
         products.totalItems(),
         products.totalPages());
+  }
+
+  /**
+   * Detalhe do produto com todos os campos do contrato (§9.3). Id inexistente, produto
+   * soft-deletado ou desativado → 404 {@code PRODUCT_NOT_FOUND}; quem decide isso é o caso de uso.
+   */
+  @GET
+  @Path("/{id}")
+  @RequirePermission(Permission.PRODUCT_READ)
+  @Produces(MediaType.APPLICATION_JSON)
+  public ProductResponse get(@PathParam("id") UUID id) {
+    return toResponse(getProductUseCase.execute(id));
   }
 
   private static ProductResponse toResponse(ProductSummary product) {
