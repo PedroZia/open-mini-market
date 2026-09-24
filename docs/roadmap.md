@@ -907,7 +907,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitário do normalizador; integração de `findByInternalCode` (ignora o soft-deletado) e do índice único parcial (`internal_code` duplicado vivo falha; o soft delete libera); parâmetros da etiqueta lidos pela porta `StoreLookup`.
   **Commit:** `feat(catalog): prepara cadastro e leitura do codigo interno`
 
-- [ ] **1104b2 — Parser puro da etiqueta de balança**
+- [x] **1104b2 — Parser puro da etiqueta de balança**
   **Objetivo:** decodificar a etiqueta sem banco nem HTTP. **Depende:** 1104b1
   **Implementar:** parser puro em `catalog/domain`: string bruta + parâmetros da loja → código interno e quantidade embutida (peso em kg ou preço total), sem resolver produto nem calcular total.
   **Testes/aceite:** unitário puro das etiquetas de peso e de preço nas configurações da loja; etiqueta fora do formato recusada.
