@@ -583,7 +583,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 7 — Estoque
 
-- [ ] **701 — Migration `product_stocks` + `stock_movements`**
+- [x] **701 — Migration `product_stocks` + `stock_movements`**
   **Objetivo:** saldo e ledger. **Depende:** 403
   **Implementar:** `V16__stock.sql` conforme §5.3 (ledger com `balance_after`, único `(store_id, product_id)` no saldo) + grants sem `UPDATE`/`DELETE` em `stock_movements`.
   **Testes/aceite:** migration aplica; `UPDATE`/`DELETE` no ledger falham por permissão.
