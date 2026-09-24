@@ -143,11 +143,13 @@ public class AuthResource {
   }
 
   /**
-   * Revoga uma sessão pela lista (§6.2, passo 210): só as do próprio usuário; sessão de outro
-   * usuário responde 404 pelo caso de uso, para não vazar a existência dela. Revogar a sessão atual
-   * é permitido — o cliente cai junto. Responde 204 sem corpo e é idempotente como o logout: sessão
-   * já revogada ou id desconhecido também é 204. Sem token, a política global (passo 307a) responde
-   * 401 {@code problem+json}.
+   * Revoga uma sessão pela lista (§6.2, passo 210): as do próprio usuário sempre; as de outro
+   * usuário quando quem pede tem {@code user.session.revoke} (passo 307b), permissão que só o ADMIN
+   * tem. Sem a permissão, a sessão alheia responde 404 pelo caso de uso, para não vazar a
+   * existência dela. A rota segue sem {@code @RequirePermission}: qualquer autenticado revoga as
+   * próprias sessões. Revogar a sessão atual é permitido — o cliente cai junto. Responde 204 sem
+   * corpo e é idempotente como o logout: sessão já revogada ou id desconhecido também é 204. Sem
+   * token, a política global (passo 307a) responde 401 {@code problem+json}.
    */
   @DELETE
   @Path("/sessions/{id}")

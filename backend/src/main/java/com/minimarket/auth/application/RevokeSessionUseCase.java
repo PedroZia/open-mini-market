@@ -4,6 +4,7 @@ import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.NotFoundException;
+import com.minimarket.shared.domain.Permission;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -16,10 +17,9 @@ import java.util.UUID;
  * regra 6): a sessão do token e a sessão alvo são lidas, o dono é conferido e a revogação grava com
  * o instante do {@code Clock} injetado — nada de {@code now()} espalhado pelo código.
  *
- * <p>Só as próprias sessões são revogáveis: sessão ativa de outro usuário responde 404 {@code
- * NOT_FOUND}, o mesmo "não existe" de um id desconhecido, para não vazar a existência da sessão
- * alheia. A variante de ADMIN ({@code user.session.revoke}) é dos passos 305–307 e ainda não
- * existe.
+ * <p>As próprias sessões são sempre revogáveis. Sessão ativa de outro usuário só cai com a
+ * permissão {@code user.session.revoke} (passo 307b); sem ela a resposta é 404 {@code NOT_FOUND}, o
+ * mesmo "não existe" de um id desconhecido, para não vazar a existência da sessão alheia.
  *
  * <p>Revogar a sessão atual é permitido — o cliente cai junto — e revogar uma já revogada ou um id
  * desconhecido é sucesso idempotente, como o logout (passo 208): o token alvo já não autentica e o
@@ -53,8 +53,15 @@ public class RevokeSessionUseCase {
   @Inject Clock clock;
 
   /**
-   * Revoga a sessão alvo se ela for do usuário autenticado. Sessão de outro usuário lança 404;
-   * sessão já revogada ou id desconhecido é no-op.
+   * Permissões efetivas de quem pede (passo 305): a revogação de sessão alheia depende de {@code
+   * user.session.revoke} (passo 307b).
+   */
+  @Inject AuthorizationService authorizationService;
+
+  /**
+   * Revoga a sessão alvo se ela for do usuário autenticado ou se quem pede tem {@code
+   * user.session.revoke}. Sessão de outro usuário sem a permissão lança 404; sessão já revogada ou
+   * id desconhecido é no-op.
    */
   @Transactional
   public void execute(UUID currentSessionId, UUID targetSessionId) {
@@ -67,7 +74,8 @@ public class RevokeSessionUseCase {
       // Já revogada ou desconhecida: o token alvo já não autentica, então não há o que revogar.
       return;
     }
-    if (!target.get().userId().equals(current.userId())) {
+    if (!target.get().userId().equals(current.userId())
+        && !authorizationService.has(Permission.USER_SESSION_REVOKE)) {
       throw new NotFoundException(SESSION_NOT_FOUND_DETAIL);
     }
     sessionStore.revoke(targetSessionId, SESSION_REVOKED_REASON, clock.instant());

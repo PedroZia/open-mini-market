@@ -333,7 +333,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** sem token `GET /users` → 401 `problem+json` (`INVALID_CREDENTIALS` + `traceId`); `GET /meta` → 200; `POST /auth/login` acessível; com token de ADMIN a API de usuários/papéis segue funcionando.
   **Commit:** `feat(auth): protege endpoints de usuarios e papeis`
 
-- [ ] **307b — Revogação de sessão alheia e matriz de permissões**
+- [x] **307b — Revogação de sessão alheia e matriz de permissões**
   **Objetivo:** aplicar `user.session.revoke` de verdade e provar a matriz de permissões. **Depende:** 307a
   **Implementar:** revogar sessão de outro usuário por quem tem `user.session.revoke` (hoje responde 404) e teste de matriz.
   **Testes/aceite:** matriz de permissões: OPERADOR recebe 403 em `/users`; ADMIN 200; GERENTE 403 em `role.write`.
