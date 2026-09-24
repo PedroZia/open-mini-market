@@ -20,13 +20,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Eventos de auditoria da administração de usuários (passo 310a) contra PostgreSQL real (Dev
- * Services): criar, editar, desativar e reativar gravam o evento esperado em {@code audit_events},
- * na mesma transação, com o ator que executou a operação e o antes/depois mínimo em {@code details}
- * (§7.2). A conferência é por SQL — o banco é a fonte de verdade do que comitou junto com o caso de
- * uso —, sempre filtrando por {@code action} e {@code entity_id}: a fixture do ADMIN gera eventos
- * ({@code USER_CREATED} do próprio admin e {@code LOGIN_SUCCESS}) e a desativação ainda gera {@code
- * SESSION_REVOKED} para o mesmo usuário (passo 213), que não podem entrar na conta.
+ * Eventos de auditoria da administração de usuários (passos 310a/310b) contra PostgreSQL real (Dev
+ * Services): criar, editar, desativar, reativar e resetar a senha gravam o evento esperado em
+ * {@code audit_events}, na mesma transação, com o ator que executou a operação e o antes/depois
+ * mínimo em {@code details} (§7.2). A conferência é por SQL — o banco é a fonte de verdade do que
+ * comitou junto com o caso de uso —, sempre filtrando por {@code action} e {@code entity_id}: a
+ * fixture do ADMIN gera eventos ({@code USER_CREATED} do próprio admin e {@code LOGIN_SUCCESS}), a
+ * desativação ainda gera {@code SESSION_REVOKED} (passo 213) e o reset de senha derruba as sessões
+ * do alvo pelo mesmo motivo, nenhum deles com a ação conferida.
  *
  * <p>O request HTTP commita de verdade e o log é append-only para a aplicação; o teste, conectado
  * como dono das tabelas, remove ao fim de cada teste o que ele mesmo criou — inclusive os usuários,
@@ -127,6 +128,39 @@ class UsersAuditEventsTest extends IntegrationTestBase {
     // RevokeSessionUseCase (passo 304).
     asAdmin().when().post(USERS_PATH + "/{id}/enable", id).then().statusCode(200);
     assertThat(events("USER_ENABLED", userId)).as("o no-op não inventa evento").hasSize(1);
+  }
+
+  @Test
+  @DisplayName("POST /users/{id}/password-reset grava PASSWORD_RESET sem senha nem hash em details")
+  void auditsPasswordReset() throws SQLException {
+    String username = "audita.senha." + SUFFIX;
+    String id = createUser(username, "Audita Senha", "OPERADOR");
+    String temporaryPassword = "senha-temporaria";
+
+    asAdmin()
+        .contentType("application/json")
+        .body(
+            """
+            {"newPassword": "%s"}
+            """
+                .formatted(temporaryPassword))
+        .when()
+        .post(USERS_PATH + "/{id}/password-reset", id)
+        .then()
+        .statusCode(200);
+
+    Event event = singleEvent("PASSWORD_RESET", UUID.fromString(id));
+    assertThat(event.entityType()).isEqualTo("USER");
+    assertThat(event.entityId()).isEqualTo(id);
+    assertThat(event.actorUsername()).isEqualTo(TestAdmin.USERNAME);
+
+    JsonNode details = detailsOf(event);
+    assertThat(details.path("username").asText()).isEqualTo(username);
+    assertThat(details.path("mustChangePassword").asBoolean()).isTrue();
+    assertThat(event.details())
+        .as("senha temporária e hash nunca entram no evento")
+        .doesNotContain(temporaryPassword)
+        .doesNotContain("$argon2");
   }
 
   /**

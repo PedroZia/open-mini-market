@@ -357,7 +357,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste por operação conferindo `action`, `entityId` e `details`.
   **Commit:** `feat(audit): audita operacoes de usuarios e papeis`
 
-- [ ] **310b — Auditar reset de senha e troca de permissões de papel**
+- [x] **310b — Auditar reset de senha e troca de permissões de papel**
   **Objetivo:** fechar a auditoria da administração de acessos. **Depende:** 310a
   **Implementar:** eventos `PASSWORD_RESET` (details `{username, mustChangePassword}`, nunca senha nem hash) e `ROLE_PERMISSIONS_CHANGED` (`entityType = "ROLE"`, `entityId` nulo, `before/after` das permissões), gravados no caso de uso.
   **Testes/aceite:** teste por operação conferindo `action`, `entityId` e `details`.
