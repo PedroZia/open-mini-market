@@ -641,7 +641,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 12+ testes unitários: totais, desconto percentual e por valor, desconto não deixa total negativo, alteração de preço do produto não afeta item existente, venda imutável após concluir.
   **Commit:** `feat(sales): adiciona modelo de dominio da venda`
 
-- [ ] **803 — Persistência da venda**
+- [x] **803 — Persistência da venda**
   **Objetivo:** salvar/carregar agregado completo. **Depende:** 802
   **Implementar:** `SaleEntity`/`SaleItemEntity` + mapper + `SaleRepository` (`findById` com itens, `insert`, `update`, `search` com filtros, `lockById`, `existsOpenByCashSession`).
   **Testes/aceite:** round-trip agregado→banco→agregado preserva totais e itens; busca por período/status.
