@@ -17,7 +17,8 @@ import java.util.UUID;
  *
  * <p>{@code cashRegisterId} é o caixa da sessão autenticada, montado pela API (passo 811) do {@code
  * OperationContext} — nunca do corpo: a {@link SaleAccessGuard} só deixa a operação seguir na venda
- * do caixa da sessão (BR-11, §9.4).
+ * do caixa da sessão (BR-11, §9.4). O autor, {@code discountAuthorizedByUserId}, vem do mesmo
+ * contexto (passo 1009): entra na linha da venda e é o ator do evento de auditoria.
  *
  * @param saleId venda que recebe o desconto
  * @param cashRegisterId caixa da sessão autenticada; nulo é sessão sem vínculo de caixa e a guarda
@@ -25,6 +26,13 @@ import java.util.UUID;
  * @param type tipo do desconto; nulo é comando inválido (400)
  * @param value valor informado, maior que zero; nulo ou não positivo é comando inválido (400)
  * @param reason motivo do desconto; nulo ou em branco é comando inválido (400)
+ * @param discountAuthorizedByUserId operador da sessão que autorizou o desconto (passo 1009), do
+ *     {@code OperationContext} pela API
  */
 public record ApplyDiscountCommand(
-    UUID saleId, UUID cashRegisterId, DiscountType type, BigDecimal value, String reason) {}
+    UUID saleId,
+    UUID cashRegisterId,
+    DiscountType type,
+    BigDecimal value,
+    String reason,
+    UUID discountAuthorizedByUserId) {}

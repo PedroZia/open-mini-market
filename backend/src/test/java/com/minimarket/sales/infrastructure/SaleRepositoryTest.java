@@ -196,7 +196,7 @@ class SaleRepositoryTest extends IntegrationTestBase {
 
   @Test
   @Transactional
-  @DisplayName("round-trip preserva desconto percentual, totais e a conclusão da venda")
+  @DisplayName("round-trip preserva desconto percentual, autor, totais e a conclusão da venda")
   void roundTripsDiscountAndCompletion() {
     Sale sale = openSale(1, openSessionId, operatorA, DAY_ONE);
     sale.addItem(
@@ -207,7 +207,8 @@ class SaleRepositoryTest extends IntegrationTestBase {
 
     Instant completedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
     Sale loaded = saleRepository.findById(sale.id()).orElseThrow();
-    loaded.applyDiscount(DiscountType.PERCENT, new BigDecimal("10"), "cliente do bairro");
+    loaded.applyDiscount(
+        DiscountType.PERCENT, new BigDecimal("10"), "cliente do bairro", operatorB);
     loaded.complete(completedAt);
     saleRepository.update(loaded);
     flushAndClear();
@@ -220,6 +221,9 @@ class SaleRepositoryTest extends IntegrationTestBase {
               assertThat(found.discountType()).isEqualTo(DiscountType.PERCENT);
               assertThat(found.discountValue()).isEqualByComparingTo("10.00");
               assertThat(found.discountReason()).isEqualTo("cliente do bairro");
+              assertThat(found.discountAuthorizedByUserId())
+                  .as("o autor volta com o desconto, mesmo depois da conclusão (passo 1009)")
+                  .isEqualTo(operatorB);
               assertThat(found.subtotal()).isEqualByComparingTo("54.50");
               assertThat(found.discountAmount()).as("10% de 54.50").isEqualByComparingTo("5.45");
               assertThat(found.total()).isEqualByComparingTo("49.05");
@@ -228,7 +232,41 @@ class SaleRepositoryTest extends IntegrationTestBase {
     assertThat(saleColumn("discount_type", sale.id())).isEqualTo("PERCENT");
     assertThat(moneyColumn("discount_value", sale.id())).isEqualByComparingTo("10.00");
     assertThat(saleColumn("discount_reason", sale.id())).isEqualTo("cliente do bairro");
+    assertThat(saleColumn("discount_authorized_by_user_id", sale.id()))
+        .as("o autor é gravado na coluna, não só no agregado")
+        .isEqualTo(operatorB);
     assertThat(saleColumn("completed_at", sale.id())).isNotNull();
+  }
+
+  @Test
+  @Transactional
+  @DisplayName("removeDiscount limpa o autor na coluna e o round-trip devolve o desconto sem autor")
+  void removalOfDiscountClearsAuthorInDatabase() {
+    Sale sale = openSale(1, openSessionId, operatorA, DAY_ONE);
+    sale.addItem(rice, "7891000315507", "Arroz 5kg", "UN", new BigDecimal("25.00"), BigDecimal.ONE);
+    sale.applyDiscount(DiscountType.VALUE, new BigDecimal("5.00"), "cortesia", operatorB);
+    saleRepository.insert(sale);
+    flushAndClear();
+
+    assertThat(saleRepository.findById(sale.id()))
+        .hasValueSatisfying(
+            found -> assertThat(found.discountAuthorizedByUserId()).isEqualTo(operatorB));
+
+    Sale loaded = saleRepository.findById(sale.id()).orElseThrow();
+    loaded.removeDiscount();
+    saleRepository.update(loaded);
+    flushAndClear();
+
+    assertThat(saleRepository.findById(sale.id()))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.discountType()).isNull();
+              assertThat(found.discountAuthorizedByUserId()).isNull();
+              assertThat(found.total()).isEqualByComparingTo("25.00");
+            });
+    assertThat(saleColumn("discount_authorized_by_user_id", sale.id()))
+        .as("a coluna volta a nulo junto com o desconto")
+        .isNull();
   }
 
   @Test

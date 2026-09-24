@@ -318,7 +318,8 @@ public class SalesResource {
    * outro caixa é 403 {@code ACCESS_DENIED}; venda fora de {@code OPEN} é 409 {@code
    * SALE_NOT_OPEN}; acima do limite da loja é 422 {@code DISCOUNT_LIMIT_EXCEEDED}. Tipo, valor ou
    * motivo ausentes são 400 {@code VALIDATION_ERROR} da forma, validada antes do caso de uso — que
-   * repete as três checagens como backstop.
+   * repete as três checagens como backstop. O autor do desconto (passo 1009) é o usuário da sessão,
+   * do {@code OperationContext}, nunca do corpo.
    */
   @PUT
   @Path("/{id}/discount")
@@ -334,7 +335,8 @@ public class SalesResource {
                 operationContext.cashRegisterId(),
                 request.type(),
                 request.value(),
-                request.reason()));
+                request.reason(),
+                operationContext.userId()));
     return toDetailResponse(sale);
   }
 

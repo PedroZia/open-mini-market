@@ -90,6 +90,9 @@ class SaleDiscountResourceTest extends IntegrationTestBase {
   /** GERENTE dono da venda: tem {@code sale.discount.apply} (seed da {@code V3__rbac.sql}). */
   private String username;
 
+  /** Id do GERENTE criado: é ele o autor do desconto gravado na venda (passo 1009). */
+  private UUID ownerUserId;
+
   private String token;
 
   private UUID registerId;
@@ -99,7 +102,7 @@ class SaleDiscountResourceTest extends IntegrationTestBase {
   @BeforeEach
   void openSaleWithItem() throws SQLException {
     username = "vendas.desconto." + SUFFIX + "." + UUID.randomUUID().toString().substring(0, 6);
-    createUser(username, List.of("GERENTE"));
+    ownerUserId = createUser(username, List.of("GERENTE"));
     registerId = cashRegisterId(SEEDED_REGISTER_CODE);
     token = login(username, registerId);
     cashSessionIds.add(open(registerId, token));
@@ -137,6 +140,9 @@ class SaleDiscountResourceTest extends IntegrationTestBase {
     assertThat(stored.discountReason()).isEqualTo("cliente fidelidade");
     assertThat(stored.discountAmount()).isEqualTo("1.98");
     assertThat(stored.total()).isEqualTo("17.82");
+    assertThat(stored.discountAuthorizedByUserId())
+        .as("o autor é o usuário da sessão autenticada (passo 1009)")
+        .isEqualTo(ownerUserId.toString());
     assertThat(auditEventCount(saleId, "SALE_DISCOUNT_APPLIED")).isEqualTo(1);
 
     Response removed = deleteDiscount(token);
@@ -151,7 +157,12 @@ class SaleDiscountResourceTest extends IntegrationTestBase {
         .as("sem desconto o total volta ao subtotal (BR-02)")
         .isEqualByComparingTo("19.80");
 
-    assertThat(saleRow(saleId).discountType()).isNull();
+    SaleRow afterRemoval = saleRow(saleId);
+
+    assertThat(afterRemoval.discountType()).isNull();
+    assertThat(afterRemoval.discountAuthorizedByUserId())
+        .as("remover o desconto limpa o autor (passo 1009)")
+        .isNull();
     assertThat(auditEventCount(saleId, "SALE_DISCOUNT_REMOVED")).isEqualTo(1);
   }
 
@@ -497,12 +508,13 @@ class SaleDiscountResourceTest extends IntegrationTestBase {
   }
 
   /** Cria o usuário pelo caso de uso (passo 107) com os papéis pedidos e rastreia o id. */
-  private void createUser(String username, List<String> roleCodes) {
+  private UUID createUser(String username, List<String> roleCodes) {
     UUID id =
         createUserUseCase
             .execute(new CreateUserCommand(username, username, PASSWORD, roleCodes))
             .id();
     userIds.add(id);
+    return id;
   }
 
   /** Login pela API (passo 205) vinculando a sessão ao caixa informado. */
@@ -529,7 +541,8 @@ class SaleDiscountResourceTest extends IntegrationTestBase {
         PreparedStatement statement =
             connection.prepareStatement(
                 "select discount_type, discount_value::text as discount_value, discount_reason,"
-                    + " discount_amount::text as discount_amount, total::text as total"
+                    + " discount_amount::text as discount_amount, total::text as total,"
+                    + " discount_authorized_by_user_id::text as discount_authorized_by_user_id"
                     + " from sales where id = ?")) {
       statement.setObject(1, id);
       try (ResultSet resultSet = statement.executeQuery()) {
@@ -539,7 +552,8 @@ class SaleDiscountResourceTest extends IntegrationTestBase {
             resultSet.getString("discount_value"),
             resultSet.getString("discount_reason"),
             resultSet.getString("discount_amount"),
-            resultSet.getString("total"));
+            resultSet.getString("total"),
+            resultSet.getString("discount_authorized_by_user_id"));
       }
     }
   }
@@ -585,5 +599,6 @@ class SaleDiscountResourceTest extends IntegrationTestBase {
       String discountValue,
       String discountReason,
       String discountAmount,
-      String total) {}
+      String total,
+      String discountAuthorizedByUserId) {}
 }

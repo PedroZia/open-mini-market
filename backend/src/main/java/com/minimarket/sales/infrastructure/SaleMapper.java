@@ -96,7 +96,10 @@ final class SaleMapper {
     }
     if (entity.getDiscountType() != null) {
       sale.applyDiscount(
-          entity.getDiscountType(), entity.getDiscountValue(), entity.getDiscountReason());
+          entity.getDiscountType(),
+          entity.getDiscountValue(),
+          entity.getDiscountReason(),
+          entity.getDiscountAuthorizedByUserId());
     }
     // O cliente entra antes da conclusão: a venda concluída é imutável e não aceitaria o vínculo.
     if (entity.getCustomerId() != null) {

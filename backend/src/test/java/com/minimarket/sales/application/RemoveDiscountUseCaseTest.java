@@ -36,6 +36,7 @@ class RemoveDiscountUseCaseTest {
   private static final UUID ANOTHER_REGISTER_ID =
       UUID.fromString("0199a2b3-0000-7000-8000-000000000011");
   private static final UUID OPERATOR_ID = UUID.fromString("0199a2b3-0000-7000-8000-000000000001");
+  private static final UUID AUTHORIZER_ID = UUID.fromString("0199a2b3-0000-7000-8000-000000000003");
   private static final Instant NOW = Instant.parse("2026-09-24T13:00:00Z");
 
   private final FakeSaleStore saleStore = new FakeSaleStore();
@@ -65,6 +66,7 @@ class RemoveDiscountUseCaseTest {
     assertThat(sale.discountType()).isNull();
     assertThat(sale.discountValue()).isNull();
     assertThat(sale.discountReason()).isNull();
+    assertThat(sale.discountAuthorizedByUserId()).as("o autor sai junto (passo 1009)").isNull();
     assertThat(sale.discountAmount()).isEqualByComparingTo("0.00");
     assertThat(sale.subtotal())
         .as("o subtotal é dos itens e não muda")
@@ -179,7 +181,8 @@ class RemoveDiscountUseCaseTest {
     sale.addItem(
         RICE_ID, "7891000100103", "Arroz 5kg", "UN", new BigDecimal("9.90"), new BigDecimal("2"));
     sale.addItem(BEANS_ID, null, "Feijão 1kg", "UN", new BigDecimal("8.50"), BigDecimal.ONE);
-    sale.applyDiscount(DiscountType.PERCENT, new BigDecimal("10"), "cliente fidelidade");
+    sale.applyDiscount(
+        DiscountType.PERCENT, new BigDecimal("10"), "cliente fidelidade", AUTHORIZER_ID);
     return sale;
   }
 

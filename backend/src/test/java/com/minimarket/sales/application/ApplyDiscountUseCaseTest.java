@@ -43,6 +43,10 @@ class ApplyDiscountUseCaseTest {
   private static final UUID ANOTHER_REGISTER_ID =
       UUID.fromString("0199a2b3-0000-7000-8000-000000000011");
   private static final UUID OPERATOR_ID = UUID.fromString("0199a2b3-0000-7000-8000-000000000001");
+
+  /** Quem aplica o desconto: um GERENTE da sessão, diferente do operador que abriu a venda. */
+  private static final UUID AUTHORIZER_ID = UUID.fromString("0199a2b3-0000-7000-8000-000000000003");
+
   private static final Instant NOW = Instant.parse("2026-09-24T13:00:00Z");
 
   /** Subtotal da venda do cenário: 2 × 20,00 de arroz + 10,00 de feijão. */
@@ -82,11 +86,15 @@ class ApplyDiscountUseCaseTest {
                 CASH_REGISTER_ID,
                 DiscountType.PERCENT,
                 new BigDecimal("10"),
-                "cliente fidelidade"));
+                "cliente fidelidade",
+                AUTHORIZER_ID));
 
     assertThat(sale.discountType()).isEqualTo(DiscountType.PERCENT);
     assertThat(sale.discountValue()).isEqualByComparingTo("10.00");
     assertThat(sale.discountReason()).isEqualTo("cliente fidelidade");
+    assertThat(sale.discountAuthorizedByUserId())
+        .as("o ator do comando fica na venda (passo 1009)")
+        .isEqualTo(AUTHORIZER_ID);
     assertThat(sale.subtotal())
         .as("o subtotal é dos itens, não do desconto")
         .isEqualByComparingTo(SUBTOTAL);
@@ -119,7 +127,8 @@ class ApplyDiscountUseCaseTest {
                 CASH_REGISTER_ID,
                 DiscountType.VALUE,
                 new BigDecimal("12.50"),
-                "arredondamento do caixa"));
+                "arredondamento do caixa",
+                AUTHORIZER_ID));
 
     assertThat(sale.discountType()).isEqualTo(DiscountType.VALUE);
     assertThat(sale.discountValue()).isEqualByComparingTo("12.50");
@@ -149,7 +158,8 @@ class ApplyDiscountUseCaseTest {
                     CASH_REGISTER_ID,
                     DiscountType.PERCENT,
                     new BigDecimal("10.01"),
-                    "cliente fidelidade")));
+                    "cliente fidelidade",
+                    AUTHORIZER_ID)));
 
     assertThat(saleStore.sale.discountType()).as("a venda não é tocada na recusa").isNull();
     assertThat(saleStore.sale.total()).isEqualByComparingTo(SUBTOTAL);
@@ -169,7 +179,8 @@ class ApplyDiscountUseCaseTest {
                     CASH_REGISTER_ID,
                     DiscountType.VALUE,
                     new BigDecimal("5.01"),
-                    "cortesia")));
+                    "cortesia",
+                    AUTHORIZER_ID)));
 
     assertThat(saleStore.sale.discountType()).isNull();
     assertThat(saleStore.sale.total()).isEqualByComparingTo(SUBTOTAL);
@@ -187,7 +198,8 @@ class ApplyDiscountUseCaseTest {
                 CASH_REGISTER_ID,
                 DiscountType.PERCENT,
                 new BigDecimal("10.00"),
-                "cliente fidelidade"));
+                "cliente fidelidade",
+                AUTHORIZER_ID));
 
     assertThat(sale.discountAmount()).isEqualByComparingTo("5.00");
     assertThat(saleStore.updateCount).isEqualTo(1);
@@ -201,7 +213,12 @@ class ApplyDiscountUseCaseTest {
     Sale sale =
         useCase.execute(
             new ApplyDiscountCommand(
-                SALE_ID, CASH_REGISTER_ID, DiscountType.VALUE, new BigDecimal("5.00"), "cortesia"));
+                SALE_ID,
+                CASH_REGISTER_ID,
+                DiscountType.VALUE,
+                new BigDecimal("5.00"),
+                "cortesia",
+                AUTHORIZER_ID));
 
     assertThat(sale.discountAmount())
         .as("5,00 de 50,00 é exatamente 10%")
@@ -223,13 +240,19 @@ class ApplyDiscountUseCaseTest {
                     CASH_REGISTER_ID,
                     DiscountType.VALUE,
                     new BigDecimal("5.00"),
-                    "cortesia")));
+                    "cortesia",
+                    AUTHORIZER_ID)));
 
     storeLookup.store = store("100.00");
     Sale sale =
         useCase.execute(
             new ApplyDiscountCommand(
-                SALE_ID, CASH_REGISTER_ID, DiscountType.VALUE, new BigDecimal("5.00"), "cortesia"));
+                SALE_ID,
+                CASH_REGISTER_ID,
+                DiscountType.VALUE,
+                new BigDecimal("5.00"),
+                "cortesia",
+                AUTHORIZER_ID));
 
     assertThat(sale.discountAmount())
         .as("desconto maior que o subtotal não deixa total negativo")
@@ -253,7 +276,8 @@ class ApplyDiscountUseCaseTest {
                         CASH_REGISTER_ID,
                         DiscountType.VALUE,
                         new BigDecimal("1.00"),
-                        "cortesia")))
+                        "cortesia",
+                        AUTHORIZER_ID)))
         .isInstanceOfSatisfying(
             ForbiddenException.class,
             error -> {
@@ -281,7 +305,8 @@ class ApplyDiscountUseCaseTest {
                       CASH_REGISTER_ID,
                       DiscountType.VALUE,
                       new BigDecimal("1.00"),
-                      reason)),
+                      reason,
+                      AUTHORIZER_ID)),
           "motivo do desconto é obrigatório");
     }
 
@@ -297,7 +322,12 @@ class ApplyDiscountUseCaseTest {
         () ->
             useCase.execute(
                 new ApplyDiscountCommand(
-                    SALE_ID, CASH_REGISTER_ID, null, new BigDecimal("1.00"), "cortesia")),
+                    SALE_ID,
+                    CASH_REGISTER_ID,
+                    null,
+                    new BigDecimal("1.00"),
+                    "cortesia",
+                    AUTHORIZER_ID)),
         "tipo do desconto é obrigatório");
 
     assertThat(saleStore.updateCount).isZero();
@@ -312,7 +342,12 @@ class ApplyDiscountUseCaseTest {
           () ->
               useCase.execute(
                   new ApplyDiscountCommand(
-                      SALE_ID, CASH_REGISTER_ID, DiscountType.VALUE, value, "cortesia")),
+                      SALE_ID,
+                      CASH_REGISTER_ID,
+                      DiscountType.VALUE,
+                      value,
+                      "cortesia",
+                      AUTHORIZER_ID)),
           "valor do desconto");
     }
 
@@ -333,7 +368,8 @@ class ApplyDiscountUseCaseTest {
                         CASH_REGISTER_ID,
                         DiscountType.VALUE,
                         new BigDecimal("1.00"),
-                        "cortesia")))
+                        "cortesia",
+                        AUTHORIZER_ID)))
         .isInstanceOfSatisfying(
             ConflictException.class,
             error -> assertThat(error.code()).isEqualTo(ErrorCode.SALE_NOT_OPEN));
@@ -354,7 +390,8 @@ class ApplyDiscountUseCaseTest {
                         ANOTHER_REGISTER_ID,
                         DiscountType.VALUE,
                         new BigDecimal("1.00"),
-                        "cortesia")))
+                        "cortesia",
+                        AUTHORIZER_ID)))
         .isInstanceOfSatisfying(
             ForbiddenException.class,
             error -> {
@@ -380,7 +417,8 @@ class ApplyDiscountUseCaseTest {
                         CASH_REGISTER_ID,
                         DiscountType.VALUE,
                         new BigDecimal("1.00"),
-                        "cortesia")))
+                        "cortesia",
+                        AUTHORIZER_ID)))
         .isInstanceOfSatisfying(
             NotFoundException.class,
             error -> {

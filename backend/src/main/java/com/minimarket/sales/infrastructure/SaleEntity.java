@@ -21,12 +21,12 @@ import java.util.UUID;
  * Panache — o id (UUIDv7) chega pronto do agregado e a entidade não sai do módulo: nada de JPA em
  * JSON.
  *
- * <p>Só as colunas que o domínio usa hoje estão mapeadas; {@code discount_authorized_by_user_id}
- * entra quando houver caso de uso para ele. O bloco de cancelamento (passo 813) está mapeado:
- * motivo, autor e instante são estado do agregado desde o {@code Sale.cancel}. {@code
- * paid_amount}/{@code change_amount} também são do agregado desde o 904: o domínio os deriva dos
- * pagamentos ({@code Sale.applyPaymentTotals}) e {@link #syncFrom(Sale)} os grava como qualquer
- * outro total.
+ * <p>Só as colunas que o domínio usa hoje estão mapeadas; o bloco de cancelamento (passo 813) está
+ * mapeado: motivo, autor e instante são estado do agregado desde o {@code Sale.cancel}. O autor do
+ * desconto (passo 1009) acompanha tipo/valor/motivo: é coluna anulável, e {@link #syncFrom(Sale)} a
+ * limpa junto com o desconto removido. {@code paid_amount}/{@code change_amount} também são do
+ * agregado desde o 904: o domínio os deriva dos pagamentos ({@code Sale.applyPaymentTotals}) e
+ * {@link #syncFrom(Sale)} os grava como qualquer outro total.
  */
 @Entity
 @Table(name = "sales")
@@ -74,6 +74,10 @@ public class SaleEntity {
 
   @Column(name = "discount_reason")
   private String discountReason;
+
+  /** Quem autorizou o desconto (passo 1009); nulo sem desconto ou no desconto anterior ao passo. */
+  @Column(name = "discount_authorized_by_user_id")
+  private UUID discountAuthorizedByUserId;
 
   @Column(name = "total")
   private BigDecimal total;
@@ -171,6 +175,7 @@ public class SaleEntity {
     this.discountValue = sale.discountValue();
     this.discountAmount = sale.discountAmount();
     this.discountReason = sale.discountReason();
+    this.discountAuthorizedByUserId = sale.discountAuthorizedByUserId();
     this.customerId = sale.customerId();
     this.total = sale.total();
     this.paidAmount = sale.paidAmount();
@@ -236,6 +241,10 @@ public class SaleEntity {
 
   public String getDiscountReason() {
     return discountReason;
+  }
+
+  public UUID getDiscountAuthorizedByUserId() {
+    return discountAuthorizedByUserId;
   }
 
   public BigDecimal getTotal() {

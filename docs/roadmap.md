@@ -849,7 +849,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** dois `disable` concorrentes de ADMINS distintos → exatamente um sucesso e um 409, sobra 1 ADMIN ativo (ExecutorService + latch, sem sleep; skill `teste-concorrencia`); o teste sequencial do 112 continua verde.
   **Commit:** `fix(users): protege o ultimo admin sob concorrencia`
 
-- [ ] **1009 — Autor do desconto persistido**
+- [x] **1009 — Autor do desconto persistido**
   **Objetivo:** persistir quem aplicou o desconto. **Depende:** 810
   **Implementar:** mapear `sales.discount_authorized_by_user_id` e o campo no domínio (`SaleEntity`/`SaleMapper`) e gravar o ator que aplicou (vem do contexto/comando já usado na auditoria); limpar na remoção; round-trip preservado.
   **Testes/aceite:** aplicar grava o autor; remover limpa; reidratar mantém.

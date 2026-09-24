@@ -45,6 +45,7 @@ public final class Sale {
   private DiscountType discountType;
   private BigDecimal discountValue;
   private String discountReason;
+  private UUID discountAuthorizedByUserId;
   private BigDecimal subtotal = zeroMoney();
   private BigDecimal discountAmount = zeroMoney();
   private BigDecimal total = zeroMoney();
@@ -159,6 +160,16 @@ public final class Sale {
   /** Motivo do desconto; a obrigatoriedade e o limite da loja são do passo 810. */
   public String discountReason() {
     return discountReason;
+  }
+
+  /**
+   * Quem autorizou o desconto (passo 1009): o operador da sessão que o aplicou, o mesmo ator do
+   * evento {@code SALE_DISCOUNT_APPLIED}. Nulo na venda sem desconto e no desconto aplicado antes
+   * de o autor ser persistido — a coluna {@code discount_authorized_by_user_id} é anulável, e a
+   * leitura de uma venda antiga não pode falhar por causa disso.
+   */
+  public UUID discountAuthorizedByUserId() {
+    return discountAuthorizedByUserId;
   }
 
   /** Σ do total das linhas (BR-02). */
@@ -277,16 +288,19 @@ public final class Sale {
   }
 
   /**
-   * Aplica o desconto da venda: guarda tipo, valor e motivo e recalcula o total. O desconto é
-   * recalculado pelo servidor a partir do tipo e do valor (BR-03) — o cliente nunca manda o valor
+   * Aplica o desconto da venda: guarda tipo, valor, motivo e autor e recalcula o total. O desconto
+   * é recalculado pelo servidor a partir do tipo e do valor (BR-03) — o cliente nunca manda o valor
    * final. A permissão de quem aplica, a obrigatoriedade do motivo e o limite da loja são checados
    * no caso de uso (passo 810).
    *
    * @param value reais quando {@code VALUE}, percentual quando {@code PERCENT}; maior que zero
    * @param reason motivo do desconto; nulo quando não informado
+   * @param authorizedByUserId quem autorizou, da sessão autenticada (passo 1009); nulo é o desconto
+   *     sem autor registrado, como os aplicados antes deste passo — a coluna é anulável
    * @throws BusinessException se a venda não estiver aberta ou o tipo/valor forem inválidos
    */
-  public void applyDiscount(DiscountType type, BigDecimal value, String reason) {
+  public void applyDiscount(
+      DiscountType type, BigDecimal value, String reason, UUID authorizedByUserId) {
     requireOpen();
     if (type == null) {
       throw new BusinessException(ErrorCode.BUSINESS_ERROR, "tipo de desconto é obrigatório");
@@ -298,14 +312,16 @@ public final class Sale {
     this.discountType = type;
     this.discountValue = money(value);
     this.discountReason = reason;
+    this.discountAuthorizedByUserId = authorizedByUserId;
     recalculate();
   }
 
   /**
-   * Tira o desconto da venda: tipo, valor e motivo voltam a nulo e o total volta a ser o subtotal
-   * (BR-02/BR-03) — quem recalcula é {@link #recalculate()}, como em qualquer mutação do agregado.
-   * A permissão de quem remove e o evento de auditoria são do caso de uso (passo 810); remover
-   * venda sem desconto é no-op de estado (nada a zerar), e quem decide não gravar é o caso de uso.
+   * Tira o desconto da venda: tipo, valor, motivo e autor voltam a nulo e o total volta a ser o
+   * subtotal (BR-02/BR-03) — quem recalcula é {@link #recalculate()}, como em qualquer mutação do
+   * agregado. A permissão de quem remove e o evento de auditoria são do caso de uso (passo 810);
+   * remover venda sem desconto é no-op de estado (nada a zerar), e quem decide não gravar é o caso
+   * de uso.
    *
    * @throws BusinessException se a venda não estiver aberta
    */
@@ -314,6 +330,7 @@ public final class Sale {
     this.discountType = null;
     this.discountValue = null;
     this.discountReason = null;
+    this.discountAuthorizedByUserId = null;
     recalculate();
   }
 

@@ -48,6 +48,7 @@ class SaleTest {
     assertThat(sale.items()).isEmpty();
     assertThat(sale.subtotal()).isEqualTo(new BigDecimal("0.00"));
     assertThat(sale.discountAmount()).isEqualTo(new BigDecimal("0.00"));
+    assertThat(sale.discountAuthorizedByUserId()).as("sem desconto não há autor").isNull();
     assertThat(sale.total()).isEqualTo(new BigDecimal("0.00"));
     assertThat(sale.itemCount()).isZero();
     assertThat(sale.completedAt()).isNull();
@@ -188,7 +189,8 @@ class SaleTest {
     Sale sale = openSale();
     sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("16.67"), new BigDecimal("2"));
 
-    sale.applyDiscount(DiscountType.PERCENT, new BigDecimal("10"), "cliente fidelidade");
+    sale.applyDiscount(
+        DiscountType.PERCENT, new BigDecimal("10"), "cliente fidelidade", OPERATOR_ID);
 
     assertThat(sale.subtotal()).isEqualTo(new BigDecimal("33.34"));
     assertThat(sale.discountType()).isEqualTo(DiscountType.PERCENT);
@@ -196,6 +198,9 @@ class SaleTest {
     assertThat(sale.discountAmount()).isEqualTo(new BigDecimal("3.33"));
     assertThat(sale.total()).isEqualTo(new BigDecimal("30.01"));
     assertThat(sale.discountReason()).isEqualTo("cliente fidelidade");
+    assertThat(sale.discountAuthorizedByUserId())
+        .as("quem aplicou fica gravado na venda (passo 1009)")
+        .isEqualTo(OPERATOR_ID);
   }
 
   @Test
@@ -204,7 +209,8 @@ class SaleTest {
     Sale sale = openSale();
     sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("25.00"), new BigDecimal("2"));
 
-    sale.applyDiscount(DiscountType.VALUE, new BigDecimal("4.5"), "arredondamento do caixa");
+    sale.applyDiscount(
+        DiscountType.VALUE, new BigDecimal("4.5"), "arredondamento do caixa", OPERATOR_ID);
 
     assertThat(sale.subtotal()).isEqualTo(new BigDecimal("50.00"));
     assertThat(sale.discountValue()).isEqualTo(new BigDecimal("4.50"));
@@ -218,12 +224,12 @@ class SaleTest {
     Sale sale = openSale();
     sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("10.00"), BigDecimal.ONE);
 
-    sale.applyDiscount(DiscountType.VALUE, new BigDecimal("25.00"), "cortesia");
+    sale.applyDiscount(DiscountType.VALUE, new BigDecimal("25.00"), "cortesia", OPERATOR_ID);
 
     assertThat(sale.discountAmount()).isEqualTo(new BigDecimal("25.00"));
     assertThat(sale.total()).isEqualTo(new BigDecimal("0.00"));
 
-    sale.applyDiscount(DiscountType.PERCENT, new BigDecimal("150"), "cortesia");
+    sale.applyDiscount(DiscountType.PERCENT, new BigDecimal("150"), "cortesia", OPERATOR_ID);
 
     assertThat(sale.discountAmount()).isEqualTo(new BigDecimal("15.00"));
     assertThat(sale.total()).isEqualTo(new BigDecimal("0.00"));
@@ -236,11 +242,11 @@ class SaleTest {
     sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("10.00"), BigDecimal.ONE);
 
     assertBusinessError(
-        () -> sale.applyDiscount(null, new BigDecimal("5.00"), "cortesia"),
+        () -> sale.applyDiscount(null, new BigDecimal("5.00"), "cortesia", OPERATOR_ID),
         "tipo de desconto é obrigatório");
     for (BigDecimal value : Arrays.asList(null, BigDecimal.ZERO, new BigDecimal("-1.00"))) {
       assertBusinessError(
-          () -> sale.applyDiscount(DiscountType.VALUE, value, "cortesia"),
+          () -> sale.applyDiscount(DiscountType.VALUE, value, "cortesia", OPERATOR_ID),
           "valor do desconto deve ser maior que zero");
     }
 
@@ -254,13 +260,15 @@ class SaleTest {
   void removeDiscountRestoresSubtotal() {
     Sale sale = openSale();
     sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("25.00"), new BigDecimal("2"));
-    sale.applyDiscount(DiscountType.PERCENT, new BigDecimal("10"), "cliente fidelidade");
+    sale.applyDiscount(
+        DiscountType.PERCENT, new BigDecimal("10"), "cliente fidelidade", OPERATOR_ID);
 
     sale.removeDiscount();
 
     assertThat(sale.discountType()).as("tipo, valor e motivo voltam a nulo").isNull();
     assertThat(sale.discountValue()).isNull();
     assertThat(sale.discountReason()).isNull();
+    assertThat(sale.discountAuthorizedByUserId()).as("o autor sai junto (passo 1009)").isNull();
     assertThat(sale.discountAmount()).isEqualTo(new BigDecimal("0.00"));
     assertThat(sale.subtotal())
         .as("o subtotal não muda: depende só dos itens")
@@ -289,7 +297,7 @@ class SaleTest {
   void rejectsRemoveDiscountAfterCompletion() {
     Sale sale = openSale();
     sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("10.00"), BigDecimal.ONE);
-    sale.applyDiscount(DiscountType.VALUE, new BigDecimal("1.00"), "cortesia");
+    sale.applyDiscount(DiscountType.VALUE, new BigDecimal("1.00"), "cortesia", OPERATOR_ID);
     sale.complete(Instant.parse("2026-09-24T12:30:00Z"));
 
     assertBusinessError(sale::removeDiscount, "não aceita alteração");
@@ -364,7 +372,8 @@ class SaleTest {
   void recalculateIsIdempotent() {
     Sale sale = openSale();
     sale.addItem(RICE, null, "Arroz 5kg", "UN", new BigDecimal("16.67"), new BigDecimal("2"));
-    sale.applyDiscount(DiscountType.PERCENT, new BigDecimal("10"), "cliente fidelidade");
+    sale.applyDiscount(
+        DiscountType.PERCENT, new BigDecimal("10"), "cliente fidelidade", OPERATOR_ID);
     sale.recalculate();
 
     BigDecimal subtotal = sale.subtotal();
@@ -426,7 +435,8 @@ class SaleTest {
         () -> sale.changeQuantity(RICE, new BigDecimal("3.000")), "não aceita alteração");
     assertBusinessError(() -> sale.removeItem(RICE), "não aceita alteração");
     assertBusinessError(
-        () -> sale.applyDiscount(DiscountType.VALUE, new BigDecimal("1.00"), "cortesia"),
+        () ->
+            sale.applyDiscount(DiscountType.VALUE, new BigDecimal("1.00"), "cortesia", OPERATOR_ID),
         "não aceita alteração");
 
     assertThat(sale.items()).hasSize(1);
@@ -469,7 +479,8 @@ class SaleTest {
         () -> sale.changeQuantity(RICE, new BigDecimal("3.000")), "não aceita alteração");
     assertBusinessError(() -> sale.removeItem(RICE), "não aceita alteração");
     assertBusinessError(
-        () -> sale.applyDiscount(DiscountType.VALUE, new BigDecimal("1.00"), "cortesia"),
+        () ->
+            sale.applyDiscount(DiscountType.VALUE, new BigDecimal("1.00"), "cortesia", OPERATOR_ID),
         "não aceita alteração");
     assertBusinessError(sale::removeDiscount, "não aceita alteração");
     assertBusinessError(() -> sale.linkCustomer(UUID.randomUUID()), "não aceita alteração");

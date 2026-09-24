@@ -49,8 +49,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  *
  * <p>Auditoria (§7.2): {@code SALE_DISCOUNT_APPLIED} na mesma transação, com o motivo do desconto
  * em {@code reason} e tipo, valor, valor calculado e total em {@code details} — o ator que
- * autorizou vem do {@code OperationContext}, não do comando. Devolve o agregado atualizado — quem
- * monta a resposta é a API (passo 811).
+ * autorizou vem do {@code OperationContext} (pela API, no comando), nunca do corpo da requisição, e
+ * é gravado também na própria venda desde o passo 1009. Devolve o agregado atualizado — quem monta
+ * a resposta é a API (passo 811).
  */
 @ApplicationScoped
 public class ApplyDiscountUseCase {
@@ -105,7 +106,7 @@ public class ApplyDiscountUseCase {
     BigDecimal value = requireValue(command.value());
     String reason = requireReason(command.reason());
     requireWithinStoreLimit(type, value, sale.subtotal());
-    sale.applyDiscount(type, value, reason);
+    sale.applyDiscount(type, value, reason, command.discountAuthorizedByUserId());
     saleStore.update(sale);
     auditRecorder.record(
         SALE_DISCOUNT_APPLIED_ACTION,
