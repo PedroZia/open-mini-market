@@ -567,7 +567,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200; resumo confere com os movimentos; 409 se já fechada.
   **Commit:** `feat(cash): expoe fechamento e resumo de caixa`
 
-- [ ] **613 — Testes de concorrência de caixa**
+- [x] **613 — Testes de concorrência de caixa**
   **Objetivo:** provar as garantias de §8. **Depende:** 612
   **Implementar:** testes com threads: dois `open` simultâneos (1 sucesso, 1 conflito); dois `close` simultâneos (1 sucesso); sangria durante fechamento não corrompe totais.
   **Testes/aceite:** 3 testes verdes e determinísticos (usar `ExecutorService` + latch, sem `sleep` arbitrário).

@@ -98,6 +98,9 @@ class RecordSupplyUseCaseTest {
     assertThat(movement.referenceType()).isNull();
     assertThat(movement.referenceId()).isNull();
 
+    assertThat(cashSessionStore.lockedSessionIds)
+        .as("o status é rechecado sob o lock da sessão, antes de gravar o movimento")
+        .containsExactly(SESSION_ID);
     assertThat(cashSessionStore.summedSessionIds)
         .as("o esperado antes e depois usa a mesma regra sobre os totais do banco")
         .containsExactly(SESSION_ID, SESSION_ID);
@@ -206,6 +209,24 @@ class RecordSupplyUseCaseTest {
   }
 
   @Test
+  @DisplayName("sessão fechada entre a leitura e o lock: 404 CASH_SESSION_NOT_OPEN sem gravar")
+  void rejectsSessionClosedUnderTheLock() {
+    cashSessionStore.openSession = openSession("100.00");
+    cashSessionStore.lockedSession = closedSession();
+
+    assertThatThrownBy(() -> useCase.execute(command("10.00", "troco extra")))
+        .as(
+            "o fechamento da outra transação vence a corrida e o suprimento não grava fora da conta")
+        .isInstanceOfSatisfying(
+            NotFoundException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.CASH_SESSION_NOT_OPEN));
+
+    assertThat(cashSessionStore.lockedSessionIds).containsExactly(SESSION_ID);
+    assertThat(cashSessionStore.movement).isNull();
+    assertThat(auditRecorder.recorded).isEmpty();
+  }
+
+  @Test
   @DisplayName("valor é normalizado na escala 2 com HALF_UP antes de virar movimento")
   void normalizesAmountToScaleTwoHalfUp() {
     cashSessionStore.openSession = openSession("100.00");
@@ -226,11 +247,20 @@ class RecordSupplyUseCaseTest {
 
   /** Sessão aberta como o adaptador a projeta; fechamento ainda nulo. */
   private static CashSessionSummary openSession(String openingAmount) {
+    return session(CashSessionStatus.OPEN, openingAmount);
+  }
+
+  /** Sessão já fechada pelo vencedor da corrida, como o {@code lockById} a releria. */
+  private static CashSessionSummary closedSession() {
+    return session(CashSessionStatus.CLOSED, "100.00");
+  }
+
+  private static CashSessionSummary session(CashSessionStatus status, String openingAmount) {
     return new CashSessionSummary(
         SESSION_ID,
         STORE_ID,
         REGISTER_ID,
-        CashSessionStatus.OPEN,
+        status,
         OPERATOR_ID,
         NOW,
         new BigDecimal(openingAmount),
@@ -255,14 +285,17 @@ class RecordSupplyUseCaseTest {
 
   /**
    * Dublê de {@link CashSessionStore}: devolve a sessão aberta configurada (só para o caixa {@link
-   * #REGISTER_ID}), soma os totais somando o movimento inserido — como o banco faria na releitura
-   * depois do insert.
+   * #REGISTER_ID}) e a sessão travada configurada — {@code CLOSED} encena a corrida perdida para o
+   * fechamento. Soma os totais somando o movimento inserido, como o banco faria na releitura depois
+   * do insert.
    */
   private static final class FakeCashSessionStore implements CashSessionStore {
 
     private CashSessionSummary openSession;
+    private CashSessionSummary lockedSession;
     private Map<CashMovementType, BigDecimal> totals = new EnumMap<>(CashMovementType.class);
     private final List<UUID> lookedUpRegisterIds = new ArrayList<>();
+    private final List<UUID> lockedSessionIds = new ArrayList<>();
     private final List<UUID> summedSessionIds = new ArrayList<>();
     private NewCashMovement movement;
 
@@ -298,7 +331,9 @@ class RecordSupplyUseCaseTest {
 
     @Override
     public Optional<CashSessionSummary> lockById(UUID id) {
-      throw new UnsupportedOperationException("lockById não é usado por RecordSupply");
+      lockedSessionIds.add(id);
+      CashSessionSummary session = lockedSession != null ? lockedSession : openSession;
+      return Optional.ofNullable(session).filter(locked -> locked.id().equals(id));
     }
 
     @Override

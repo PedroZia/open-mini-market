@@ -3,6 +3,7 @@ package com.minimarket.cash.application;
 import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.cash.domain.CashMovementType;
 import com.minimarket.cash.domain.CashSessionAmounts;
+import com.minimarket.cash.domain.CashSessionStatus;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.NotFoundException;
@@ -24,7 +25,13 @@ import java.util.UUID;
  *
  * <p>O caixa precisa ter sessão aberta: {@link CashSessionStore#findOpenByRegister} vazio é 404
  * {@code CASH_SESSION_NOT_OPEN}, o mesmo código do passo 608 — caixa inexistente, inativo ou já
- * fechado cai no mesmo caso, sem revelar quais caixas existem.
+ * fechado cai no mesmo caso, sem revelar quais caixas existem. A sessão encontrada é então travada
+ * com {@link CashSessionStore#lockById} ({@code SELECT ... FOR UPDATE}, passo 604) e o status é
+ * rechecado sob o lock, que é quem serializa com o fechamento: sem ele, o {@code
+ * CloseCashSessionUseCase} poderia calcular o esperado e fechar a sessão entre a leitura e o insert
+ * do movimento, e o suprimento gravaria dinheiro entrando em uma sessão já fechada, fora da conta
+ * do {@code expected_amount} (o cenário 3 do passo 613 mostrou a janela na sangria, espelho deste
+ * caso de uso). Sessão que não está mais aberta sob o lock é o mesmo 404, sem gravar nada.
  *
  * <p>Valor nulo ou não positivo e motivo em branco são 400 {@code VALIDATION_ERROR}, na ordem:
  * entrada inválida não chega a consultar o banco. O valor é normalizado na escala 2 com {@code
@@ -74,7 +81,7 @@ public class RecordSupplyUseCase {
   public CashMovementResult execute(RecordSupplyCommand command) {
     BigDecimal amount = requireAmount(command.amount());
     String reason = requireReason(command.reason());
-    CashSessionSummary session = requireOpenSession(command.cashRegisterId());
+    CashSessionSummary session = lockOpenSession(requireOpenSession(command.cashRegisterId()));
 
     Instant createdAt = clock.instant();
     BigDecimal expectedBefore = expectedAmount(session);
@@ -137,6 +144,23 @@ public class RecordSupplyUseCase {
                 new NotFoundException(
                     ErrorCode.CASH_SESSION_NOT_OPEN,
                     "caixa %s não tem sessão aberta".formatted(cashRegisterId)));
+  }
+
+  /**
+   * Trava a sessão ({@code SELECT ... FOR UPDATE}) e recheca o status sob o lock: o fechamento
+   * trava a mesma linha, então é o lock que decide a ordem — quem chega depois encontra {@code
+   * CLOSED} e recebe o mesmo 404 do caminho comum, nunca um movimento gravado fora da conta do
+   * {@code expected_amount}.
+   */
+  private CashSessionSummary lockOpenSession(CashSessionSummary session) {
+    return cashSessionStore
+        .lockById(session.id())
+        .filter(locked -> locked.status() == CashSessionStatus.OPEN)
+        .orElseThrow(
+            () ->
+                new NotFoundException(
+                    ErrorCode.CASH_SESSION_NOT_OPEN,
+                    "sessão de caixa %s não está mais aberta".formatted(session.id())));
   }
 
   /**

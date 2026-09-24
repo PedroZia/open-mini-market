@@ -126,20 +126,23 @@ public class CashSessionRepository implements CashSessionStore {
   /**
    * {@inheritDoc}
    *
-   * <p>O {@code SELECT ... FOR UPDATE} é emitido na consulta, não no {@code find} com lock: a linha
-   * é travada já na leitura e a transação só solta no commit. Projeção na saída — a entidade fica
-   * presa no adaptador.
+   * <p>O {@code SELECT ... FOR UPDATE} sai no {@code refresh} com lock, não numa consulta: o {@code
+   * find} reaproveita a cópia que o {@code findOpenByRegister} da mesma transação já deixou no
+   * contexto de persistência e o {@code refresh} relê a linha do banco <em>já travada</em>, repondo
+   * essa cópia com o estado atual — inclusive {@code status} e {@code version}. Uma consulta comum
+   * aqui morreria com {@code OptimisticLockException} se outra transação tivesse fechado a sessão
+   * entre a leitura e o lock (o passo 613 pegou exatamente isso: o perdedor de dois fechamentos
+   * simultâneos recebia 500 em vez do 409 de sessão já fechada). Projeção na saída — a entidade
+   * fica presa no adaptador.
    */
   @Override
   public Optional<CashSessionSummary> lockById(UUID id) {
-    List<CashSessionEntity> found =
-        entityManager
-            .createQuery(
-                "select s from CashSessionEntity s where s.id = :id", CashSessionEntity.class)
-            .setLockMode(LockModeType.PESSIMISTIC_WRITE)
-            .setParameter("id", id)
-            .getResultList();
-    return firstSummary(found);
+    CashSessionEntity entity = entityManager.find(CashSessionEntity.class, id);
+    if (entity == null) {
+      return Optional.empty();
+    }
+    entityManager.refresh(entity, LockModeType.PESSIMISTIC_WRITE);
+    return Optional.of(toSummary(entity));
   }
 
   /**
