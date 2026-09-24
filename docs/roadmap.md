@@ -297,7 +297,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de integração: `INSERT`/`SELECT` funcionam; `UPDATE`/`DELETE` falham por permissão.
   **Commit:** `feat(audit): cria tabela de auditoria append-only`
 
-- [ ] **302 — `OperationContext`**
+- [x] **302 — `OperationContext`**
   **Objetivo:** contexto do ator disponível para toda a aplicação. **Depende:** 206, 301
   **Implementar:** bean `@RequestScoped` com `userId`, `username`, `authSessionId`, `storeId`, `cashRegisterId`, `requestId`, `ip`, `source` (TUI/WEB/API/SYSTEM); preenchido pelo mecanismo de autenticação/filtro.
   **Testes/aceite:** teste de API confirma que os campos chegam preenchidos no contexto durante a requisição.

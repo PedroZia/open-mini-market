@@ -68,9 +68,14 @@ class AuthenticateSessionUseCaseTest {
     AuthenticatedSession result = useCase.execute("hash-do-token");
 
     assertThat(result.sessionId()).isEqualTo(SESSION_ID);
+    assertThat(result.userId()).isEqualTo(USER_ID);
     assertThat(result.username()).isEqualTo(USERNAME);
     assertThat(result.roles()).containsExactly("OPERADOR");
     assertThat(result.permissions()).containsExactly("sale.create");
+    // Cliente, loja e caixa da sessão viajam na identidade para o contexto de operação (passo 302).
+    assertThat(result.client()).isEqualTo(SessionClient.WEB);
+    assertThat(result.storeId()).isEqualTo(STORE_ID);
+    assertThat(result.cashRegisterId()).isNull();
     assertThat(sessionStore.touches).containsExactly(NOW);
     assertThat(sessionStore.session.lastSeenAt()).isEqualTo(NOW);
   }

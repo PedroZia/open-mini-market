@@ -25,6 +25,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * sessão vencida de vez não mente sobre o motivo. Cada cliente tem seu limite (§6.2): WEB 30 min,
  * TUI 8 h.
  *
+ * <p>A identidade devolvida carrega também o cliente, a loja e o caixa da sessão (passo 302): são
+ * atributos da identidade e é deles que o {@code OperationContext} da requisição é preenchido, sem
+ * uma segunda consulta ao banco.
+ *
  * <p>{@code last_seen_at} é atualizado no máximo 1x/min ({@code
  * minimarket.security.session.touch-interval-seconds}, §6.2 — sem isso seria um write por request)
  * e por um {@code update} único: dois requests do mesmo token podem decidir tocar a sessão ao mesmo
@@ -68,8 +72,8 @@ public class AuthenticateSessionUseCase {
    * Resolve a identidade do token: 401 {@code INVALID_CREDENTIALS} para hash desconhecido ou
    * revogado, 401 {@code SESSION_EXPIRED} para expiração absoluta vencida, 401 {@code
    * SESSION_IDLE_TIMEOUT} para inatividade além do limite do cliente e, no sucesso, usuário, RBAC
-   * efetivo e id da sessão. Usuário inexistente também é 401 genérico — sem usuário não há
-   * identidade para montar.
+   * efetivo, id da sessão e a origem da operação (cliente, loja e caixa da sessão). Usuário
+   * inexistente também é 401 genérico — sem usuário não há identidade para montar.
    */
   @Transactional
   public AuthenticatedSession execute(String tokenHash) {
@@ -92,7 +96,14 @@ public class AuthenticateSessionUseCase {
             .orElseThrow(
                 () -> new BusinessException(ErrorCode.INVALID_CREDENTIALS, INVALID_TOKEN_DETAIL));
     return new AuthenticatedSession(
-        session.id(), user.username(), user.roles(), user.permissions());
+        session.id(),
+        user.id(),
+        user.username(),
+        user.roles(),
+        user.permissions(),
+        session.client(),
+        session.storeId(),
+        session.cashRegisterId());
   }
 
   /**
