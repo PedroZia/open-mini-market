@@ -747,7 +747,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 8+ testes unitários (pagamento único, múltiplos, troco, insuficiente, pagamento maior que o total em cartão → recusado ou registrado conforme regra definida).
   **Commit:** `feat(sales): adiciona modelo de dominio de pagamento`
 
-- [ ] **903 — Persistência de pagamento**
+- [x] **903 — Persistência de pagamento**
   **Objetivo:** salvar pagamentos. **Depende:** 902
   **Implementar:** `PaymentEntity` + mapper + repo (`listBySale`, `insert`, `cancel`, `sumApprovedBySale`).
   **Testes/aceite:** round-trip e soma correta.
