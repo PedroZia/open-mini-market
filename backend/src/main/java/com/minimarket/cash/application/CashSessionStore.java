@@ -3,6 +3,7 @@ package com.minimarket.cash.application;
 import com.minimarket.cash.domain.CashMovementType;
 import com.minimarket.shared.domain.ConflictException;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,4 +51,20 @@ public interface CashSessionStore {
    * desconhecido.
    */
   Optional<CashSessionSummary> lockById(UUID id);
+
+  /**
+   * Grava a conferência do fechamento (passo 611) e devolve a projeção já atualizada: status {@code
+   * CLOSED} com contado, esperado, diferença, observações e quem fechou. O adaptador escreve na
+   * entidade que o {@link #lockById} da mesma transação deixou presa no contexto de persistência e
+   * força o flush — {@code updated_at} e {@code version} completos na projeção devolvida; o
+   * {@code @Version} segue como backstop se algo escapar do lock.
+   */
+  CashSessionSummary close(
+      UUID id,
+      BigDecimal countedAmount,
+      BigDecimal expectedAmount,
+      BigDecimal differenceAmount,
+      String closingNotes,
+      UUID closedByUserId,
+      Instant closedAt);
 }

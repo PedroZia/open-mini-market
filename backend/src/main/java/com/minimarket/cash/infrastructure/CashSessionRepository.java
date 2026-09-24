@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -139,6 +140,34 @@ public class CashSessionRepository implements CashSessionStore {
             .setParameter("id", id)
             .getResultList();
     return firstSummary(found);
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>A entidade já está no contexto de persistência — o {@link #lockById} da mesma transação a
+   * carregou —, então o {@code find} não vai ao banco de novo: devolve o que está preso. O flush
+   * antecipado grava a conferência e completa {@code updated_at} e {@code version} na projeção
+   * devolvida; sem ele, os dois sairiam com o valor antigo.
+   */
+  @Override
+  public CashSessionSummary close(
+      UUID id,
+      BigDecimal countedAmount,
+      BigDecimal expectedAmount,
+      BigDecimal differenceAmount,
+      String closingNotes,
+      UUID closedByUserId,
+      Instant closedAt) {
+    CashSessionEntity entity = entityManager.find(CashSessionEntity.class, id);
+    if (entity == null) {
+      throw new IllegalStateException(
+          "sessão de caixa %s não encontrada para fechar".formatted(id));
+    }
+    entity.close(
+        countedAmount, expectedAmount, differenceAmount, closingNotes, closedByUserId, closedAt);
+    entityManager.flush();
+    return toSummary(entity);
   }
 
   private static Optional<CashSessionSummary> firstSummary(List<CashSessionEntity> found) {

@@ -108,6 +108,27 @@ public class CashSessionEntity {
     updatedAt = Instant.now();
   }
 
+  /**
+   * Fechamento (passo 611): grava a conferência e vira {@code CLOSED}. Quem decide a transição é o
+   * caso de uso, que já travou a linha e checou o status — aqui só a mutação dos campos, que o
+   * flush do adaptador grava junto com {@code updated_at} e o incremento de {@code version}.
+   */
+  void close(
+      BigDecimal countedAmount,
+      BigDecimal expectedAmount,
+      BigDecimal differenceAmount,
+      String closingNotes,
+      UUID closedByUserId,
+      Instant closedAt) {
+    this.status = CashSessionStatus.CLOSED;
+    this.countedAmount = countedAmount;
+    this.expectedAmount = expectedAmount;
+    this.differenceAmount = differenceAmount;
+    this.closingNotes = closingNotes;
+    this.closedByUserId = closedByUserId;
+    this.closedAt = closedAt;
+  }
+
   void assignId(UUID id) {
     this.id = id;
   }

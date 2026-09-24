@@ -555,7 +555,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 201 e saldo esperado atualizado; replay idempotente não duplica movimento.
   **Commit:** `feat(cash): implementa suprimento e expoe sangria/suprimento`
 
-- [ ] **611 — Caso de uso `CloseCashSession`**
+- [x] **611 — Caso de uso `CloseCashSession`**
   **Objetivo:** fechar caixa com conferência. **Depende:** 605, 604
   **Implementar:** lock da sessão; valida que não há vendas `OPEN` (consulta preparada para a Fase 8); grava `counted_amount`, `expected_amount`, `difference_amount`, `closing_notes`; status `CLOSED`; auditoria `CASH_SESSION_CLOSED`; permissão `cash.close`.
   **Testes/aceite:** fecha com diferença calculada corretamente; fechar duas vezes → 409; auditoria registrada.

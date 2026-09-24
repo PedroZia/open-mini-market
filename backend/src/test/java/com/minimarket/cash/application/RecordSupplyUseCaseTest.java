@@ -300,6 +300,18 @@ class RecordSupplyUseCaseTest {
     public Optional<CashSessionSummary> lockById(UUID id) {
       throw new UnsupportedOperationException("lockById não é usado por RecordSupply");
     }
+
+    @Override
+    public CashSessionSummary close(
+        UUID id,
+        BigDecimal countedAmount,
+        BigDecimal expectedAmount,
+        BigDecimal differenceAmount,
+        String closingNotes,
+        UUID closedByUserId,
+        Instant closedAt) {
+      throw new UnsupportedOperationException("close não é usado por RecordSupply");
+    }
   }
 
   /**

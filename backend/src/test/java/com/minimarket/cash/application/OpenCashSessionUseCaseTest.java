@@ -430,6 +430,18 @@ class OpenCashSessionUseCaseTest {
     public Optional<CashSessionSummary> lockById(UUID id) {
       throw new UnsupportedOperationException("lockById não é usado por OpenCashSession");
     }
+
+    @Override
+    public CashSessionSummary close(
+        UUID id,
+        BigDecimal countedAmount,
+        BigDecimal expectedAmount,
+        BigDecimal differenceAmount,
+        String closingNotes,
+        UUID closedByUserId,
+        Instant closedAt) {
+      throw new UnsupportedOperationException("close não é usado por OpenCashSession");
+    }
   }
 
   /** Dublê de {@link StoreLookup}: devolve a loja configurada, como o seed da V1. */
