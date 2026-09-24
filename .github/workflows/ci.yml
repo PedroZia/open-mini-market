@@ -57,7 +57,7 @@ jobs:
           if [ -f package.json ]; then
             npm ci
             npm test
-            npx tsc --noEmit
+            npm run typecheck
           else
             echo "Sem package.json na raiz: ainda não há código TypeScript (Fases 11 e 12)."
           fi

@@ -877,7 +877,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 11 — TUI (PDV)
 
-- [ ] **1101 — Projeto da TUI**
+- [x] **1101 — Projeto da TUI**
   **Objetivo:** esqueleto TypeScript + Ink funcionando. **Depende:** 001
   **Implementar:** npm workspaces na raiz; `terminal/` com TypeScript strict, Ink 7, Vitest, ESLint; `npm run dev` mostra um "hello" e encerra com `q`.
   **Testes/aceite:** `npm test` e `tsc --noEmit` verdes; execução manual no Windows e no Linux.
