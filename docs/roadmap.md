@@ -339,7 +339,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** matriz de permissões: OPERADOR recebe 403 em `/users`; ADMIN 200; GERENTE 403 em `role.write`.
   **Commit:** `feat(auth): revoga sessao alheia com permissao`
 
-- [ ] **308 — Teste global de segurança de rotas**
+- [x] **308 — Teste global de segurança de rotas**
   **Objetivo:** nenhum endpoint esquecido sem proteção. **Depende:** 307a, 307b
   **Implementar:** teste que enumera as rotas registradas (`/q/openapi` ou o `Router`) e exige `401` sem token para todas as rotas de `/api/v1`, com lista explícita de exceções (`/auth/login`, `/meta`).
   **Testes/aceite:** rota nova sem proteção quebra o build; exceções justificadas no teste.
