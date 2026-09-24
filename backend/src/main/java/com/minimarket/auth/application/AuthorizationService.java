@@ -29,10 +29,14 @@ public class AuthorizationService {
   /** Identidade da requisição; fora de uma requisição HTTP é a identidade anônima. */
   @Inject SecurityIdentity identity;
 
-  /** Exige a permissão da operação: sem ela, 403 {@code ACCESS_DENIED}. */
+  /**
+   * Exige a permissão da operação: sem ela, 403 {@code ACCESS_DENIED}. A exceção carrega o código
+   * exigido — é dele que a auditoria do acesso negado (passo 309) monta o evento.
+   */
   public void require(Permission permission) {
     if (!has(permission)) {
-      throw new ForbiddenException("permissão %s necessária".formatted(permission.code()));
+      throw new ForbiddenException(
+          "permissão %s necessária".formatted(permission.code()), permission.code());
     }
   }
 

@@ -41,7 +41,8 @@ public record ProblemDetail(
         .build();
   }
 
-  private static String pathOf(UriInfo uriInfo) {
+  /** Caminho da requisição; o mesmo que o evento de acesso negado leva como rota (passo 309). */
+  static String pathOf(UriInfo uriInfo) {
     return uriInfo == null ? null : uriInfo.getRequestUri().getPath();
   }
 

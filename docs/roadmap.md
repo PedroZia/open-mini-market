@@ -345,7 +345,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** rota nova sem proteção quebra o build; exceções justificadas no teste.
   **Commit:** `test(auth): garante autenticacao em todas as rotas`
 
-- [ ] **309 — Auditar acesso negado**
+- [x] **309 — Auditar acesso negado**
   **Objetivo:** saber quem tentou o que sem permissão. **Depende:** 306, 303
   **Implementar:** evento `ACCESS_DENIED` (rota, permissão exigida, ator, IP) para 403 em `/api/v1`.
   **Testes/aceite:** tentativa de OPERADOR em rota de ADMIN gera exatamente 1 evento.
