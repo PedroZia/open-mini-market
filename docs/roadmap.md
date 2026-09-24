@@ -829,6 +829,44 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** documento cobre todos os eventos emitidos no código (conferido por busca no fonte).
   **Commit:** `docs(audit): documenta catalogo de eventos de auditoria`
 
+## Hardening pós-backend (autorizado pelo dono)
+
+- [ ] **1006 — Auditoria com sessão de caixa e troca de senha**
+  **Objetivo:** preencher `cash_session_id` nos eventos de caixa, venda e pagamento e auditar a troca de senha. **Depende:** 1005
+  **Implementar:** overload `record(..., UUID cashSessionId)` no `AuditRecorder` (o método atual delega com `null`); casos de uso que conhecem a sessão passam o id explicitamente (sem query por request no filtro); preencher em caixa (`CASH_SESSION_OPENED` com a sessão criada, `CLOSED`/`WITHDRAWAL`/`SUPPLY` com a sessão), vendas (`SALE_CREATED`, `SALE_ITEM_ADDED`, `SALE_ITEM_QUANTITY_CHANGED`, `SALE_ITEM_REMOVED`, `SALE_DISCOUNT_APPLIED`/`REMOVED`, `SALE_CUSTOMER_LINKED`/`UNLINKED`, `SALE_CANCELLED`, `SALE_COMPLETED`) e pagamentos (`PAYMENT_ADDED`/`CANCELLED`); demais eventos ficam `null` (estoque manual, usuários, auth); `PASSWORD_CHANGED` no `ChangeOwnPasswordUseCase` (entityType `USER`, entityId = usuário da sessão, `details {username}`; nunca senha/hash); atualizar `docs/auditoria.md` (ação nova e campo agora preenchido — o doc diz 38 ações).
+  **Testes/aceite:** `GET /api/v1/audit-events?cashSessionId=<id>` devolve os eventos da sessão (abertura, venda, fechamento) no fluxo real; `PASSWORD_CHANGED` exatamente 1, sem credencial em `details`.
+  **Commit:** `feat(audit): registra sessao de caixa e troca de senha`
+
+- [ ] **1007 — Filtros inválidos respondem 400 (problem+json)**
+  **Objetivo:** filtro tipado inválido vira 400 problem+json, nunca 404/500 do conversor. **Depende:** 607b
+  **Implementar:** varredura dos filtros tipados das listagens (`users.active`, `sales.from`/`to`/`status`, `products.active`/`categoryId`, `stock.lowStock`, `page`/`size` numéricos) com parse explícito e 400 problem+json (`errors[]` com o field, padrão do `FieldValidationException` do 607b); helper em `shared/api` se ajudar; não mexer em `sort` (whitelist já responde 400).
+  **Testes/aceite:** `GET /users?active=abc` → 400 (não 404); `GET /sales?from=abc` e `?status=xyz` → 400; filtros válidos inalterados; regressões verdes.
+  **Commit:** `fix(shared): responde 400 para filtros invalidos nas listagens`
+
+- [ ] **1008 — Último ADMIN sob concorrência**
+  **Objetivo:** impedir zerar os ADMINS em dois disables simultâneos. **Depende:** 112
+  **Implementar:** `DisableUserUseCase.requireNotLastActiveAdmin` hoje é read-then-write (`countActiveUsersWithRole`); fechar com lock pessimista nos ADMINS ativos antes da checagem (ex.: novo método na `RoleStore` que carrega os ids dos ADMINs ativos com `PESSIMISTIC_WRITE`; a contagem revalida sob o lock); o perdedor recebe o 409 já existente (READ COMMITTED + lock: a segunda transação reavalia e vê 1).
+  **Testes/aceite:** dois `disable` concorrentes de ADMINS distintos → exatamente um sucesso e um 409, sobra 1 ADMIN ativo (ExecutorService + latch, sem sleep; skill `teste-concorrencia`); o teste sequencial do 112 continua verde.
+  **Commit:** `fix(users): protege o ultimo admin sob concorrencia`
+
+- [ ] **1009 — Autor do desconto persistido**
+  **Objetivo:** persistir quem aplicou o desconto. **Depende:** 810
+  **Implementar:** mapear `sales.discount_authorized_by_user_id` e o campo no domínio (`SaleEntity`/`SaleMapper`) e gravar o ator que aplicou (vem do contexto/comando já usado na auditoria); limpar na remoção; round-trip preservado.
+  **Testes/aceite:** aplicar grava o autor; remover limpa; reidratar mantém.
+  **Commit:** `feat(sales): persiste o autor do desconto`
+
+- [ ] **1010 — Relógio em shared e alinhado ao microssegundo**
+  **Objetivo:** um relógio só, sem diferença ns × µs nos testes. **Depende:** 1005
+  **Implementar:** mover `ClockProducer` de `auth/infrastructure` para `shared/infrastructure` (injeção por tipo; ajustar imports) e truncar o instante em microssegundos, fechando o ns (JVM) × µs (PostgreSQL) que hoje obriga tolerância de 1 µs nos testes.
+  **Testes/aceite:** teste unitário de precisão (nanos múltiplos de 1000) + pelo menos um teste de integração em que o instante da resposta de uma operação (ex.: concluir venda) bate exatamente com o persistido, sem tolerância; suíte existente verde.
+  **Commit:** `fix(shared): alinha o relogio ao microssegundo do banco`
+
+- [ ] **1011 — Cobertura pendente de segurança**
+  **Objetivo:** fechar buracos de teste de autenticação/autorização. **Depende:** 307a, 907
+  **Implementar:** `/q/health` responde 200 sem token (está no permit do 307a e não tinha teste) e um papel sem `sale.complete`/`payment.add` recebe 403 nas rotas correspondentes (criar o papel no teste pelos repositórios e limpar).
+  **Testes/aceite:** os dois testes verdes.
+  **Commit:** `test(auth): cobre health e negativas de permissao`
+
 ---
 
 ## Fase 11 — TUI (PDV)
