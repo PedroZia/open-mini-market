@@ -10,6 +10,7 @@ import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,10 @@ class IdempotencyServiceTest extends IntegrationTestBase {
   @DisplayName("record grava o registro com expires_at = agora + TTL configurado (24 h)")
   void recordsWithConfiguredTtl() {
     UUID userId = insertUser();
-    Instant before = Instant.now();
+    // A borda inferior desce ao microssegundo, a resolução do relógio da aplicação (passo 1010):
+    // ele trunca para baixo, então um `before` em nanossegundos da mesma janela de 1 µs ficaria
+    // acima do instante gravado.
+    Instant before = Instant.now().truncatedTo(ChronoUnit.MICROS);
 
     idempotencyService.record(
         new NewIdempotencyRecord(

@@ -251,6 +251,7 @@ class FullSaleFlowTest extends IntegrationTestBase {
     assertThat(completedBody.get("completedAt"))
         .as("o instante da conclusão vem no detalhe")
         .isNotNull();
+    Instant completedAtFromResponse = Instant.parse((String) completedBody.get("completedAt"));
     assertThat(decimal(completedBody, "paidAmount")).isEqualByComparingTo("27.00");
     assertThat(decimal(completedBody, "changeAmount")).isEqualByComparingTo("10.00");
 
@@ -258,6 +259,11 @@ class FullSaleFlowTest extends IntegrationTestBase {
     SaleRow sale = saleRow(saleId);
     assertThat(sale.status()).isEqualTo("COMPLETED");
     assertThat(sale.completedAt()).as("venda concluída tem instante de conclusão").isNotNull();
+    assertThat(completedAtFromResponse)
+        .as(
+            "o instante respondido é exatamente o gravado em completed_at: o relógio da aplicação"
+                + " já trunca no microssegundo do banco, então não há tolerância nenhuma aqui")
+        .isEqualTo(sale.completedAt());
     assertThat(sale.subtotal()).as("o numeric do banco com a escala da coluna").isEqualTo("30.00");
     assertThat(sale.discountAmount()).isEqualTo("3.00");
     assertThat(sale.total()).isEqualTo("27.00");

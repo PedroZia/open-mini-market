@@ -855,7 +855,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** aplicar grava o autor; remover limpa; reidratar mantém.
   **Commit:** `feat(sales): persiste o autor do desconto`
 
-- [ ] **1010 — Relógio em shared e alinhado ao microssegundo**
+- [x] **1010 — Relógio em shared e alinhado ao microssegundo**
   **Objetivo:** um relógio só, sem diferença ns × µs nos testes. **Depende:** 1005
   **Implementar:** mover `ClockProducer` de `auth/infrastructure` para `shared/infrastructure` (injeção por tipo; ajustar imports) e truncar o instante em microssegundos, fechando o ns (JVM) × µs (PostgreSQL) que hoje obriga tolerância de 1 µs nos testes.
   **Testes/aceite:** teste unitário de precisão (nanos múltiplos de 1000) + pelo menos um teste de integração em que o instante da resposta de uma operação (ex.: concluir venda) bate exatamente com o persistido, sem tolerância; suíte existente verde.

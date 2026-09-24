@@ -2,7 +2,6 @@ package com.minimarket.sales.api;
 
 import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.within;
 
 import com.minimarket.IntegrationTestBase;
 import com.minimarket.catalog.application.NewProduct;
@@ -24,7 +23,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -361,11 +359,9 @@ class CompleteSaleConcurrencyResourceTest extends IntegrationTestBase {
         .containsOnly("COMPLETED");
     assertThat(Instant.parse(responses.get(0).jsonPath().getString("completedAt")))
         .as(
-            "as duas respostas descrevem a mesma conclusão — o no-op relê do banco, que guarda"
-                + " micros, então a comparação tolera a precisão do armazenamento")
-        .isCloseTo(
-            Instant.parse(responses.get(1).jsonPath().getString("completedAt")),
-            within(1, ChronoUnit.MICROS));
+            "as duas respostas descrevem a mesma conclusão — o no-op relê do banco e o relógio da"
+                + " aplicação trunca no microssegundo gravado, então o instante bate exato")
+        .isEqualTo(Instant.parse(responses.get(1).jsonPath().getString("completedAt")));
 
     assertThat(stockLedger())
         .extracting(MovementRow::type)
