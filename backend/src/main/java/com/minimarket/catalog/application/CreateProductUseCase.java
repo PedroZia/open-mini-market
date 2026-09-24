@@ -6,6 +6,7 @@ import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.NotFoundException;
+import com.minimarket.shared.domain.Store;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -18,11 +19,12 @@ import java.util.UUID;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
- * Cria produto (passo 405): normaliza o barcode pela regra única do {@link BarcodeNormalizer},
- * exige preço não negativo, unidade da whitelist {@code UN}/{@code KG} e categoria existente quando
- * informada, e recusa barcode já usado por produto vivo. Uma execução = uma transação (§2.2, regra
- * 6): as checagens e o insert vivem juntos, e o adaptador ainda traduz o 23505 do índice único como
- * backstop caso outra requisição grave o mesmo barcode no meio do caminho.
+ * Cria produto (passo 405): normaliza o barcode pela regra única do {@link BarcodeNormalizer} e o
+ * código interno pela do {@link InternalCodeNormalizer} (passo 1104d), exige preço não negativo,
+ * unidade da whitelist {@code UN}/{@code KG} e categoria existente quando informada, e recusa
+ * barcode ou código interno já usado por produto vivo. Uma execução = uma transação (§2.2, regra
+ * 6): as checagens e o insert vivem juntos, e o adaptador ainda traduz o 23505 dos índices únicos
+ * como backstop caso outra requisição grave o mesmo código no meio do caminho.
  *
  * <p>A loja não vem do cliente: é a configurada ({@code minimarket.store.default-code}), como no
  * {@code GetMetaUseCase} — o MVP tem loja única (§5.3). O produto nasce ativo e sem {@code
@@ -61,24 +63,31 @@ public class CreateProductUseCase {
   String defaultStoreCode;
 
   /**
-   * 409 {@code BARCODE_ALREADY_EXISTS} quando o barcode já é de um produto vivo; 404 {@code
+   * 409 {@code BARCODE_ALREADY_EXISTS} quando o barcode já é de um produto vivo, 409 {@code
+   * INTERNAL_CODE_ALREADY_EXISTS} quando o código interno já é de outro produto vivo; 404 {@code
    * CATEGORY_NOT_FOUND} quando a categoria informada não existe; 400 {@code VALIDATION_ERROR} para
-   * preço ausente/negativo e unidade fora da whitelist.
+   * preço ausente/negativo, unidade fora da whitelist e código interno não numérico ou maior que o
+   * configurado (estes dois com o campo {@code internalCode} em {@code errors[]}).
    */
   @Transactional
   public CreateProductResult execute(CreateProductCommand command) {
+    Store store = currentStore();
     String barcode = BarcodeNormalizer.normalize(command.barcode());
+    String internalCode =
+        InternalCodeNormalizer.normalize(command.internalCode(), store.internalCodeLength());
     BigDecimal price = requireValidPrice(command.price());
     String unit = requireValidUnit(command.unit());
     requireExistingCategory(command.categoryId());
     requireFreeBarcode(barcode);
+    requireFreeInternalCode(internalCode);
 
     UUID id =
         productStore.insert(
             new NewProduct(
-                currentStoreId(),
+                store.id(),
                 command.name(),
                 barcode,
+                internalCode,
                 command.description(),
                 command.categoryId(),
                 unit,
@@ -89,7 +98,7 @@ public class CreateProductUseCase {
         PRODUCT_ENTITY_TYPE,
         id,
         null,
-        details(command.name(), barcode, price));
+        details(command.name(), barcode, internalCode, price));
 
     return new CreateProductResult(id, storedProduct(id));
   }
@@ -139,20 +148,30 @@ public class CreateProductUseCase {
     }
   }
 
+  /** Mesma regra do barcode para o código interno da etiqueta (passo 1104d). */
+  private void requireFreeInternalCode(String internalCode) {
+    if (internalCode != null && productStore.existsActiveInternalCode(internalCode)) {
+      throw new ConflictException(
+          ErrorCode.INTERNAL_CODE_ALREADY_EXISTS,
+          "código interno %s já está em uso".formatted(internalCode));
+    }
+  }
+
   /** Produto só existe dentro de uma loja; a loja atual vem da configuração, não do corpo. */
-  private UUID currentStoreId() {
+  private Store currentStore() {
     return storeLookup
         .findByCode(defaultStoreCode)
         .orElseThrow(
-            () -> new IllegalStateException("loja configurada não existe: " + defaultStoreCode))
-        .id();
+            () -> new IllegalStateException("loja configurada não existe: " + defaultStoreCode));
   }
 
   /** Details mínimo do evento: o que identifica o produto criado para quem lê o log depois. */
-  private static Map<String, Object> details(String name, String barcode, BigDecimal price) {
+  private static Map<String, Object> details(
+      String name, String barcode, String internalCode, BigDecimal price) {
     Map<String, Object> details = new LinkedHashMap<>();
     details.put("name", name);
     details.put("barcode", barcode);
+    details.put("internalCode", internalCode);
     details.put("price", price);
     return details;
   }

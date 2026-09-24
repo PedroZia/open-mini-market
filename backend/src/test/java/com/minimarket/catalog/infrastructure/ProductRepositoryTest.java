@@ -257,7 +257,7 @@ class ProductRepositoryTest extends IntegrationTestBase {
 
     Optional<ProductSummary> updated =
         productRepository.update(
-            id, "Arroz Tipo 1 5kg", limpeza, "KG", "grão longo", new BigDecimal("2.500"));
+            id, "Arroz Tipo 1 5kg", null, limpeza, "KG", "grão longo", new BigDecimal("2.500"));
 
     assertThat(updated)
         .hasValueSatisfying(
@@ -283,8 +283,27 @@ class ProductRepositoryTest extends IntegrationTestBase {
               assertThat(found.updatedAt()).isAfterOrEqualTo(before);
             });
     // Id desconhecido é no-op, como nas outras escritas por id.
-    assertThat(productRepository.update(UUID.randomUUID(), "Fantasma", null, "UN", null, null))
+    assertThat(
+            productRepository.update(UUID.randomUUID(), "Fantasma", null, null, "UN", null, null))
         .isEmpty();
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("update grava o código interno e o limpa quando vem nulo (substituição)")
+  void updatesInternalCode() {
+    UUID id = insertWithInternalCode("Banana prata kg", "00042", "6.99");
+
+    assertThat(productRepository.update(id, "Banana prata kg", "00077", null, "KG", null, null))
+        .hasValueSatisfying(
+            found -> assertThat(found.internalCode()).as("código novo").isEqualTo("00077"));
+    assertThat(productRepository.findByInternalCode("00042")).isEmpty();
+    assertThat(productRepository.findByInternalCode("00077"))
+        .hasValueSatisfying(found -> assertThat(found.id()).isEqualTo(id));
+
+    assertThat(productRepository.update(id, "Banana prata kg", null, null, "KG", null, null))
+        .hasValueSatisfying(found -> assertThat(found.internalCode()).as("nulo limpa").isNull());
+    assertThat(productRepository.findByInternalCode("00077")).isEmpty();
   }
 
   @Test
@@ -310,7 +329,7 @@ class ProductRepositoryTest extends IntegrationTestBase {
     assertThat(names(search(null, null, null, ProductSort.NAME, true)))
         .containsExactly("Feijão 1kg");
     assertThat(names(search("arroz", null, null, ProductSort.NAME, true))).isEmpty();
-    assertThat(productRepository.update(id, "Arroz Novo", null, "UN", null, null)).isEmpty();
+    assertThat(productRepository.update(id, "Arroz Novo", null, null, "UN", null, null)).isEmpty();
     // Id desconhecido é no-op, como nas outras escritas por id.
     productRepository.softDelete(UUID.randomUUID());
   }
@@ -480,12 +499,73 @@ class ProductRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
-  @DisplayName("código interno duplicado entre produtos vivos falha no índice único parcial")
+  @DisplayName(
+      "código interno duplicado entre produtos vivos vira ConflictException(INTERNAL_CODE_ALREADY_EXISTS)")
   void translatesDuplicateInternalCodeOnInsert() {
     insertWithInternalCode("Banana prata kg", "00042", "6.99");
 
     assertThatThrownBy(() -> insertWithInternalCode("Banana nanica kg", "00042", "5.99"))
-        .isInstanceOf(ConflictException.class);
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.INTERNAL_CODE_ALREADY_EXISTS));
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName(
+      "update para um código interno já tomado vira ConflictException(INTERNAL_CODE_ALREADY_EXISTS)")
+  void translatesInternalCodeConflictOnUpdate() {
+    insertWithInternalCode("Banana prata kg", "00042", "6.99");
+    UUID tomate = insertWithInternalCode("Tomate kg", "00077", "9.90");
+
+    assertThatThrownBy(
+            () -> productRepository.update(tomate, "Tomate kg", "00042", null, "KG", null, null))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.INTERNAL_CODE_ALREADY_EXISTS));
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName(
+      "enable de produto cujo código interno já foi tomado vira ConflictException(INTERNAL_CODE_ALREADY_EXISTS)")
+  void translatesInternalCodeConflictOnEnable() {
+    UUID antigo = insertWithInternalCode("Banana prata kg", "00042", "6.99");
+    productRepository.disable(antigo);
+    entityManager.flush();
+    entityManager.clear();
+    insertWithInternalCode("Banana nanica kg", "00042", "5.99");
+
+    assertThatThrownBy(() -> productRepository.enable(antigo))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.INTERNAL_CODE_ALREADY_EXISTS));
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName(
+      "existsActiveInternalCode ignora soft-deletado, código desconhecido e nulo; a variante ExceptId ignora o próprio produto")
+  void checksActiveInternalCode() {
+    UUID banan = insertWithInternalCode("Banana prata kg", "00042", "6.99");
+    insertWithInternalCode("Tomate kg", "00077", "9.90");
+
+    assertThat(productRepository.existsActiveInternalCode("00042")).isTrue();
+    assertThat(productRepository.existsActiveInternalCode("00077")).isTrue();
+    assertThat(productRepository.existsActiveInternalCode("99999")).isFalse();
+    assertThat(productRepository.existsActiveInternalCode(null)).isFalse();
+
+    assertThat(productRepository.existsActiveInternalCodeExceptId("00042", banan)).isFalse();
+    assertThat(productRepository.existsActiveInternalCodeExceptId("00042", UUID.randomUUID()))
+        .isTrue();
+    assertThat(productRepository.existsActiveInternalCodeExceptId("99999", banan)).isFalse();
+    assertThat(productRepository.existsActiveInternalCodeExceptId(null, banan)).isFalse();
+
+    productRepository.softDelete(banan);
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(productRepository.existsActiveInternalCode("00042")).isFalse();
   }
 
   @Test
@@ -503,7 +583,8 @@ class ProductRepositoryTest extends IntegrationTestBase {
         .setParameter("id", id)
         .executeUpdate();
 
-    assertThatThrownBy(() -> productRepository.update(id, "Arroz Novo", null, "UN", null, null))
+    assertThatThrownBy(
+            () -> productRepository.update(id, "Arroz Novo", null, null, "UN", null, null))
         .isInstanceOfSatisfying(
             ConflictException.class,
             error -> assertThat(error.code()).isEqualTo(ErrorCode.CONCURRENT_MODIFICATION));

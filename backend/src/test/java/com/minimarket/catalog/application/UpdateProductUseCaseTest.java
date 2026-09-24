@@ -4,14 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.minimarket.audit.application.AuditRecorder;
+import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.shared.domain.FieldValidationException;
 import com.minimarket.shared.domain.NotFoundException;
+import com.minimarket.shared.domain.ScaleEmbeddedField;
+import com.minimarket.shared.domain.Store;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +40,7 @@ class UpdateProductUseCaseTest {
 
   private final FakeProductStore productStore = new FakeProductStore();
   private final FakeCategoryStore categoryStore = new FakeCategoryStore();
+  private final FakeStoreLookup storeLookup = new FakeStoreLookup();
   private final FakeAuditRecorder auditRecorder = new FakeAuditRecorder();
 
   private UpdateProductUseCase useCase;
@@ -44,11 +50,13 @@ class UpdateProductUseCaseTest {
     useCase = new UpdateProductUseCase();
     useCase.productStore = productStore;
     useCase.categoryStore = categoryStore;
+    useCase.storeLookup = storeLookup;
     useCase.auditRecorder = auditRecorder;
+    useCase.defaultStoreCode = FakeStoreLookup.STORE_CODE;
   }
 
   @Test
-  @DisplayName("edita os cinco campos e devolve o produto relido com a versão nova")
+  @DisplayName("edita os campos da edição e devolve o produto relido com a versão nova")
   void updatesProduct() {
     UUID categoryId = categoryStore.existingCategory();
     BigDecimal minQuantity = new BigDecimal("2.500");
@@ -63,6 +71,7 @@ class UpdateProductUseCaseTest {
             new Update(
                 PRODUCT_ID,
                 "Arroz Tipo 1 5kg",
+                null,
                 categoryId,
                 "KG",
                 "grão longo tipo 1",
@@ -191,8 +200,10 @@ class UpdateProductUseCaseTest {
         .containsEntry("unit", "UN")
         .containsEntry("description", "grão longo")
         .containsKey("categoryId")
+        .containsKey("internalCode")
         .containsKey("minQuantity");
     assertThat(before.get("categoryId")).as("produto nasceu sem categoria").isNull();
+    assertThat(before.get("internalCode")).as("produto nasceu sem código interno").isNull();
     assertThat(before.get("minQuantity")).as("produto nasceu sem mínimo").isNull();
 
     Map<String, Object> after = snapshot(event.details(), "after");
@@ -201,7 +212,73 @@ class UpdateProductUseCaseTest {
         .containsEntry("categoryId", categoryId)
         .containsEntry("unit", "KG")
         .containsEntry("description", "grão longo tipo 1")
+        .containsKey("internalCode")
         .containsEntry("minQuantity", new BigDecimal("2.5"));
+    assertThat(after.get("internalCode")).as("o PUT sem o campo limpa o código").isNull();
+  }
+
+  @Test
+  @DisplayName("código interno curto vira a forma canônica; o nulo do PUT limpa o código")
+  void padsAndClearsInternalCode() {
+    useCase.execute(commandWithInternalCode(0, " 4 2 "));
+
+    assertThat(productStore.updateCall.internalCode())
+        .as("trim, sem espaços internos e zeros à esquerda até os 5 dígitos da etiqueta da loja")
+        .isEqualTo("00042");
+    assertThat(productStore.stored.internalCode()).isEqualTo("00042");
+
+    useCase.execute(commandWithInternalCode(1, null));
+
+    assertThat(productStore.updateCall.internalCode())
+        .as("o campo ausente/nulo do PUT substitui o código por nada")
+        .isNull();
+    assertThat(productStore.stored.internalCode()).isNull();
+  }
+
+  @Test
+  @DisplayName(
+      "código interno não numérico ou maior que o da etiqueta é 400 apontando o campo, sem gravar")
+  void rejectsMalformedInternalCode() {
+    for (String malformed : Arrays.asList("12A", "123456")) {
+      assertThatThrownBy(() -> useCase.execute(commandWithInternalCode(0, malformed)))
+          .as("código interno %s", malformed)
+          .isInstanceOfSatisfying(
+              FieldValidationException.class,
+              error -> {
+                assertThat(error.code()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                assertThat(error.errors())
+                    .singleElement()
+                    .satisfies(field -> assertThat(field.field()).isEqualTo("internalCode"));
+              });
+    }
+
+    assertThat(productStore.updateCall).as("o 400 não grava").isNull();
+    assertThat(auditRecorder.recorded).isEmpty();
+  }
+
+  @Test
+  @DisplayName("código interno de outro produto vivo é 409 INTERNAL_CODE_ALREADY_EXISTS sem gravar")
+  void rejectsTakenInternalCode() {
+    productStore.takenInternalCodes.put("00042", UUID.randomUUID());
+
+    assertThatThrownBy(() -> useCase.execute(commandWithInternalCode(0, "42")))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.INTERNAL_CODE_ALREADY_EXISTS));
+
+    assertThat(productStore.updateCall).isNull();
+    assertThat(auditRecorder.recorded).isEmpty();
+  }
+
+  @Test
+  @DisplayName("o código interno do próprio produto não colide consigo mesmo")
+  void keepsOwnInternalCode() {
+    productStore.takenInternalCodes.put("00042", PRODUCT_ID);
+
+    useCase.execute(commandWithInternalCode(0, "00042"));
+
+    assertThat(productStore.updateCall.internalCode()).isEqualTo("00042");
+    assertThat(productStore.stored.internalCode()).isEqualTo("00042");
   }
 
   /** Comando com os campos que o teste não varia: o produto do dublê começa com Arroz 5kg/UN. */
@@ -217,7 +294,21 @@ class UpdateProductUseCaseTest {
       String description,
       BigDecimal minQuantity) {
     return new UpdateProductCommand(
-        PRODUCT_ID, expectedVersion, name, categoryId, unit, description, minQuantity);
+        PRODUCT_ID, expectedVersion, name, null, categoryId, unit, description, minQuantity);
+  }
+
+  /** Comando que varia só o código interno (passo 1104d): o resto é o default do cenário. */
+  private static UpdateProductCommand commandWithInternalCode(
+      long expectedVersion, String internalCode) {
+    return new UpdateProductCommand(
+        PRODUCT_ID,
+        expectedVersion,
+        "Arroz Tipo 1 5kg",
+        internalCode,
+        null,
+        "KG",
+        "grão longo tipo 1",
+        null);
   }
 
   /** Produto do "banco" do dublê; só o que cada teste varia entra por parâmetro. */
@@ -255,9 +346,12 @@ class UpdateProductUseCaseTest {
 
   /**
    * Dublê de {@link ProductStore}: guarda um produto só — o "banco" que o caso de uso lê e
-   * reescreve — e a última chamada de {@code update} para conferência.
+   * reescreve — e a última chamada de {@code update} para conferência. {@code takenInternalCodes}
+   * simula o índice único parcial: código → id do produto vivo que o tem.
    */
   private static final class FakeProductStore implements ProductStore {
+
+    private final Map<String, UUID> takenInternalCodes = new HashMap<>();
 
     private ProductSummary stored =
         product(0, "Arroz 5kg", null, "UN", "grão longo", null, true, null);
@@ -272,22 +366,35 @@ class UpdateProductUseCaseTest {
     public Optional<ProductSummary> update(
         UUID id,
         String name,
+        String internalCode,
         UUID categoryId,
         String unit,
         String description,
         BigDecimal minQuantity) {
-      updateCall = new Update(id, name, categoryId, unit, description, minQuantity);
+      updateCall = new Update(id, name, internalCode, categoryId, unit, description, minQuantity);
       if (stored == null || !stored.id().equals(id)) {
         return Optional.empty();
       }
-      stored = withDetails(stored, name, categoryId, unit, description, minQuantity);
+      stored = withDetails(stored, name, internalCode, categoryId, unit, description, minQuantity);
       return Optional.of(stored);
+    }
+
+    @Override
+    public boolean existsActiveInternalCode(String internalCode) {
+      return takenInternalCodes.containsKey(internalCode);
+    }
+
+    @Override
+    public boolean existsActiveInternalCodeExceptId(String internalCode, UUID id) {
+      UUID owner = takenInternalCodes.get(internalCode);
+      return owner != null && !owner.equals(id);
     }
 
     /** O update do "banco" do dublê: troca os campos da edição e avança a versão. */
     private static ProductSummary withDetails(
         ProductSummary product,
         String name,
+        String internalCode,
         UUID categoryId,
         String unit,
         String description,
@@ -296,6 +403,7 @@ class UpdateProductUseCaseTest {
           product.id(),
           product.storeId(),
           product.barcode(),
+          internalCode,
           name,
           description,
           categoryId,
@@ -464,8 +572,39 @@ class UpdateProductUseCaseTest {
   private record Update(
       UUID id,
       String name,
+      String internalCode,
       UUID categoryId,
       String unit,
       String description,
       BigDecimal minQuantity) {}
+
+  /**
+   * Dublê de {@link StoreLookup}: devolve a loja configurada, dona do tamanho do código interno.
+   */
+  private static final class FakeStoreLookup implements StoreLookup {
+
+    private static final String STORE_CODE = "MATRIZ";
+
+    private static final Store STORE =
+        new Store(
+            UUID.randomUUID(),
+            STORE_CODE,
+            "Matriz",
+            false,
+            new BigDecimal("10.00"),
+            "2",
+            5,
+            ScaleEmbeddedField.WEIGHT,
+            3);
+
+    @Override
+    public Optional<Store> findByCode(String code) {
+      return STORE_CODE.equals(code) ? Optional.of(STORE) : Optional.empty();
+    }
+
+    @Override
+    public Optional<Store> findById(UUID id) {
+      throw new UnsupportedOperationException("findById não é usado por UpdateProduct");
+    }
+  }
 }

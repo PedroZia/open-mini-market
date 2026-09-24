@@ -24,8 +24,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  *       barcode;
  *   <li>etiqueta de balança ({@link ScaleLabel#parse}) com os parâmetros da loja atual: o código
  *       interno (PLU) sai da etiqueta e a quantidade embutida de {@link ScaleLabel#quantityFor};
- *   <li>código interno digitado ({@link ProductStore#findByInternalCode}): o PLU curto que o
- *       operador digita ou o produto sem GTIN;
+ *   <li>código interno digitado ({@link ProductStore#findByInternalCode}): o PLU que o operador
+ *       digita ou o produto sem GTIN — o curto é completado com zeros como o cadastro o gravou
+ *       ({@link InternalCodeNormalizer#forLookup}), para o mesmo produto resolver pela etiqueta e
+ *       pelo código digitado;
  *   <li>404 {@code PRODUCT_NOT_FOUND}: o código não é de produto nenhum.
  * </ol>
  *
@@ -69,12 +71,16 @@ public class BarcodeResolver {
     if (exact.isPresent()) {
       return new BarcodeResolution(exact.get(), null);
     }
-    Optional<ScaleLabel> label = ScaleLabel.parse(normalized, currentStore());
+    Store store = currentStore();
+    Optional<ScaleLabel> label = ScaleLabel.parse(normalized, store);
     if (label.isPresent()) {
       ProductSummary product = internalProduct(label.get().internalCode(), normalized);
       return new BarcodeResolution(product, label.get().quantityFor(product.price()));
     }
-    return new BarcodeResolution(internalProduct(normalized, normalized), null);
+    // O PLU digitado curto é procurado na forma canônica do cadastro (1104d): 42 e 00042 acham o
+    // mesmo produto, como a etiqueta 2 + 00042 + valor.
+    String typedCode = InternalCodeNormalizer.forLookup(normalized, store.internalCodeLength());
+    return new BarcodeResolution(internalProduct(typedCode, normalized), null);
   }
 
   /** Produto do código interno; sem produto, o 404 carrega o código como o cliente o mandou. */

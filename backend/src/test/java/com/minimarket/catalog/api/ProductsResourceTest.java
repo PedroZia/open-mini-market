@@ -74,6 +74,13 @@ class ProductsResourceTest extends IntegrationTestBase {
   private static final String UNKNOWN_INTERNAL_CODE =
       String.format("%05d", ThreadLocalRandom.current().nextInt(100_000));
 
+  /** Código interno digitado curto (passo 1104d): 4 dígitos, como o operador o digita. */
+  private static final String TYPED_INTERNAL_CODE =
+      String.format("%04d", ThreadLocalRandom.current().nextInt(10_000));
+
+  /** O mesmo código na forma canônica que o cadastro grava: com o zero à esquerda da etiqueta. */
+  private static final String PADDED_INTERNAL_CODE = "0" + TYPED_INTERNAL_CODE;
+
   /** Caso de uso da criação de usuário: o OPERADOR é fixture, não o alvo do teste. */
   @Inject CreateUserUseCase createUserUseCase;
 
@@ -117,6 +124,7 @@ class ProductsResourceTest extends IntegrationTestBase {
             "id",
             "name",
             "barcode",
+            "internalCode",
             "description",
             "categoryId",
             "unit",
@@ -162,6 +170,91 @@ class ProductsResourceTest extends IntegrationTestBase {
     assertThat(countActiveByBarcode(STORED_BARCODE))
         .as("o 409 não cria a segunda linha")
         .isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName(
+      "POST com internalCode curto grava a forma canônica: etiqueta e código digitado resolvem o mesmo produto")
+  void storesCanonicalInternalCode() throws SQLException {
+    Response created =
+        post(
+            adminToken(),
+            """
+            {"name": "%s", "internalCode": "%s", "unit": "KG", "price": 7.49}
+            """
+                .formatted(name("Banana prata"), TYPED_INTERNAL_CODE));
+
+    assertThat(created.statusCode()).isEqualTo(201);
+    assertThat(created.jsonPath().getString("internalCode"))
+        .as("zeros à esquerda até os 5 dígitos da etiqueta da loja")
+        .isEqualTo(PADDED_INTERNAL_CODE);
+    String id = created.jsonPath().getString("id");
+    assertThat(productOf(id).internalCode())
+        .as("o banco guardou a forma canônica")
+        .isEqualTo(PADDED_INTERNAL_CODE);
+
+    Response typed = getByBarcode(TYPED_INTERNAL_CODE);
+    Response label = getByBarcode(weightLabel(PADDED_INTERNAL_CODE));
+
+    assertThat(typed.statusCode()).as("PLU digitado curto resolve").isEqualTo(200);
+    assertThat(label.statusCode()).as("etiqueta de peso resolve").isEqualTo(200);
+    for (Response response : List.of(typed, label)) {
+      assertThat(response.jsonPath().getString("id"))
+          .as("o mesmo produto resolve pela etiqueta e pelo código digitado")
+          .isEqualTo(id);
+    }
+    assertThat(number(label.jsonPath().getMap("$").get("quantity")))
+        .as("0001234 com 3 casas = 1,234 kg")
+        .isEqualByComparingTo("1.234");
+  }
+
+  @Test
+  @DisplayName("código interno já usado por produto vivo responde 409 INTERNAL_CODE_ALREADY_EXISTS")
+  void rejectsDuplicateInternalCode() throws SQLException {
+    seedProduct("Banana prata", "7.49", "KG", null, null, INTERNAL_CODE);
+
+    Response response =
+        post(
+            adminToken(),
+            """
+            {"name": "%s", "internalCode": "%s", "unit": "KG", "price": 7.49}
+            """
+                .formatted(name("Banana nanica"), INTERNAL_CODE));
+
+    assertThat(response.statusCode()).isEqualTo(409);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("type"))
+        .isEqualTo("https://minimarket.local/problems/internal-code-already-exists");
+    assertThat(response.jsonPath().getString("title")).isEqualTo("Código interno já está em uso");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("INTERNAL_CODE_ALREADY_EXISTS");
+    assertThat(countActiveByInternalCode(INTERNAL_CODE))
+        .as("o 409 não cria a segunda linha")
+        .isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName(
+      "internalCode não numérico ou maior que o configurado responde 400 VALIDATION_ERROR no campo")
+  void rejectsMalformedInternalCode() throws SQLException {
+    for (String malformed : List.of("12A", "12.3", "123456")) {
+      Response response =
+          post(
+              adminToken(),
+              """
+              {"name": "%s", "internalCode": "%s", "unit": "KG", "price": 7.49}
+              """
+                  .formatted(name("Banana prata"), malformed));
+
+      assertThat(response.statusCode()).as("código interno %s", malformed).isEqualTo(400);
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+      assertThat(response.jsonPath().getList("errors.field", String.class))
+          .as("o 400 cita o campo")
+          .containsExactly("internalCode");
+      assertThat(countActiveByInternalCode(malformed))
+          .as("a linha inválida não foi criada")
+          .isZero();
+    }
   }
 
   @Test
@@ -265,6 +358,7 @@ class ProductsResourceTest extends IntegrationTestBase {
             "id",
             "name",
             "barcode",
+            "internalCode",
             "description",
             "categoryId",
             "unit",
@@ -395,6 +489,7 @@ class ProductsResourceTest extends IntegrationTestBase {
             "id",
             "name",
             "barcode",
+            "internalCode",
             "description",
             "categoryId",
             "unit",
@@ -681,6 +776,7 @@ class ProductsResourceTest extends IntegrationTestBase {
             "id",
             "name",
             "barcode",
+            "internalCode",
             "description",
             "categoryId",
             "unit",
@@ -879,6 +975,77 @@ class ProductsResourceTest extends IntegrationTestBase {
   }
 
   @Test
+  @DisplayName(
+      "PUT com internalCode substitui o código (com zeros à esquerda) e o campo ausente limpa")
+  void updatesAndClearsInternalCode() throws SQLException {
+    UUID id = seedProduct("Banana prata", "7.49", "KG", null, null, INTERNAL_CODE);
+
+    Response set =
+        put(
+            adminToken(),
+            id,
+            "\"0\"",
+            updateBody(name("Banana prata kg"), "42", null, "KG", null, null));
+
+    assertThat(set.statusCode()).isEqualTo(200);
+    assertThat(set.jsonPath().getString("internalCode"))
+        .as("o cadastro completa o curto com zeros")
+        .isEqualTo("00042");
+    assertThat(productOf(id.toString()).internalCode()).isEqualTo("00042");
+    assertThat(getByBarcode("00042").jsonPath().getString("id"))
+        .as("o código novo resolve no bipe")
+        .isEqualTo(id.toString());
+
+    Response cleared =
+        put(adminToken(), id, "\"1\"", updateBody(name("Banana prata kg"), null, "KG", null, null));
+
+    assertThat(cleared.statusCode()).isEqualTo(200);
+    assertThat(cleared.jsonPath().getString("internalCode"))
+        .as("o campo ausente do PUT limpa o código")
+        .isNull();
+    assertThat(productOf(id.toString()).internalCode()).isNull();
+    assertThat(getByBarcode("00042").statusCode()).as("código limpo não resolve").isEqualTo(404);
+  }
+
+  @Test
+  @DisplayName("PUT com o próprio código interno é aceito: não colide consigo mesmo")
+  void acceptsOwnInternalCodeOnUpdate() throws SQLException {
+    UUID id = seedProduct("Banana prata", "7.49", "KG", null, null, INTERNAL_CODE);
+
+    Response response =
+        put(
+            adminToken(),
+            id,
+            "\"0\"",
+            updateBody(name("Banana prata kg"), INTERNAL_CODE, null, "KG", null, null));
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.jsonPath().getString("internalCode")).isEqualTo(INTERNAL_CODE);
+    assertThat(productOf(id.toString()).internalCode()).isEqualTo(INTERNAL_CODE);
+  }
+
+  @Test
+  @DisplayName(
+      "PUT com código interno de outro produto vivo responde 409 INTERNAL_CODE_ALREADY_EXISTS")
+  void rejectsInternalCodeTakenOnUpdate() throws SQLException {
+    seedProduct("Banana prata", "7.49", "KG", null, null, INTERNAL_CODE);
+    UUID id = seedProduct("Tomate", "9.90", "KG", null, null, null);
+
+    Response response =
+        put(
+            adminToken(),
+            id,
+            "\"0\"",
+            updateBody(name("Tomate kg"), INTERNAL_CODE, null, "KG", null, null));
+
+    assertThat(response.statusCode()).isEqualTo(409);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("INTERNAL_CODE_ALREADY_EXISTS");
+    assertThat(response.jsonPath().getString("detail")).contains("código interno");
+    assertThat(productOf(id.toString()).internalCode()).as("o 409 não grava").isNull();
+  }
+
+  @Test
   @DisplayName("PUT grava PRODUCT_UPDATED com o antes/depois dos campos editados")
   void auditsProductUpdated() throws SQLException {
     UUID categoryId = seedCategory("Bebidas");
@@ -890,7 +1057,7 @@ class ProductsResourceTest extends IntegrationTestBase {
                     adminToken(),
                     id,
                     "\"0\"",
-                    updateBody(newName, categoryId, "KG", "grão longo tipo 1", "2.500"))
+                    updateBody(newName, "123", categoryId, "KG", "grão longo tipo 1", "2.500"))
                 .statusCode())
         .isEqualTo(200);
 
@@ -910,6 +1077,12 @@ class ProductsResourceTest extends IntegrationTestBase {
     assertThat(event.afterUnit()).isEqualTo("KG");
     assertThat(event.afterDescription()).isEqualTo("grão longo tipo 1");
     assertThat(event.afterMinQuantity()).isEqualTo("2.500");
+    assertThat(event.beforeInternalCode())
+        .as("produto nasceu sem código interno (passo 1104d)")
+        .isNull();
+    assertThat(event.afterInternalCode())
+        .as("o código interno da etiqueta entra no antes/depois")
+        .isEqualTo("00123");
   }
 
   @Test
@@ -930,6 +1103,7 @@ class ProductsResourceTest extends IntegrationTestBase {
             "id",
             "name",
             "barcode",
+            "internalCode",
             "description",
             "categoryId",
             "unit",
@@ -1042,6 +1216,7 @@ class ProductsResourceTest extends IntegrationTestBase {
             "id",
             "name",
             "barcode",
+            "internalCode",
             "description",
             "categoryId",
             "unit",
@@ -1101,6 +1276,7 @@ class ProductsResourceTest extends IntegrationTestBase {
             "id",
             "name",
             "barcode",
+            "internalCode",
             "description",
             "categoryId",
             "unit",
@@ -1234,6 +1410,32 @@ class ProductsResourceTest extends IntegrationTestBase {
     assertThat(getByBarcode(STORED_BARCODE).jsonPath().getString("id"))
         .as("o bipe resolve o produto novo")
         .isEqualTo(novo);
+  }
+
+  @Test
+  @DisplayName(
+      "enable de produto cujo código interno já foi tomado responde 409 e o produto continua desativado")
+  void rejectsEnableWhenInternalCodeAlreadyTaken() throws SQLException {
+    UUID antigo = seedProduct("Banana prata", "7.49", "KG", null, null, INTERNAL_CODE);
+    assertThat(postStatus(adminToken(), antigo, "disable").statusCode()).isEqualTo(200);
+    UUID novo = seedProduct("Banana nanica", "5.99", "KG", null, null, INTERNAL_CODE);
+
+    Response response = postStatus(adminToken(), antigo, "enable");
+
+    assertThat(response.statusCode()).isEqualTo(409);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("INTERNAL_CODE_ALREADY_EXISTS");
+    assertThat(response.jsonPath().getString("detail")).contains("código interno");
+    assertThat(statusEventCount(antigo, "PRODUCT_ENABLED")).as("o 409 não audita").isZero();
+    StoredProduct stored = productOf(antigo.toString());
+    assertThat(stored.deleted()).as("o produto continua desativado").isTrue();
+    assertThat(stored.active()).isFalse();
+    assertThat(countActiveByInternalCode(INTERNAL_CODE))
+        .as("o código interno continua só do produto novo")
+        .isEqualTo(1);
+    assertThat(getByBarcode(INTERNAL_CODE).jsonPath().getString("id"))
+        .as("o bipe resolve o produto novo")
+        .isEqualTo(novo.toString());
   }
 
   /**
@@ -1486,7 +1688,12 @@ class ProductsResourceTest extends IntegrationTestBase {
 
   /** Etiqueta de peso da loja: prefixo "2" + código interno + o valor embutido de 1,234 kg. */
   private static String weightLabel() {
-    return "2" + INTERNAL_CODE + "0001234";
+    return weightLabel(INTERNAL_CODE);
+  }
+
+  /** A mesma etiqueta com outro código interno: o PLU da loja tem os 5 dígitos configurados. */
+  private static String weightLabel(String internalCode) {
+    return "2" + internalCode + "0001234";
   }
 
   /** Etiqueta de preço da loja: prefixo "2" + código interno + R$ 19,99 embutidos (2 casas). */
@@ -1590,7 +1797,24 @@ class ProductsResourceTest extends IntegrationTestBase {
    */
   private static String updateBody(
       String name, UUID categoryId, String unit, String description, Object minQuantity) {
+    return updateBody(name, null, categoryId, unit, description, minQuantity);
+  }
+
+  /**
+   * Corpo do PUT com o código interno da etiqueta (passo 1104d): {@code internalCode} nulo omite o
+   * campo, que é exatamente a semântica de limpar do PUT.
+   */
+  private static String updateBody(
+      String name,
+      String internalCode,
+      UUID categoryId,
+      String unit,
+      String description,
+      Object minQuantity) {
     StringBuilder json = new StringBuilder("{\"name\": \"").append(name).append('"');
+    if (internalCode != null) {
+      json.append(", \"internalCode\": \"").append(internalCode).append('"');
+    }
     if (categoryId != null) {
       json.append(", \"categoryId\": \"").append(categoryId).append('"');
     }
@@ -1636,18 +1860,19 @@ class ProductsResourceTest extends IntegrationTestBase {
     return response.jsonPath().getString("id");
   }
 
-  /** Barcode, preço (numeric textual), active e soft delete do produto no banco. */
+  /** Barcode, código interno, preço (numeric textual), active e soft delete do produto no banco. */
   private StoredProduct productOf(String id) throws SQLException {
     try (Connection connection = dataSource.getConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select barcode, price::text as price, active, deleted_at is not null as deleted"
-                    + " from products where id = ?::uuid")) {
+                "select barcode, internal_code, price::text as price, active,"
+                    + " deleted_at is not null as deleted from products where id = ?::uuid")) {
       statement.setString(1, id);
       try (ResultSet resultSet = statement.executeQuery()) {
         assertThat(resultSet.next()).as("produto %s gravado", id).isTrue();
         return new StoredProduct(
             resultSet.getString("barcode"),
+            resultSet.getString("internal_code"),
             resultSet.getString("price"),
             resultSet.getBoolean("active"),
             resultSet.getBoolean("deleted"));
@@ -1698,11 +1923,13 @@ class ProductsResourceTest extends IntegrationTestBase {
                     + " details->'before'->>'unit' as before_unit,"
                     + " details->'before'->>'description' as before_description,"
                     + " details->'before'->>'minQuantity' as before_min_quantity,"
+                    + " details->'before'->>'internalCode' as before_internal_code,"
                     + " details->'after'->>'name' as after_name,"
                     + " details->'after'->>'categoryId' as after_category_id,"
                     + " details->'after'->>'unit' as after_unit,"
                     + " details->'after'->>'description' as after_description,"
-                    + " details->'after'->>'minQuantity' as after_min_quantity"
+                    + " details->'after'->>'minQuantity' as after_min_quantity,"
+                    + " details->'after'->>'internalCode' as after_internal_code"
                     + " from audit_events where action = 'PRODUCT_UPDATED' and entity_id = ?::uuid")) {
       statement.setString(1, id.toString());
       try (ResultSet resultSet = statement.executeQuery()) {
@@ -1717,11 +1944,13 @@ class ProductsResourceTest extends IntegrationTestBase {
                 resultSet.getString("before_unit"),
                 resultSet.getString("before_description"),
                 resultSet.getString("before_min_quantity"),
+                resultSet.getString("before_internal_code"),
                 resultSet.getString("after_name"),
                 resultSet.getString("after_category_id"),
                 resultSet.getString("after_unit"),
                 resultSet.getString("after_description"),
-                resultSet.getString("after_min_quantity"));
+                resultSet.getString("after_min_quantity"),
+                resultSet.getString("after_internal_code"));
         assertThat(resultSet.next()).as("uma edição, um evento").isFalse();
         return event;
       }
@@ -1818,6 +2047,20 @@ class ProductsResourceTest extends IntegrationTestBase {
     }
   }
 
+  /** Quantos produtos vivos existem com o código interno informado; os 4xx não podem criar. */
+  private int countActiveByInternalCode(String internalCode) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select count(*) from products where internal_code = ? and deleted_at is null")) {
+      statement.setString(1, internalCode);
+      try (ResultSet resultSet = statement.executeQuery()) {
+        resultSet.next();
+        return resultSet.getInt(1);
+      }
+    }
+  }
+
   /** Quantos produtos vivos existem com o barcode informado; o 409 e o 403 não podem criar. */
   private int countActiveByBarcode(String barcode) throws SQLException {
     try (Connection connection = dataSource.getConnection();
@@ -1843,7 +2086,8 @@ class ProductsResourceTest extends IntegrationTestBase {
   }
 
   /** Linha de {@code products} como o banco a guardou; preço no formato textual do numeric. */
-  private record StoredProduct(String barcode, String price, boolean active, boolean deleted) {}
+  private record StoredProduct(
+      String barcode, String internalCode, String price, boolean active, boolean deleted) {}
 
   /** Linha de {@code audit_events} do {@code PRODUCT_PRICE_CHANGED} com o antes/depois extraído. */
   private record PriceEvent(
@@ -1864,11 +2108,13 @@ class ProductsResourceTest extends IntegrationTestBase {
       String beforeUnit,
       String beforeDescription,
       String beforeMinQuantity,
+      String beforeInternalCode,
       String afterName,
       String afterCategoryId,
       String afterUnit,
       String afterDescription,
-      String afterMinQuantity) {}
+      String afterMinQuantity,
+      String afterInternalCode) {}
 
   /**
    * Linha de {@code audit_events} do ciclo de vida do produto (passo 412), com o antes/depois do

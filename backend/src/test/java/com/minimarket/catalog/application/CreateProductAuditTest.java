@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 class CreateProductAuditTest extends IntegrationTestBase {
 
   private static final String BARCODE = "7891000000017";
+  private static final String INTERNAL_CODE = "00042";
   private static final String NAME = "Arroz 5kg";
 
   @Inject CreateProductUseCase useCase;
@@ -44,6 +45,7 @@ class CreateProductAuditTest extends IntegrationTestBase {
             new CreateProductCommand(
                 NAME,
                 BARCODE,
+                INTERNAL_CODE,
                 "grão longo",
                 null,
                 "UN",
@@ -60,10 +62,14 @@ class CreateProductAuditTest extends IntegrationTestBase {
     assertThat(event.storeId()).as("fora de request não há loja no contexto").isNull();
     assertThat(event.detailsName()).isEqualTo(NAME);
     assertThat(event.detailsBarcode()).isEqualTo(BARCODE);
+    assertThat(event.detailsInternalCode())
+        .as("o código interno da etiqueta entra nos details (passo 1104d)")
+        .isEqualTo(INTERNAL_CODE);
     assertThat(event.detailsPrice()).isEqualTo("24.90");
 
     Product product = productOf(result.id());
     assertThat(product.barcode()).isEqualTo(BARCODE);
+    assertThat(product.internalCode()).isEqualTo(INTERNAL_CODE);
     assertThat(product.unit()).isEqualTo("UN");
     assertThat(product.price()).isEqualTo("24.90");
     assertThat(product.active()).as("produto nasce ativo").isTrue();
@@ -99,7 +105,7 @@ class CreateProductAuditTest extends IntegrationTestBase {
             connection.prepareStatement(
                 "select entity_id, action, entity_type, source, actor_user_id, store_id,"
                     + " details->>'name' as name, details->>'barcode' as barcode,"
-                    + " details->>'price' as price"
+                    + " details->>'internalCode' as internal_code, details->>'price' as price"
                     + " from audit_events where entity_id = ?")) {
       statement.setObject(1, entityId);
       try (ResultSet resultSet = statement.executeQuery()) {
@@ -113,6 +119,7 @@ class CreateProductAuditTest extends IntegrationTestBase {
             resultSet.getString("store_id"),
             resultSet.getString("name"),
             resultSet.getString("barcode"),
+            resultSet.getString("internal_code"),
             resultSet.getString("price"));
       }
     }
@@ -123,13 +130,14 @@ class CreateProductAuditTest extends IntegrationTestBase {
     try (Connection connection = dataSource.getConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select barcode, unit, price::text as price, active, deleted_at"
+                "select barcode, internal_code, unit, price::text as price, active, deleted_at"
                     + " from products where id = ?")) {
       statement.setObject(1, id);
       try (ResultSet resultSet = statement.executeQuery()) {
         assertThat(resultSet.next()).as("produto gravado %s", id).isTrue();
         return new Product(
             resultSet.getString("barcode"),
+            resultSet.getString("internal_code"),
             resultSet.getString("unit"),
             resultSet.getString("price"),
             resultSet.getBoolean("active"),
@@ -148,9 +156,15 @@ class CreateProductAuditTest extends IntegrationTestBase {
       String storeId,
       String detailsName,
       String detailsBarcode,
+      String detailsInternalCode,
       String detailsPrice) {}
 
   /** Linha de {@code products} como o banco a guardou. */
   private record Product(
-      String barcode, String unit, String price, boolean active, Object deletedAt) {}
+      String barcode,
+      String internalCode,
+      String unit,
+      String price,
+      boolean active,
+      Object deletedAt) {}
 }

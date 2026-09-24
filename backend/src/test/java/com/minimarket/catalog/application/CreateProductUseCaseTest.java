@@ -8,6 +8,7 @@ import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.shared.domain.FieldValidationException;
 import com.minimarket.shared.domain.NotFoundException;
 import com.minimarket.shared.domain.ScaleEmbeddedField;
 import com.minimarket.shared.domain.Store;
@@ -64,6 +65,7 @@ class CreateProductUseCaseTest {
             new CreateProductCommand(
                 "Arroz 5kg",
                 " 789 1000 000017 ",
+                null,
                 "grão longo",
                 categoryId,
                 "UN",
@@ -129,6 +131,71 @@ class CreateProductUseCaseTest {
   }
 
   @Test
+  @DisplayName(
+      "código interno com espaços e curto vira a forma canônica: zeros à esquerda do tamanho da etiqueta")
+  void padsInternalCodeToStoreLength() {
+    CreateProductResult result = useCase.execute(command("7891000000017", " 4 2 ", null));
+
+    assertThat(productStore.inserted.internalCode())
+        .as("trim, sem espaços internos e completo com zeros até os 5 dígitos da loja")
+        .isEqualTo("00042");
+    assertThat(productStore.internalCodeChecked)
+        .as("com código informado a duplicidade é checada")
+        .isTrue();
+    assertThat(result.product().internalCode()).isEqualTo("00042");
+    assertThat(auditRecorder.only().details()).containsEntry("internalCode", "00042");
+  }
+
+  @Test
+  @DisplayName("código interno em branco vira nulo sem checar duplicidade")
+  void normalizesBlankInternalCodeToNull() {
+    useCase.execute(command("7891000000017", "   ", null));
+
+    assertThat(productStore.inserted.internalCode()).isNull();
+    assertThat(productStore.internalCodeChecked)
+        .as("sem código interno não há duplicidade a checar")
+        .isFalse();
+    Map<String, Object> details = auditRecorder.only().details();
+    assertThat(details).containsKey("internalCode");
+    assertThat(details.get("internalCode")).as("o produto nasce sem código interno").isNull();
+  }
+
+  @Test
+  @DisplayName(
+      "código interno não numérico ou maior que o da etiqueta é 400 apontando o campo, sem inserir")
+  void rejectsMalformedInternalCode() {
+    for (String malformed : Arrays.asList("12A", "12.3", "123456")) {
+      assertThatThrownBy(() -> useCase.execute(command("7891000000017", malformed, null)))
+          .as("código interno %s", malformed)
+          .isInstanceOfSatisfying(
+              FieldValidationException.class,
+              error -> {
+                assertThat(error.code()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                assertThat(error.errors())
+                    .singleElement()
+                    .satisfies(field -> assertThat(field.field()).isEqualTo("internalCode"));
+              });
+    }
+
+    assertThat(productStore.inserted).as("o 400 não insere").isNull();
+    assertThat(auditRecorder.recorded).isEmpty();
+  }
+
+  @Test
+  @DisplayName("código interno duplicado entre vivos lança ConflictException sem inserir")
+  void rejectsDuplicateInternalCode() {
+    productStore.existingInternalCodes.add("00042");
+
+    assertThatThrownBy(() -> useCase.execute(command("7891000000017", " 42 ", null)))
+        .isInstanceOfSatisfying(
+            ConflictException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.INTERNAL_CODE_ALREADY_EXISTS));
+
+    assertThat(productStore.inserted).isNull();
+    assertThat(auditRecorder.recorded).as("criação recusada não inventa evento").isEmpty();
+  }
+
+  @Test
   @DisplayName("barcode duplicado entre produtos vivos lança ConflictException sem inserir")
   void rejectsDuplicateBarcode() {
     productStore.existingBarcodes.add("7891000000017");
@@ -190,29 +257,43 @@ class CreateProductUseCaseTest {
   }
 
   private static CreateProductCommand command(String barcode, UUID categoryId) {
+    return command(barcode, null, categoryId);
+  }
+
+  private static CreateProductCommand command(
+      String barcode, String internalCode, UUID categoryId) {
     return new CreateProductCommand(
-        "Arroz 5kg", barcode, "grão longo", categoryId, "UN", new BigDecimal("24.90"), null);
+        "Arroz 5kg",
+        barcode,
+        internalCode,
+        "grão longo",
+        categoryId,
+        "UN",
+        new BigDecimal("24.90"),
+        null);
   }
 
   private static CreateProductCommand commandWithPrice(BigDecimal price) {
-    return new CreateProductCommand("Arroz 5kg", null, "grão longo", null, "UN", price, null);
+    return new CreateProductCommand("Arroz 5kg", null, null, "grão longo", null, "UN", price, null);
   }
 
   private static CreateProductCommand commandWithUnit(String unit) {
     return new CreateProductCommand(
-        "Arroz 5kg", null, "grão longo", null, unit, new BigDecimal("24.90"), null);
+        "Arroz 5kg", null, null, "grão longo", null, unit, new BigDecimal("24.90"), null);
   }
 
-  /** Dublê de {@link ProductStore}: guarda a última inserção e simula barcodes já em uso. */
+  /** Dublê de {@link ProductStore}: guarda a última inserção e simula os códigos já em uso. */
   private static final class FakeProductStore implements ProductStore {
 
     /** Instante fixo do "banco" do dublê: o resultado da criação é conferido campo a campo. */
     private static final Instant CREATED_AT = Instant.parse("2026-01-02T03:04:05Z");
 
     private final Set<String> existingBarcodes = new HashSet<>();
+    private final Set<String> existingInternalCodes = new HashSet<>();
     private final UUID generatedId = UUID.randomUUID();
     private NewProduct inserted;
     private boolean barcodeChecked;
+    private boolean internalCodeChecked;
 
     @Override
     public UUID insert(NewProduct product) {
@@ -224,6 +305,12 @@ class CreateProductUseCaseTest {
     public boolean existsActiveBarcode(String barcode) {
       barcodeChecked = true;
       return existingBarcodes.contains(barcode);
+    }
+
+    @Override
+    public boolean existsActiveInternalCode(String internalCode) {
+      internalCodeChecked = true;
+      return existingInternalCodes.contains(internalCode);
     }
 
     /**
@@ -240,6 +327,7 @@ class CreateProductUseCaseTest {
               generatedId,
               inserted.storeId(),
               inserted.barcode(),
+              inserted.internalCode(),
               inserted.name(),
               inserted.description(),
               inserted.categoryId(),
@@ -284,11 +372,18 @@ class CreateProductUseCaseTest {
     public Optional<ProductSummary> update(
         UUID id,
         String name,
+        String internalCode,
         UUID categoryId,
         String unit,
         String description,
         BigDecimal minQuantity) {
       throw new UnsupportedOperationException("update não é usado por CreateProduct");
+    }
+
+    @Override
+    public boolean existsActiveInternalCodeExceptId(String internalCode, UUID id) {
+      throw new UnsupportedOperationException(
+          "existsActiveInternalCodeExceptId não é usado por CreateProduct");
     }
 
     @Override

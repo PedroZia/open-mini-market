@@ -259,6 +259,7 @@ class ChangeProductPriceUseCaseTest {
     public Optional<ProductSummary> update(
         UUID id,
         String name,
+        String internalCode,
         UUID categoryId,
         String unit,
         String description,
@@ -275,6 +276,18 @@ class ChangeProductPriceUseCaseTest {
     public boolean existsActiveBarcode(String barcode) {
       throw new UnsupportedOperationException(
           "existsActiveBarcode não é usado por ChangeProductPrice");
+    }
+
+    @Override
+    public boolean existsActiveInternalCode(String internalCode) {
+      throw new UnsupportedOperationException(
+          "existsActiveInternalCode não é usado por ChangeProductPrice");
+    }
+
+    @Override
+    public boolean existsActiveInternalCodeExceptId(String internalCode, UUID id) {
+      throw new UnsupportedOperationException(
+          "existsActiveInternalCodeExceptId não é usado por ChangeProductPrice");
     }
 
     @Override

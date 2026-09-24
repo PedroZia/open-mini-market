@@ -13,10 +13,14 @@ import java.util.UUID;
  * no {@code If-Match} ficam com o caso de uso — fonte única da regra. Preço (passo 411), barcode
  * (imutável) e status (passo 412) não entram no corpo: quem os muda é a operação própria.
  *
+ * <p>{@code internalCode} (passo 1104d) segue a semântica de substituição dos demais campos do PUT:
+ * ausente ou nulo <em>limpa</em> o código interno do produto.
+ *
  * <p>Os limites de dígitos espelham o schema: quantidade {@code numeric(14,3)}, não negativa.
  */
 public record UpdateProductRequest(
     @NotBlank(message = "não pode ser vazio") String name,
+    String internalCode,
     UUID categoryId,
     @NotNull(message = "não pode ser nulo") String unit,
     String description,

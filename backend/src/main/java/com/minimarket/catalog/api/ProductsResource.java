@@ -81,9 +81,10 @@ public class ProductsResource {
 
   /**
    * Cria o produto e devolve 201 com o {@code Location} dele. Categoria inexistente → 404 {@code
-   * CATEGORY_NOT_FOUND}; barcode já usado por produto vivo → 409 {@code BARCODE_ALREADY_EXISTS};
-   * unidade fora da whitelist ou preço inválido → 400 {@code VALIDATION_ERROR} (do caso de uso,
-   * quando escapa da validação de forma).
+   * CATEGORY_NOT_FOUND}; barcode ou código interno já usado por produto vivo → 409 {@code
+   * BARCODE_ALREADY_EXISTS}/{@code INTERNAL_CODE_ALREADY_EXISTS}; unidade fora da whitelist, preço
+   * inválido ou código interno fora da regra → 400 {@code VALIDATION_ERROR} (do caso de uso, quando
+   * escapa da validação de forma).
    */
   @POST
   @RequirePermission(Permission.PRODUCT_WRITE)
@@ -100,6 +101,7 @@ public class ProductsResource {
                 new CreateProductCommand(
                     request.name(),
                     request.barcode(),
+                    request.internalCode(),
                     request.description(),
                     request.categoryId(),
                     request.unit(),
@@ -158,12 +160,14 @@ public class ProductsResource {
   }
 
   /**
-   * Edita nome, categoria, unidade, descrição e quantidade mínima (§9.3, passo 410) — preço (411),
-   * barcode (imutável) e status (412) não passam por aqui. O {@code If-Match} é obrigatório e leva
-   * a versão que o cliente leu no detalhe: ausente ou em branco → 428 {@code IF_MATCH_REQUIRED};
-   * versão velha → 409 {@code CONCURRENT_MODIFICATION} (§8 do plano); id desconhecido, produto
-   * desativado ou soft-deletado → 404 {@code PRODUCT_NOT_FOUND}; unidade fora da whitelist ou
-   * categoria inexistente → 400/404 do caso de uso.
+   * Edita nome, código interno (passo 1104d), categoria, unidade, descrição e quantidade mínima
+   * (§9.3, passo 410) — preço (411), barcode (imutável) e status (412) não passam por aqui. O
+   * {@code If-Match} é obrigatório e leva a versão que o cliente leu no detalhe: ausente ou em
+   * branco → 428 {@code IF_MATCH_REQUIRED}; versão velha → 409 {@code CONCURRENT_MODIFICATION} (§8
+   * do plano); id desconhecido, produto desativado ou soft-deletado → 404 {@code
+   * PRODUCT_NOT_FOUND}; unidade fora da whitelist, código interno fora da regra ou categoria
+   * inexistente → 400/404 do caso de uso; código interno de outro produto vivo → 409 {@code
+   * INTERNAL_CODE_ALREADY_EXISTS}.
    */
   @PUT
   @Path("/{id}")
@@ -180,6 +184,7 @@ public class ProductsResource {
                 id,
                 expectedVersion(ifMatch),
                 request.name(),
+                request.internalCode(),
                 request.categoryId(),
                 request.unit(),
                 request.description(),
@@ -257,6 +262,7 @@ public class ProductsResource {
         product.id(),
         product.name(),
         product.barcode(),
+        product.internalCode(),
         product.description(),
         product.categoryId(),
         product.unit(),

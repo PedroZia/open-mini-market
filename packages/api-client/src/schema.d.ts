@@ -2602,6 +2602,7 @@ export interface components {
         CreateProductRequest: {
             name: string;
             barcode?: string;
+            internalCode?: string;
             description?: string;
             categoryId?: components["schemas"]["UUID"];
             unit: string;
@@ -2786,6 +2787,7 @@ export interface components {
             id?: components["schemas"]["UUID"];
             name?: string;
             barcode?: string;
+            internalCode?: string;
             description?: string;
             categoryId?: components["schemas"]["UUID"];
             unit?: string;
@@ -2971,6 +2973,7 @@ export interface components {
         UUID: string;
         UpdateProductRequest: {
             name: string;
+            internalCode?: string;
             categoryId?: components["schemas"]["UUID"];
             unit: string;
             description?: string;

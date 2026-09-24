@@ -8,12 +8,15 @@ import java.util.UUID;
  * Produto como a API devolve (§9.3): só os campos do contrato — {@code storeId} e {@code deletedAt}
  * são detalhe do banco e não aparecem (o {@code active} já diz se o produto está vivo). A projeção
  * {@code ProductSummary} de {@code application} é mapeada para cá; entidade JPA nunca vai a JSON.
- * Reutilizado pelo detalhe (passo 408) e pela edição (passo 410).
+ * Reutilizado pelo detalhe (passo 408) e pela edição (passo 410). O {@code internalCode} é o PLU da
+ * etiqueta de balança como o banco o guardou — com os zeros à esquerda do tamanho configurado
+ * (passo 1104d).
  */
 public record ProductResponse(
     UUID id,
     String name,
     String barcode,
+    String internalCode,
     String description,
     UUID categoryId,
     String unit,

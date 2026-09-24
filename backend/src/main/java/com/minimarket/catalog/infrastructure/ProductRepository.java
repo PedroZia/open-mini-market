@@ -27,7 +27,8 @@ import org.hibernate.exception.ConstraintViolationException;
  * <p>{@link #findById} devolve também produto soft-deletado — quem decide o que fazer com {@code
  * deletedAt} é o caso de uso (o passo 412 precisa reativar o registro); {@link #findByBarcode},
  * {@link #findByInternalCode}, {@link #search}, {@link #update}, {@link #updatePrice}, {@link
- * #updateCostPrice} e {@link #existsActiveBarcode} sempre ignoram deletados.
+ * #updateCostPrice}, {@link #existsActiveBarcode} e {@link #existsActiveInternalCode} (com a
+ * variante que exclui o próprio produto) sempre ignoram deletados.
  *
  * <p>Implementa a porta {@link ProductStore}: é por ela que {@code application} grava produto sem
  * tocar em JPA.
@@ -37,6 +38,11 @@ public class ProductRepository implements ProductStore {
 
   /** SQLState de violação de unique constraint no PostgreSQL. */
   private static final String UNIQUE_VIOLATION = "23505";
+
+  /** Índices únicos parciais de {@code products} (V8 e V21): o nome diz qual código colidiu. */
+  private static final String BARCODE_INDEX = "ux_products_barcode";
+
+  private static final String INTERNAL_CODE_INDEX = "ux_products_internal_code";
 
   @Inject EntityManager entityManager;
 
@@ -108,6 +114,35 @@ public class ProductRepository implements ProductStore {
         .isEmpty();
   }
 
+  /** {@inheritDoc} */
+  @Override
+  public boolean existsActiveInternalCode(String internalCode) {
+    return existsInternalCode(internalCode, null);
+  }
+
+  /** {@inheritDoc} */
+  @Override
+  public boolean existsActiveInternalCodeExceptId(String internalCode, UUID id) {
+    return existsInternalCode(internalCode, id);
+  }
+
+  /** {@code id} nulo não exclui ninguém: o mesmo SQL serve ao cadastro e à edição. */
+  private boolean existsInternalCode(String internalCode, UUID id) {
+    if (internalCode == null) {
+      return false;
+    }
+    return !entityManager
+        .createQuery(
+            "select p.id from ProductEntity p where p.internalCode = :internalCode and p.deletedAt"
+                + " is null and (:id is null or p.id <> :id)",
+            UUID.class)
+        .setParameter("internalCode", internalCode)
+        .setParameter("id", id)
+        .setMaxResults(1)
+        .getResultList()
+        .isEmpty();
+  }
+
   /**
    * {@inheritDoc}
    *
@@ -123,6 +158,7 @@ public class ProductRepository implements ProductStore {
   public Optional<ProductSummary> update(
       UUID id,
       String name,
+      String internalCode,
       UUID categoryId,
       String unit,
       String description,
@@ -131,7 +167,7 @@ public class ProductRepository implements ProductStore {
         .filter(product -> product.getDeletedAt() == null)
         .map(
             product -> {
-              product.updateDetails(name, categoryId, unit, description, minQuantity);
+              product.updateDetails(name, internalCode, categoryId, unit, description, minQuantity);
               flushTranslatingConflicts();
               return toSummary(product);
             });
@@ -281,16 +317,20 @@ public class ProductRepository implements ProductStore {
   }
 
   /**
-   * O {@code existsActiveBarcode} do caso de uso não é atômico: entre a checagem e a escrita, outro
-   * request pode gravar o mesmo barcode. O flush antecipado (no {@code insert} e também no {@code
-   * update}, que compartilha a tabela) faz a violação do índice único parcial {@code
-   * ux_products_barcode} aparecer aqui e virar {@link ConflictException} com o mesmo código do
-   * caminho comum — o backstop do banco nunca responde 500. {@code products} só tem índices únicos
-   * sobre código de barras — {@code ux_products_barcode} e o {@code ux_products_internal_code} do
-   * passo 1104b1, que o cliente enxerga como o mesmo conflito (o código interno é o código de
-   * barras que a balança imprime, BR-14) — além da chave primária (o id é UUIDv7 gerado na
-   * aplicação), então SQLState 23505 aqui só pode ser código duplicado entre produtos vivos;
-   * qualquer outra falha de persistência sobe como está.
+   * As checagens de duplicidade do caso de uso ({@code existsActiveBarcode} e {@code
+   * existsActiveInternalCode}) não são atômicas: entre a checagem e a escrita, outro request pode
+   * gravar o mesmo código. O flush antecipado (no {@code insert}, no {@code update} e também no
+   * {@code enable}) faz a violação dos índices únicos parciais aparecer aqui e virar {@link
+   * ConflictException} com o mesmo código do caminho comum — o backstop do banco nunca responde
+   * 500. {@code products} só tem índices únicos sobre código de barras e código interno — {@code
+   * ux_products_barcode} e o {@code ux_products_internal_code} do passo 1104b1 — além da chave
+   * primária (o id é UUIDv7 gerado na aplicação), então SQLState 23505 aqui só pode ser código
+   * duplicado entre produtos vivos; qualquer outra falha de persistência sobe como está.
+   *
+   * <p>A violação é traduzida pelo nome da constraint (o PostgreSQL o nomeia sempre; o dialeto do
+   * Hibernate o extrai da mensagem): cada índice tem o seu código de conflito. Nome desconhecido —
+   * índice novo ou violação que não é destes dois — sobe como {@code CONFLICT} genérico, que não
+   * mente sobre qual código colidiu.
    *
    * <p>O mesmo flush é o backstop do lock otimista do {@code update}: o Hibernate sinaliza a versão
    * vencida (o {@code where version = ?} não achou a linha) e o stale vira o 409 {@code
@@ -307,9 +347,23 @@ public class ProductRepository implements ProductStore {
       if (!UNIQUE_VIOLATION.equals(exception.getSQLState())) {
         throw exception;
       }
-      throw new ConflictException(
+      throw duplicateCodeConflict(exception.getConstraintName());
+    }
+  }
+
+  /** Código de conflito do índice violado; nome desconhecido não escolhe um dos dois códigos. */
+  private static ConflictException duplicateCodeConflict(String constraintName) {
+    if (INTERNAL_CODE_INDEX.equals(constraintName)) {
+      return new ConflictException(
+          ErrorCode.INTERNAL_CODE_ALREADY_EXISTS, "código interno já está em uso");
+    }
+    if (BARCODE_INDEX.equals(constraintName)) {
+      return new ConflictException(
           ErrorCode.BARCODE_ALREADY_EXISTS, "código de barras já está em uso");
     }
+    return new ConflictException(
+        ErrorCode.CONFLICT,
+        "cadastro do produto já usa um destes códigos; recarregue e tente de novo");
   }
 
   /** Entidade pronta para escrita; quem só lê recebe a projeção de {@link #toSummary}. */

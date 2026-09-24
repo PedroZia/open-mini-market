@@ -33,8 +33,8 @@ public class ProductEntity {
   private String barcode;
 
   /**
-   * PLU da etiqueta de balança (passo 1104b1, BR-14); imutável como o {@code barcode} — não há
-   * método de update.
+   * PLU da etiqueta de balança (passos 1104b1/1104d, BR-14): o PUT de cadastro o substitui junto
+   * com os demais campos — nulo limpa. Diferente do {@code barcode}, não é imutável.
    */
   @Column(name = "internal_code")
   private String internalCode;
@@ -122,8 +122,14 @@ public class ProductEntity {
 
   /** Campos que o passo 410 edita; preço, barcode e status não mudam por aqui. */
   void updateDetails(
-      String name, UUID categoryId, String unit, String description, BigDecimal minQuantity) {
+      String name,
+      String internalCode,
+      UUID categoryId,
+      String unit,
+      String description,
+      BigDecimal minQuantity) {
     this.name = name;
+    this.internalCode = internalCode;
     this.categoryId = categoryId;
     this.unit = unit;
     this.description = description;

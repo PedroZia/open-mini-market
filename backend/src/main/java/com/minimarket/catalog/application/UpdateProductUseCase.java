@@ -1,10 +1,12 @@
 package com.minimarket.catalog.application;
 
 import com.minimarket.audit.application.AuditRecorder;
+import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.NotFoundException;
+import com.minimarket.shared.domain.Store;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -12,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
  * Edita o cadastro do produto (passo 410) com lock otimista: só grava se a versão que o cliente leu
@@ -23,8 +26,12 @@ import java.util.UUID;
  * <p>Só entram produto vivo e ativo: {@code deletedAt} preenchido ou {@code active} falso é 404
  * {@code PRODUCT_NOT_FOUND}, como no detalhe (passo 408) — o passo 412 é quem reativa.
  *
+ * <p>O código interno da etiqueta (passo 1104d) é substituído como os demais campos do PUT: o nulo
+ * limpa. A normalização é a do {@link InternalCodeNormalizer}, com o tamanho configurado na loja —
+ * quem não foi informado continua sem código.
+ *
  * <p>Auditoria (passo 410, consolidada no 413): a alteração vira {@code PRODUCT_UPDATED} na mesma
- * transação, com o antes/depois mínimo dos cinco campos editados (§7.2). O "before" é lido antes de
+ * transação, com o antes/depois mínimo dos campos editados (§7.2). O "before" é lido antes de
  * gravar — depois do update a projeção já viria com os valores novos.
  */
 @ApplicationScoped
@@ -43,28 +50,41 @@ public class UpdateProductUseCase {
 
   @Inject CategoryStore categoryStore;
 
+  @Inject StoreLookup storeLookup;
+
   /** Auditoria do catálogo (passo 410), na transação da alteração. */
   @Inject AuditRecorder auditRecorder;
 
+  /** Loja atual (loja única do MVP), dona do tamanho do código interno da etiqueta. */
+  @ConfigProperty(name = "minimarket.store.default-code")
+  String defaultStoreCode;
+
   /**
    * 404 {@code PRODUCT_NOT_FOUND} para id desconhecido, produto soft-deletado ou desativado; 409
-   * {@code CONCURRENT_MODIFICATION} quando a versão esperada não é a do banco; 400 {@code
-   * VALIDATION_ERROR} para unidade fora da whitelist; 404 {@code CATEGORY_NOT_FOUND} quando a
-   * categoria informada não existe. Devolve o produto como o banco o guardou, com o {@code version}
-   * novo para o {@code If-Match} seguinte.
+   * {@code CONCURRENT_MODIFICATION} quando a versão esperada não é a do banco; 409 {@code
+   * INTERNAL_CODE_ALREADY_EXISTS} quando o código interno já é de outro produto vivo; 400 {@code
+   * VALIDATION_ERROR} para unidade fora da whitelist e código interno não numérico ou maior que o
+   * configurado (estes dois com {@code internalCode} em {@code errors[]}); 404 {@code
+   * CATEGORY_NOT_FOUND} quando a categoria informada não existe. Devolve o produto como o banco o
+   * guardou, com o {@code version} novo para o {@code If-Match} seguinte.
    */
   @Transactional
   public ProductSummary execute(UpdateProductCommand command) {
     ProductSummary before = requireEditable(command.id());
     requireExpectedVersion(before, command.expectedVersion());
+    String internalCode =
+        InternalCodeNormalizer.normalize(
+            command.internalCode(), currentStore().internalCodeLength());
     String unit = requireValidUnit(command.unit());
     requireExistingCategory(command.categoryId());
+    requireFreeInternalCode(internalCode, command.id());
 
     ProductSummary after =
         productStore
             .update(
                 command.id(),
                 command.name(),
+                internalCode,
                 command.categoryId(),
                 unit,
                 command.description(),
@@ -117,9 +137,30 @@ public class UpdateProductUseCase {
   }
 
   /**
+   * O código interno não pode ser de outro produto vivo (passo 1104d) — o do próprio produto é
+   * reescrito por aqui e não colide consigo mesmo. A checagem não é atômica; a constraint é o
+   * backstop do adaptador.
+   */
+  private void requireFreeInternalCode(String internalCode, UUID id) {
+    if (internalCode != null && productStore.existsActiveInternalCodeExceptId(internalCode, id)) {
+      throw new ConflictException(
+          ErrorCode.INTERNAL_CODE_ALREADY_EXISTS,
+          "código interno %s já está em uso".formatted(internalCode));
+    }
+  }
+
+  /** Loja atual, dona do tamanho do código interno — o mesmo padrão do cadastro. */
+  private Store currentStore() {
+    return storeLookup
+        .findByCode(defaultStoreCode)
+        .orElseThrow(
+            () -> new IllegalStateException("loja configurada não existe: " + defaultStoreCode));
+  }
+
+  /**
    * O antes/depois mínimo do §7.2: só os campos que a operação muda, nunca o produto inteiro.
-   * {@code LinkedHashMap} porque categoria, descrição e quantidade mínima podem ser nulas — valor
-   * nulo no jsonb é o produto sem aquele dado, e {@code Map.of} não aceita nulo.
+   * {@code LinkedHashMap} porque categoria, descrição, quantidade mínima e código interno podem ser
+   * nulos — valor nulo no jsonb é o produto sem aquele dado, e {@code Map.of} não aceita nulo.
    */
   private static Map<String, Object> beforeAndAfter(ProductSummary before, ProductSummary after) {
     Map<String, Object> details = new LinkedHashMap<>();
@@ -131,6 +172,7 @@ public class UpdateProductUseCase {
   private static Map<String, Object> snapshot(ProductSummary product) {
     Map<String, Object> values = new LinkedHashMap<>();
     values.put("name", product.name());
+    values.put("internalCode", product.internalCode());
     values.put("categoryId", product.categoryId());
     values.put("unit", product.unit());
     values.put("description", product.description());

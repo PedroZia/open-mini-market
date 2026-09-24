@@ -28,10 +28,7 @@ public record ProductSummary(
     Instant deletedAt,
     long version) {
 
-  /**
-   * Produto sem código interno: enquanto nenhum caso de uso informa o campo (o 1104b1 só prepara a
-   * persistência), toda projeção nasce assim — o atalho preserva os call sites que não têm o dado.
-   */
+  /** Produto sem código interno: o atalho de quem não tem o PLU da etiqueta em mãos. */
   public ProductSummary(
       UUID id,
       UUID storeId,

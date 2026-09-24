@@ -58,14 +58,19 @@ public interface ProductStore {
   long count(String search, UUID categoryId, Boolean active);
 
   /**
-   * Grava nome, categoria, unidade, descrição e quantidade mínima do produto não deletado — preço
-   * (passo 411), barcode (imutável) e status (passo 412) não passam por aqui. Devolve a projeção já
-   * atualizada, com o {@code version} novo para o {@code If-Match} seguinte; vazio quando não
-   * existe produto não deletado com o id — o 404 é do caso de uso.
+   * Grava nome, código interno, categoria, unidade, descrição e quantidade mínima do produto não
+   * deletado — preço (passo 411), barcode (imutável) e status (passo 412) não passam por aqui. O
+   * {@code internalCode} é substituído como os demais campos do PUT: nulo limpa o código (passo
+   * 1104d). O flush do adaptador ainda confronta o código com o índice único parcial {@code
+   * ux_products_internal_code}: se outro produto vivo já o tomou, a operação falha com {@code
+   * ConflictException(INTERNAL_CODE_ALREADY_EXISTS)}. Devolve a projeção já atualizada, com o
+   * {@code version} novo para o {@code If-Match} seguinte; vazio quando não existe produto não
+   * deletado com o id — o 404 é do caso de uso.
    */
   Optional<ProductSummary> update(
       UUID id,
       String name,
+      String internalCode,
       UUID categoryId,
       String unit,
       String description,
@@ -104,9 +109,11 @@ public interface ProductStore {
   /**
    * Reativa o produto desativado (passo 412): enxerga o soft-deletado, grava {@code active = true}
    * e limpa {@code deleted_at}, o que devolve o produto à busca e ao bipe. A gravação é conferida
-   * contra o índice único de barcode: se outro produto vivo já tomou o código liberado na
-   * desativação, a operação falha com {@code ConflictException(BARCODE_ALREADY_EXISTS)} e nada é
-   * gravado. Vazio para id desconhecido — o 404 é do caso de uso.
+   * contra os dois índices únicos parciais: se outro produto vivo já tomou o barcode ou o código
+   * interno liberados na desativação, a operação falha com {@code
+   * ConflictException(BARCODE_ALREADY_EXISTS)} ou {@code
+   * ConflictException(INTERNAL_CODE_ALREADY_EXISTS)} e nada é gravado. Vazio para id desconhecido —
+   * o 404 é do caso de uso.
    */
   Optional<ProductSummary> enable(UUID id);
 
@@ -116,4 +123,19 @@ public interface ProductStore {
    * cobrir a tabela inteira é o mesmo escopo da constraint.
    */
   boolean existsActiveBarcode(String barcode);
+
+  /**
+   * Indica se existe produto não deletado com o código interno informado (passo 1104d): o cadastro
+   * recusa o duplicado antes de tentar gravar e o adaptador ainda traduz a constraint como
+   * backstop, como no barcode. Mesmo escopo de {@link #existsActiveBarcode}: a loja única do MVP
+   * faz a tabela inteira ser o escopo do índice {@code (store_id, internal_code)}.
+   */
+  boolean existsActiveInternalCode(String internalCode);
+
+  /**
+   * O mesmo de {@link #existsActiveInternalCode}, ignorando o produto {@code id}: a edição (passo
+   * 410) substitui o código interno do próprio produto e não pode colidir consigo mesma. Mesmo
+   * desenho do {@code existsByNameExceptId} do {@code CategoryStore}.
+   */
+  boolean existsActiveInternalCodeExceptId(String internalCode, UUID id);
 }

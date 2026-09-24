@@ -88,8 +88,8 @@ mesmo `occurred_at` e desempate pelo `id`.
 
 | `action` | Emissor (quando) | `entityType`/`entityId` | `reason` | `details` |
 | --- | --- | --- | --- | --- |
-| `PRODUCT_CREATED` | `CreateProductUseCase.execute` | `PRODUCT` / id do produto | — | `name`, `barcode`, `price` |
-| `PRODUCT_UPDATED` | `UpdateProductUseCase.execute` | `PRODUCT` / id do produto | — | `before{name, categoryId, unit, description, minQuantity}`, `after{...}` |
+| `PRODUCT_CREATED` | `CreateProductUseCase.execute` | `PRODUCT` / id do produto | — | `name`, `barcode`, `internalCode` (nulo sem PLU), `price` |
+| `PRODUCT_UPDATED` | `UpdateProductUseCase.execute` | `PRODUCT` / id do produto | — | `before{name, internalCode, categoryId, unit, description, minQuantity}`, `after{...}` |
 | `PRODUCT_PRICE_CHANGED` | `ChangeProductPriceUseCase.execute` (`PATCH /products/{id}/price`) | `PRODUCT` / id do produto | motivo informado na alteração | `before{price}`, `after{price}` |
 | `PRODUCT_DISABLED` | `DisableProductUseCase.execute` | `PRODUCT` / id do produto | — | `before{active}`, `after{active}` |
 | `PRODUCT_ENABLED` | `EnableProductUseCase.execute` | `PRODUCT` / id do produto | — | `before{active}`, `after{active}` |
