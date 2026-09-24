@@ -531,7 +531,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 201; 409 já aberto; 403 sem `cash.open`; repetir com mesma `Idempotency-Key` devolve a mesma sessão.
   **Commit:** `feat(cash): expoe abertura de caixa na API`
 
-- [ ] **608 — API `GET .../current-session`**
+- [x] **608 — API `GET .../current-session`**
   **Objetivo:** TUI mostra o caixa aberto. **Depende:** 607
   **Implementar:** sessão atual com totais por tipo de movimento e saldo esperado; 404 quando não há sessão aberta.
   **Testes/aceite:** valores conferem após abrir + sangria + suprimento.

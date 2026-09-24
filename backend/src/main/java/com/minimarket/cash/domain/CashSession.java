@@ -5,7 +5,9 @@ import com.minimarket.shared.domain.ErrorCode;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Agregado da sessão de caixa (linha “Caixa (sessão)” do §4.4 e BR-10): valor de abertura,
@@ -54,13 +56,25 @@ public final class CashSession {
     return openingAmount;
   }
 
-  /** Saldo esperado: abertura + vendas + suprimentos − sangrias. */
+  /**
+   * Saldo esperado: abertura + vendas + suprimentos − sangrias. A conta em si é do {@link
+   * CashSessionAmounts} (regra única, também usada pela consulta da sessão atual no passo 608);
+   * aqui só os movimentos do agregado viram totais assinados por tipo.
+   */
   public BigDecimal expectedAmount() {
-    BigDecimal expected = openingAmount;
+    return CashSessionAmounts.expectedAmount(openingAmount, totalsByType());
+  }
+
+  /**
+   * Totais assinados por tipo, como o ledger os guardaria — a conta fica no {@code
+   * CashSessionAmounts}.
+   */
+  private Map<CashMovementType, BigDecimal> totalsByType() {
+    Map<CashMovementType, BigDecimal> totals = new EnumMap<>(CashMovementType.class);
     for (Movement movement : movements) {
-      expected = expected.add(movement.amount());
+      totals.merge(movement.type(), movement.amount(), BigDecimal::add);
     }
-    return money(expected);
+    return totals;
   }
 
   /** Venda: entrada positiva; sem motivo, porque a origem é a própria venda. */

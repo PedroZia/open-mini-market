@@ -2,6 +2,8 @@ package com.minimarket.cash.api;
 
 import com.minimarket.cash.application.CashRegisterView;
 import com.minimarket.cash.application.CashSessionSummary;
+import com.minimarket.cash.application.CurrentCashSessionView;
+import com.minimarket.cash.application.GetCurrentCashSessionUseCase;
 import com.minimarket.cash.application.ListCashRegistersUseCase;
 import com.minimarket.cash.application.OpenCashSessionCommand;
 import com.minimarket.cash.application.OpenCashSessionUseCase;
@@ -48,6 +50,8 @@ public class CashRegistersResource {
 
   @Inject OpenCashSessionUseCase openCashSessionUseCase;
 
+  @Inject GetCurrentCashSessionUseCase getCurrentCashSessionUseCase;
+
   /** Idempotência da operação de dinheiro (§8, passo 607a). */
   @Inject IdempotencyGuard idempotencyGuard;
 
@@ -93,6 +97,20 @@ public class CashRegistersResource {
       @Valid OpenCashSessionRequest request) {
     return idempotencyGuard.execute(
         idempotencyKey, HttpMethod.POST, openPath(id), request, () -> openSession(id, request));
+  }
+
+  /**
+   * Sessão atual do caixa (§9.3): a TUI usa com o caixa aberto para mostrar os totais por tipo de
+   * movimento e o saldo esperado, recalculado pelo servidor (BR-12). Leitura, sem idempotência.
+   * Caixa sem sessão aberta — inclusive registro inexistente — é 404 {@code CASH_SESSION_NOT_OPEN};
+   * sem {@code cash.read} o interceptor responde 403 antes de o corpo do método rodar.
+   */
+  @GET
+  @Path("/{id}/current-session")
+  @RequirePermission(Permission.CASH_READ)
+  @Produces(MediaType.APPLICATION_JSON)
+  public CurrentCashSessionResponse currentSession(@PathParam("id") UUID id) {
+    return toCurrentSessionResponse(getCurrentCashSessionUseCase.execute(id));
   }
 
   /** Ação idempotente: abre a sessão e monta o 201 com o {@code Location} da sessão atual. */
@@ -142,5 +160,18 @@ public class CashRegistersResource {
         session.openedAt(),
         session.openedByUserId(),
         session.openingAmount());
+  }
+
+  private static CurrentCashSessionResponse toCurrentSessionResponse(
+      CurrentCashSessionView session) {
+    return new CurrentCashSessionResponse(
+        session.sessionId(),
+        session.cashRegisterId(),
+        session.status(),
+        session.openedAt(),
+        session.openedByUserId(),
+        session.openingAmount(),
+        session.expectedAmount(),
+        session.totalsByType());
   }
 }

@@ -23,6 +23,7 @@ public enum ErrorCode {
   PRODUCT_NOT_FOUND(404, "Produto não encontrado"),
   CUSTOMER_NOT_FOUND(404, "Cliente não encontrado"),
   CASH_REGISTER_NOT_FOUND(404, "Caixa não encontrado"),
+  CASH_SESSION_NOT_OPEN(404, "Sessão de caixa não aberta"),
   METHOD_NOT_ALLOWED(405, "Método não permitido"),
   CONFLICT(409, "Conflito de estado"),
   USERNAME_ALREADY_EXISTS(409, "Username já está em uso"),
