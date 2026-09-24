@@ -895,7 +895,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 15+ testes unitários das transições, sem renderização.
   **Commit:** `feat(tui): adiciona maquina de estados da operacao`
 
-- [ ] **1104a — Núcleo: leitor de código de barras**
+- [x] **1104a — Núcleo: leitor de código de barras**
   **Objetivo:** bipe confiável independente de foco. **Depende:** 1103
   **Implementar:** `core/scanner.ts`: acumula caracteres com intervalo < 50 ms, encerra em `ENTER`/`TAB`, emite o `barcode` **bruto** (a interpretação é do servidor, BR-14); descarta digitação humana lenta; funciona em qualquer tela exceto modais bloqueantes; multiplicador `3*` + bipe vira `quantity = 3`.
   **Testes/aceite:** rajada rápida vira um barcode; digitação lenta não; `ENTER` isolado não; `3*` + bipe resulta em quantidade 3.
