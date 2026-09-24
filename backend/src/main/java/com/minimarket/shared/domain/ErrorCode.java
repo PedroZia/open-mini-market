@@ -33,6 +33,7 @@ public enum ErrorCode {
   TAX_ID_ALREADY_EXISTS(409, "CPF já está em uso"),
   CASH_REGISTER_ALREADY_OPEN(409, "Caixa já está aberto"),
   CASH_SESSION_ALREADY_CLOSED(409, "Sessão de caixa já está fechada"),
+  CASH_SESSION_REQUIRED(409, "Sessão de caixa aberta obrigatória"),
   IDEMPOTENCY_KEY_REUSED(409, "Chave de idempotência já utilizada"),
   CONCURRENT_MODIFICATION(409, "Modificação concorrente"),
   BUSINESS_ERROR(422, "Regra de negócio violada"),

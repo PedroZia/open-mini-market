@@ -653,10 +653,10 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 50 alocações concorrentes → 50 números únicos e sem buraco (teste com threads).
   **Commit:** `feat(sales): aloca numeracao sequencial de venda`
 
-- [ ] **805 — Caso de uso `CreateSale`**
+- [x] **805 — Caso de uso `CreateSale`**
   **Objetivo:** abrir venda no caixa da sessão. **Depende:** 803, 804, 604
   **Implementar:** exige sessão autenticada vinculada a caixa com sessão de caixa `OPEN` (BR-06/BR-11); cria venda `OPEN` vazia com número; auditoria `SALE_CREATED`.
-  **Testes/aceite:** cria com sucesso; sem caixa aberto → 409 `CASH_SESSION_NOT_OPEN`; sem vínculo de caixa → 403.
+  **Testes/aceite:** cria com sucesso; sem caixa aberto → 409 `CASH_SESSION_REQUIRED`; sem vínculo de caixa → 403.
   **Commit:** `feat(sales): implementa abertura de venda`
 
 - [ ] **806 — Idempotência na API**
