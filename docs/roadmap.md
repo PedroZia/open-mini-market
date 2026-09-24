@@ -683,7 +683,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** unitários dos dois casos de uso novos e da posse no `AddSaleItem`: 200/estado com totais recalculados e evento; 403 venda de outro caixa; 404 venda; 404 item; 409 venda concluída.
   **Commit:** `feat(sales): adiciona casos de uso de item com posse`
 
-- [ ] **809b — API de itens**
+- [x] **809b — API de itens**
   **Objetivo:** manipular itens via HTTP. **Depende:** 809a
   **Implementar:** `POST /sales/{id}/items`, `PATCH /sales/{id}/items/{itemId}`, `DELETE /sales/{id}/items/{itemId}` (200 com `SaleDetailResponse` — id, número, status, caixa/sessão/operador, cliente, totais, desconto, `itemCount`, timestamps e `items[]` —, `{itemId}` = `productId`), DTOs `SaleItemRequest`/`SaleItemQuantityRequest`/`SaleItemResponse`, permissão `sale.create` nas três e as 3 rotas em `API_ROUTES`.
   **Testes/aceite:** 200 com totais recalculados nos três; 403 em venda de outro caixa; 404 item inexistente; 409 venda concluída; 400 forma inválida; 401 sem token nas 3 rotas.
