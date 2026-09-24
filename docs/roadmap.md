@@ -351,11 +351,17 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** tentativa de OPERADOR em rota de ADMIN gera exatamente 1 evento.
   **Commit:** `feat(audit): registra tentativas de acesso negado`
 
-- [ ] **310 — Auditar operações de usuário**
+- [x] **310a — Auditar o ciclo de vida do usuário (criar, editar, desativar e reativar)**
   **Objetivo:** rastrear administração de acessos. **Depende:** 303, 108–114
-  **Implementar:** eventos `USER_CREATED`, `USER_UPDATED`, `USER_DISABLED`, `USER_ENABLED`, `PASSWORD_RESET`, `ROLE_PERMISSIONS_CHANGED` com `before/after` mínimo.
+  **Implementar:** eventos `USER_CREATED`, `USER_UPDATED`, `USER_DISABLED` e `USER_ENABLED` com `before/after` mínimo, gravados no caso de uso; reativar quem já está ativo é no-op sem evento. Subpasso do 310 (diff estimado acima de 300 linhas), que ficou dividido com o **310b**.
   **Testes/aceite:** teste por operação conferindo `action`, `entityId` e `details`.
   **Commit:** `feat(audit): audita operacoes de usuarios e papeis`
+
+- [ ] **310b — Auditar reset de senha e troca de permissões de papel**
+  **Objetivo:** fechar a auditoria da administração de acessos. **Depende:** 310a
+  **Implementar:** eventos `PASSWORD_RESET` (details `{username, mustChangePassword}`, nunca senha nem hash) e `ROLE_PERMISSIONS_CHANGED` (`entityType = "ROLE"`, `entityId` nulo, `before/after` das permissões), gravados no caso de uso.
+  **Testes/aceite:** teste por operação conferindo `action`, `entityId` e `details`.
+  **Commit:** `feat(audit): audita reset de senha e permissoes de papel`
 
 ---
 

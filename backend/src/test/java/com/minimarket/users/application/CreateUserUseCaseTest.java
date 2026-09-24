@@ -3,14 +3,17 @@ package com.minimarket.users.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import java.lang.reflect.RecordComponent;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -20,7 +23,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Unitários puros do {@link CreateUserUseCase}, sem Quarkus e sem banco: as portas são dublês
- * escritos à mão.
+ * escritos à mão. O gravador de auditoria (passo 310a) também é dublê: o evento é conferido como o
+ * caso de uso o entregou, e a gravação de verdade contra o PostgreSQL é coberta pelo teste de API.
  */
 class CreateUserUseCaseTest {
 
@@ -30,6 +34,7 @@ class CreateUserUseCaseTest {
   private final FakeUserStore userStore = new FakeUserStore();
   private final FakeRoleStore roleStore = new FakeRoleStore();
   private final FakePasswordHasher passwordHasher = new FakePasswordHasher();
+  private final FakeAuditRecorder auditRecorder = new FakeAuditRecorder();
 
   private CreateUserUseCase useCase;
 
@@ -39,6 +44,7 @@ class CreateUserUseCaseTest {
     useCase.userStore = userStore;
     useCase.roleStore = roleStore;
     useCase.passwordHasher = passwordHasher;
+    useCase.auditRecorder = auditRecorder;
   }
 
   @Test
@@ -68,6 +74,25 @@ class CreateUserUseCaseTest {
   }
 
   @Test
+  @DisplayName(
+      "audita USER_CREATED com o id criado e username/displayName/roles, sem senha nem hash")
+  void auditsUserCreated() {
+    useCase.execute(
+        new CreateUserCommand("Maria.Silva", "Maria Silva", PASSWORD, List.of("OPERADOR")));
+
+    Recorded event = auditRecorder.only();
+    assertThat(event.action()).isEqualTo("USER_CREATED");
+    assertThat(event.entityType()).isEqualTo("USER");
+    assertThat(event.entityId()).isEqualTo(userStore.generatedId);
+    assertThat(event.reason()).isNull();
+    assertThat(event.details())
+        .containsEntry("username", "maria.silva")
+        .containsEntry("displayName", "Maria Silva")
+        .containsEntry("roles", List.of("OPERADOR"));
+    assertThat(event.details().toString()).doesNotContain(PASSWORD).doesNotContain(HASH);
+  }
+
+  @Test
   @DisplayName("username duplicado lança ConflictException sem inserir nem hashear")
   void rejectsDuplicateUsername() {
     userStore.existing.add("maria.silva");
@@ -82,6 +107,7 @@ class CreateUserUseCaseTest {
     assertThat(userStore.inserted).isNull();
     assertThat(passwordHasher.hashedInput).isNull();
     assertThat(roleStore.userId).isNull();
+    assertThat(auditRecorder.recorded).as("criação recusada não inventa evento").isEmpty();
   }
 
   @Test
@@ -255,4 +281,38 @@ class CreateUserUseCaseTest {
       throw new UnsupportedOperationException("needsRehash não é usado por CreateUser");
     }
   }
+
+  /**
+   * Dublê de {@link AuditRecorder}: guarda o que o caso de uso pediu para gravar, sem CDI e sem
+   * banco. A subclasse só sobrescreve {@code record} — o caminho de verdade (contexto + INSERT) é
+   * do passo 303 e tem teste próprio contra PostgreSQL.
+   */
+  private static final class FakeAuditRecorder extends AuditRecorder {
+
+    private final List<Recorded> recorded = new ArrayList<>();
+
+    @Override
+    public void record(
+        String action,
+        String entityType,
+        UUID entityId,
+        String reason,
+        Map<String, Object> details) {
+      recorded.add(new Recorded(action, entityType, entityId, reason, details));
+    }
+
+    /** Único evento do cenário; o teste falha se o caso de uso gravou zero ou dois. */
+    private Recorded only() {
+      assertThat(recorded).as("eventos de auditoria do cenário").hasSize(1);
+      return recorded.getFirst();
+    }
+  }
+
+  /** Evento como o caso de uso o entregou ao gravador. */
+  private record Recorded(
+      String action,
+      String entityType,
+      UUID entityId,
+      String reason,
+      Map<String, Object> details) {}
 }
