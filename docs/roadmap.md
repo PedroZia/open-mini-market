@@ -549,7 +549,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** sucesso registra movimento e auditoria; OPERADOR sem permissão → 403; motivo vazio → 400.
   **Commit:** `feat(cash): implementa sangria`
 
-- [ ] **610 — Caso de uso de suprimento + endpoints**
+- [x] **610 — Caso de uso de suprimento + endpoints**
   **Objetivo:** colocar dinheiro no caixa. **Depende:** 609
   **Implementar:** `POST /cash-registers/{id}/withdrawals` e `POST /cash-registers/{id}/supplies` (idempotentes), permissão `cash.supply`, auditoria `CASH_SUPPLY`.
   **Testes/aceite:** 201 e saldo esperado atualizado; replay idempotente não duplica movimento.

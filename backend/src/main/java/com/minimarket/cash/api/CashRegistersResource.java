@@ -1,5 +1,6 @@
 package com.minimarket.cash.api;
 
+import com.minimarket.cash.application.CashMovementResult;
 import com.minimarket.cash.application.CashRegisterView;
 import com.minimarket.cash.application.CashSessionSummary;
 import com.minimarket.cash.application.CurrentCashSessionView;
@@ -7,6 +8,10 @@ import com.minimarket.cash.application.GetCurrentCashSessionUseCase;
 import com.minimarket.cash.application.ListCashRegistersUseCase;
 import com.minimarket.cash.application.OpenCashSessionCommand;
 import com.minimarket.cash.application.OpenCashSessionUseCase;
+import com.minimarket.cash.application.RecordSupplyCommand;
+import com.minimarket.cash.application.RecordSupplyUseCase;
+import com.minimarket.cash.application.RecordWithdrawalCommand;
+import com.minimarket.cash.application.RecordWithdrawalUseCase;
 import com.minimarket.shared.api.IdempotencyGuard;
 import com.minimarket.shared.api.RequirePermission;
 import com.minimarket.shared.application.OperationContext;
@@ -33,9 +38,10 @@ import java.util.UUID;
  * Caixas físicos (§9.3 do plano). A API valida forma, delega ao caso de uso e mapeia a resposta —
  * zero regra de negócio aqui.
  *
- * <p>A leitura exige {@code cash.read} (a TUI escolhe o caixa no login) e a abertura exige {@code
- * cash.open}: sem a permissão o interceptor do {@code RequirePermission} responde 403 {@code
- * ACCESS_DENIED} antes de o corpo do método rodar.
+ * <p>A leitura exige {@code cash.read} (a TUI escolhe o caixa no login), a abertura {@code
+ * cash.open} e os movimentos de dinheiro as permissões de cada um — {@code cash.withdrawal} na
+ * sangria e {@code cash.supply} no suprimento (BR-10): sem a permissão o interceptor do {@code
+ * RequirePermission} responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar.
  *
  * <p>A listagem é um array simples, sem paginação: o §9.3 não define {@code page}/{@code size} para
  * esta rota e são poucos caixas por loja — a ordenação por código vem do repositório.
@@ -51,6 +57,11 @@ public class CashRegistersResource {
   @Inject OpenCashSessionUseCase openCashSessionUseCase;
 
   @Inject GetCurrentCashSessionUseCase getCurrentCashSessionUseCase;
+
+  /** Sangria (passo 609) e suprimento (passo 610): os dois movimentos de dinheiro do caixa. */
+  @Inject RecordWithdrawalUseCase recordWithdrawalUseCase;
+
+  @Inject RecordSupplyUseCase recordSupplyUseCase;
 
   /** Idempotência da operação de dinheiro (§8, passo 607a). */
   @Inject IdempotencyGuard idempotencyGuard;
@@ -113,6 +124,65 @@ public class CashRegistersResource {
     return toCurrentSessionResponse(getCurrentCashSessionUseCase.execute(id));
   }
 
+  /**
+   * Sangria: retira dinheiro da sessão aberta do caixa (passo 609) e devolve 201 com o movimento
+   * gravado. Exige {@code cash.withdrawal} — sem a permissão o interceptor responde 403 {@code
+   * ACCESS_DENIED} antes de o corpo do método rodar — e é operação de dinheiro idempotente por
+   * contrato (§8): o {@link IdempotencyGuard} exige o header {@code Idempotency-Key} (sem ele, 400
+   * {@code IDEMPOTENCY_KEY_REQUIRED}) e o retry com a mesma chave devolve a resposta gravada com
+   * {@code Idempotency-Replayed: true}, sem sangrar de novo.
+   *
+   * <p>A forma é validada antes ({@code amount} ausente/não positivo ou motivo vazio → 400 {@code
+   * VALIDATION_ERROR}); caixa sem sessão aberta é 404 {@code CASH_SESSION_NOT_OPEN} e sangria acima
+   * do esperado <em>não</em> bloqueia: devolve 201 com {@code aboveExpected = true} para o cliente
+   * alertar o operador. O {@code Location} aponta para a sessão atual do caixa (passo 608), onde o
+   * efeito do movimento aparece.
+   */
+  @POST
+  @Path("/{id}/withdrawals")
+  @RequirePermission(Permission.CASH_WITHDRAWAL)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response withdraw(
+      @PathParam("id") UUID id,
+      @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
+      @Valid CashMovementRequest request) {
+    return idempotencyGuard.execute(
+        idempotencyKey,
+        HttpMethod.POST,
+        PATH + "/" + id + "/withdrawals",
+        request,
+        () -> movementCreated(id, recordWithdrawal(id, request)));
+  }
+
+  /**
+   * Suprimento: coloca dinheiro na sessão aberta do caixa e devolve 201 com o movimento gravado.
+   * Exige {@code cash.supply} — o OPERADOR tem {@code cash.open}/{@code cash.close}, mas suprir é
+   * do gerente (seed da V3) — e segue o mesmo contrato de idempotência da sangria: header {@code
+   * Idempotency-Key} obrigatório e retry com a mesma chave devolve a resposta gravada, sem suprir
+   * de novo.
+   *
+   * <p>Valor positivo e motivo obrigatório na forma; caixa sem sessão aberta é 404 {@code
+   * CASH_SESSION_NOT_OPEN}. O {@code aboveExpected} do corpo é sempre {@code false}: o alerta é só
+   * da sangria (o suprimento só aumenta o esperado).
+   */
+  @POST
+  @Path("/{id}/supplies")
+  @RequirePermission(Permission.CASH_SUPPLY)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response supply(
+      @PathParam("id") UUID id,
+      @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
+      @Valid CashMovementRequest request) {
+    return idempotencyGuard.execute(
+        idempotencyKey,
+        HttpMethod.POST,
+        PATH + "/" + id + "/supplies",
+        request,
+        () -> movementCreated(id, recordSupply(id, request)));
+  }
+
   /** Ação idempotente: abre a sessão e monta o 201 com o {@code Location} da sessão atual. */
   private Response openSession(UUID id, OpenCashSessionRequest request) {
     CashSessionSummary session =
@@ -123,6 +193,30 @@ public class CashRegistersResource {
                 operationContext.userId(),
                 operationContext.authSessionId()));
     return Response.created(currentSessionLocation(id)).entity(toSessionResponse(session)).build();
+  }
+
+  /** Sangra com o ator da requisição: o motivo e o valor vêm do corpo validado. */
+  private CashMovementResult recordWithdrawal(UUID id, CashMovementRequest request) {
+    return recordWithdrawalUseCase.execute(
+        new RecordWithdrawalCommand(
+            id, request.amount(), request.reason(), operationContext.userId()));
+  }
+
+  /** Suprimento com o ator da requisição, no mesmo formato da sangria. */
+  private CashMovementResult recordSupply(UUID id, CashMovementRequest request) {
+    return recordSupplyUseCase.execute(
+        new RecordSupplyCommand(id, request.amount(), request.reason(), operationContext.userId()));
+  }
+
+  /**
+   * 201 do movimento: o corpo é a projeção do caso de uso e o {@code Location} aponta para onde o
+   * efeito é visível — a sessão atual do caixa (rota do passo 608); o movimento em si não tem GET
+   * no §9.3 (o histórico sai do resumo do passo 612).
+   */
+  private Response movementCreated(UUID cashRegisterId, CashMovementResult movement) {
+    return Response.created(currentSessionLocation(cashRegisterId))
+        .entity(toMovementResponse(movement))
+        .build();
   }
 
   /** O caminho concreto da requisição: é ele que a chave de idempotência identifica (§8). */
@@ -160,6 +254,17 @@ public class CashRegistersResource {
         session.openedAt(),
         session.openedByUserId(),
         session.openingAmount());
+  }
+
+  private static CashMovementResponse toMovementResponse(CashMovementResult movement) {
+    return new CashMovementResponse(
+        movement.sessionId(),
+        movement.type(),
+        movement.amount(),
+        movement.reason(),
+        movement.expectedBefore(),
+        movement.expectedAfter(),
+        movement.aboveExpected());
   }
 
   private static CurrentCashSessionResponse toCurrentSessionResponse(
