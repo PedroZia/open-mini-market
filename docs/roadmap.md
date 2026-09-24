@@ -629,7 +629,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 8 — Vendas (venda aberta, itens, desconto)
 
-- [ ] **801 — Migrations de venda**
+- [x] **801 — Migrations de venda**
   **Objetivo:** estrutura da venda. **Depende:** 603, 403
   **Implementar:** `V17__document_sequences.sql`, `V18__sales.sql`, `V19__sale_items.sql` conforme §5.3.
   **Testes/aceite:** migrations aplicam; unique `(store_id, number)`; `line_number` único por venda.
