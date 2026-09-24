@@ -391,7 +391,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** barcode duplicado ativo falha; barcode igual em produto deletado é permitido; preço negativo rejeitado.
   **Commit:** `feat(catalog): cria tabela de produtos`
 
-- [ ] **404 — Produto: repositório**
+- [x] **404 — Produto: repositório**
   **Objetivo:** consultas do catálogo. **Depende:** 403
   **Implementar:** `ProductRepository`: `findById`, `findByBarcode`, `search(search, categoryId, active, page, size, sort)`, `insert`, `update`, `softDelete`, `existsActiveBarcode`.
   **Testes/aceite:** teste de integração para cada método, incluindo busca por nome parcial e ordenação por preço/nome.
