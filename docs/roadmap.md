@@ -303,7 +303,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de API confirma que os campos chegam preenchidos no contexto durante a requisição.
   **Commit:** `feat(audit): propaga contexto da operacao na requisicao`
 
-- [ ] **303 — `AuditRecorder`**
+- [x] **303 — `AuditRecorder`**
   **Objetivo:** gravar evento de negócio na mesma transação. **Depende:** 302
   **Implementar:** `AuditRecorder.record(action, entityType, entityId, reason, details)` montando o evento a partir do `OperationContext`; sem `try/catch` que engula erro (falha na auditoria derruba a transação, por decisão).
   **Testes/aceite:** teste de integração grava evento e confere todos os campos; rollback da transação não deixa evento órfão.
