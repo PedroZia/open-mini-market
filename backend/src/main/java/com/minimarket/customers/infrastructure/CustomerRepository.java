@@ -24,7 +24,8 @@ import org.hibernate.exception.ConstraintViolationException;
  *
  * <p>Diferente do produto (que precisa do soft-deletado para reativar), cliente não tem reativação:
  * {@link #findById}, {@link #search}, {@link #count}, {@link #update} e {@link #disable} só
- * enxergam cliente vivo.
+ * enxergam cliente vivo. A exceção é {@link #findAnyById}, que enxerga o desativado de propósito —
+ * o vínculo da venda (passo 811) precisa saber que o cliente existe, só não está ativo.
  *
  * <p>Implementa a porta {@link CustomerStore}: é por ela que {@code application} grava cliente sem
  * tocar em JPA.
@@ -58,6 +59,18 @@ public class CustomerRepository implements CustomerStore {
   @Override
   public Optional<CustomerSummary> findById(UUID id) {
     return findLiveEntityById(id).map(CustomerRepository::toSummary);
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>O {@code find} do contexto de persistência enxerga a linha inteira, desativada inclusive —
+   * nenhum filtro de {@code deleted_at} aqui, como no {@code ProductRepository.findById}.
+   */
+  @Override
+  public Optional<CustomerSummary> findAnyById(UUID id) {
+    return Optional.ofNullable(entityManager.find(CustomerEntity.class, id))
+        .map(CustomerRepository::toSummary);
   }
 
   /** {@inheritDoc} */

@@ -21,6 +21,15 @@ public interface CustomerStore {
   Optional<CustomerSummary> findById(UUID id);
 
   /**
+   * Cliente pelo id <em>incluindo o desativado</em> — espelha o {@code ProductStore.findById}, que
+   * enxerga o soft-deletado: quem decide o que fazer com o estado é o caso de uso. O vínculo da
+   * venda (passo 811) precisa distinguir "nunca existiu" (404 {@code CUSTOMER_NOT_FOUND}) de
+   * "existe e está desativado" (422 {@code CUSTOMER_INACTIVE}), e o {@link #findById} só enxerga
+   * vivo, então não serve para isso. Vazio quando não existe cliente com o id.
+   */
+  Optional<CustomerSummary> findAnyById(UUID id);
+
+  /**
    * Página de clientes vivos (desativado nunca aparece) ordenada por nome sem diferenciar
    * maiúsculas, com desempate por {@code id} para a paginação não repetir item. {@code search} em
    * branco = sem filtro; com termo, casa nome por trecho sem diferenciar maiúsculas e, quando o

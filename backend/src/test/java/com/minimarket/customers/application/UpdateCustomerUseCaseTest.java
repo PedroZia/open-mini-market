@@ -264,6 +264,11 @@ class UpdateCustomerUseCaseTest {
     }
 
     @Override
+    public Optional<CustomerSummary> findAnyById(UUID id) {
+      throw new UnsupportedOperationException("findAnyById não é usado por UpdateCustomer");
+    }
+
+    @Override
     public UUID insert(NewCustomer customer) {
       throw new UnsupportedOperationException("insert não é usado por UpdateCustomer");
     }

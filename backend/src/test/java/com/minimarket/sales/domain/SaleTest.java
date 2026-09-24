@@ -298,6 +298,64 @@ class SaleTest {
   }
 
   @Test
+  @DisplayName("linkCustomer vincula o cliente e vincular outro substitui o anterior")
+  void linksCustomerReplacingThePreviousOne() {
+    Sale sale = openSale();
+    UUID ana = UUID.randomUUID();
+    UUID bruno = UUID.randomUUID();
+
+    sale.linkCustomer(ana);
+
+    assertThat(sale.customerId()).isEqualTo(ana);
+    assertThat(sale.total())
+        .as("o vínculo não mexe em item nem total")
+        .isEqualTo(new BigDecimal("0.00"));
+
+    sale.linkCustomer(bruno);
+
+    assertThat(sale.customerId()).as("a venda guarda um cliente por vez").isEqualTo(bruno);
+  }
+
+  @Test
+  @DisplayName("unlinkCustomer devolve a venda anônima e sem vínculo é no-op de estado")
+  void unlinksCustomer() {
+    Sale sale = openSale();
+
+    sale.unlinkCustomer();
+
+    assertThat(sale.customerId()).as("venda sem cliente não muda no desvínculo").isNull();
+
+    sale.linkCustomer(UUID.randomUUID());
+    sale.unlinkCustomer();
+
+    assertThat(sale.customerId()).isNull();
+    assertThat(sale.itemCount()).isZero();
+  }
+
+  @Test
+  @DisplayName("linkCustomer sem cliente é violação de negócio")
+  void rejectsLinkWithoutCustomer() {
+    Sale sale = openSale();
+
+    assertBusinessError(() -> sale.linkCustomer(null), "cliente é obrigatório");
+    assertThat(sale.customerId()).isNull();
+  }
+
+  @Test
+  @DisplayName("venda concluída não aceita linkCustomer nem unlinkCustomer (BR-07)")
+  void rejectsCustomerMutationAfterCompletion() {
+    Sale sale = openSale();
+    UUID ana = UUID.randomUUID();
+    sale.linkCustomer(ana);
+    sale.complete(Instant.parse("2026-09-24T12:30:00Z"));
+
+    assertBusinessError(() -> sale.linkCustomer(UUID.randomUUID()), "não aceita alteração");
+    assertBusinessError(sale::unlinkCustomer, "não aceita alteração");
+
+    assertThat(sale.customerId()).as("o cliente da venda concluída fica onde está").isEqualTo(ana);
+  }
+
+  @Test
   @DisplayName("recalculate é idempotente")
   void recalculateIsIdempotent() {
     Sale sale = openSale();

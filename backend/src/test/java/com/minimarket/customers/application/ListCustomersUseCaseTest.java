@@ -132,6 +132,11 @@ class ListCustomersUseCaseTest {
     }
 
     @Override
+    public Optional<CustomerSummary> findAnyById(UUID id) {
+      throw new UnsupportedOperationException("findAnyById não é usado por ListCustomers");
+    }
+
+    @Override
     public Optional<CustomerSummary> update(
         UUID id, String name, String taxId, String phone, String email, String notes) {
       throw new UnsupportedOperationException("update não é usado por ListCustomers");

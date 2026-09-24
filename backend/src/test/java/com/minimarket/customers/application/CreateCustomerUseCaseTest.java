@@ -193,6 +193,11 @@ class CreateCustomerUseCaseTest {
     }
 
     @Override
+    public Optional<CustomerSummary> findAnyById(UUID id) {
+      throw new UnsupportedOperationException("findAnyById não é usado por CreateCustomer");
+    }
+
+    @Override
     public long count(String search) {
       throw new UnsupportedOperationException("count não é usado por CreateCustomer");
     }

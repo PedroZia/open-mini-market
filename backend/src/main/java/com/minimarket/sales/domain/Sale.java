@@ -17,8 +17,8 @@ import java.util.UUID;
  *
  * <p>A venda nasce {@link SaleStatus#OPEN} no caixa que a criou (BR-06) e só sai daí ao concluir
  * (passo 906, quando o pagamento cobre o total) ou ao cancelar (passo 813, enquanto não foi paga).
- * Depois de {@code COMPLETED} ou {@code CANCELLED} o agregado é imutável (BR-07): item e desconto
- * recusam mutação com {@link ErrorCode#BUSINESS_ERROR} (422), a mesma convenção do {@code
+ * Depois de {@code COMPLETED} ou {@code CANCELLED} o agregado é imutável (BR-07): item, desconto e
+ * cliente recusam mutação com {@link ErrorCode#BUSINESS_ERROR} (422), a mesma convenção do {@code
  * CashSession}. Dinheiro tem escala 2 com arredondamento {@code HALF_UP} e quantidade escala 3 (§3
  * do plano).
  */
@@ -120,7 +120,7 @@ public final class Sale {
     return operatorUserId;
   }
 
-  /** Cliente vinculado à venda; nulo até o vínculo do passo 811. */
+  /** Cliente vinculado à venda; nulo na venda anônima (o vínculo nasce no passo 811). */
   public UUID customerId() {
     return customerId;
   }
@@ -278,6 +278,34 @@ public final class Sale {
     this.discountValue = null;
     this.discountReason = null;
     recalculate();
+  }
+
+  /**
+   * Vincula o cliente à venda aberta: a venda guarda um cliente por vez, então vincular outro
+   * substitui o anterior. Quem confere se o cliente existe e está ativo é o caso de uso (passo 811)
+   * — aqui só a venda aberta é exigida, e a venda anônima continua válida.
+   *
+   * @param customerId cliente a vincular, obrigatório
+   * @throws BusinessException se a venda não estiver aberta ou o cliente não for informado
+   */
+  public void linkCustomer(UUID customerId) {
+    requireOpen();
+    if (customerId == null) {
+      throw new BusinessException(ErrorCode.BUSINESS_ERROR, "cliente é obrigatório");
+    }
+    this.customerId = customerId;
+  }
+
+  /**
+   * Desvincula o cliente da venda aberta: ela volta a ser anônima. Venda sem cliente vinculado é
+   * no-op de estado (nada a zerar) e quem decide não gravar é o caso de uso, como na remoção do
+   * desconto (passo 810).
+   *
+   * @throws BusinessException se a venda não estiver aberta
+   */
+  public void unlinkCustomer() {
+    requireOpen();
+    this.customerId = null;
   }
 
   /**

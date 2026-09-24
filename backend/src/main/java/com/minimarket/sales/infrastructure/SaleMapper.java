@@ -12,8 +12,8 @@ import java.util.UUID;
 /**
  * Conversão entre o agregado {@link Sale} e as entidades JPA de {@code sales}/{@code sale_items}:
  * nada de JPA fora daqui. A rehidratação usa só os métodos públicos do domínio (construtor, {@code
- * addItem}, {@code applyDiscount}, {@code complete}), como o §4.1 manda — a linha não reconstrói
- * estado que o agregado não aceita.
+ * addItem}, {@code applyDiscount}, {@code linkCustomer}, {@code complete}), como o §4.1 manda — a
+ * linha não reconstrói estado que o agregado não aceita.
  */
 final class SaleMapper {
 
@@ -100,6 +100,10 @@ final class SaleMapper {
     if (entity.getDiscountType() != null) {
       sale.applyDiscount(
           entity.getDiscountType(), entity.getDiscountValue(), entity.getDiscountReason());
+    }
+    // O cliente entra antes da conclusão: a venda concluída é imutável e não aceitaria o vínculo.
+    if (entity.getCustomerId() != null) {
+      sale.linkCustomer(entity.getCustomerId());
     }
     if (entity.getStatus() == SaleStatus.COMPLETED) {
       sale.complete(entity.getCompletedAt());

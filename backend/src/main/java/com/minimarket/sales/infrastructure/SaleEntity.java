@@ -23,9 +23,9 @@ import java.util.UUID;
  *
  * <p>Só as colunas que o domínio do 802 usa hoje estão mapeadas; {@code
  * discount_authorized_by_user_id} e o bloco de cancelamento (passo 813) entram quando houver caso
- * de uso para eles. {@code paid_amount}/{@code change_amount} (passos 905+) e {@code customer_id}
- * (passo 811) são lidos pela projeção, mas nascem no default da tabela e {@link #syncFrom(Sale)}
- * não os toca — enquanto o agregado não os muda, ninguém os escreve.
+ * de uso para eles. {@code paid_amount}/{@code change_amount} (passos 905+) nascem no default da
+ * tabela e {@link #syncFrom(Sale)} não os toca — enquanto o agregado não os muda, ninguém os
+ * escreve.
  */
 @Entity
 @Table(name = "sales")
@@ -47,7 +47,7 @@ public class SaleEntity {
   @Column(name = "cash_register_id")
   private UUID cashRegisterId;
 
-  /** Vínculo com o cliente (passo 811); nulo até lá. */
+  /** Vínculo com o cliente (passo 811); nulo é venda anônima. */
   @Column(name = "customer_id")
   private UUID customerId;
 
@@ -146,9 +146,9 @@ public class SaleEntity {
   }
 
   /**
-   * Estado que o agregado manda para a linha: status, totais, desconto, contagem de itens e as
-   * datas de criação/conclusão. As colunas de cliente, pagamento e cancelamento ficam como estão —
-   * o domínio ainda não as governa (passos 811, 905+ e 813).
+   * Estado que o agregado manda para a linha: status, totais, desconto, cliente, contagem de itens
+   * e as datas de criação/conclusão. As colunas de pagamento e cancelamento ficam como estão — o
+   * domínio ainda não as governa (passos 905+ e 813).
    */
   void syncFrom(Sale sale) {
     this.status = sale.status();
@@ -157,6 +157,7 @@ public class SaleEntity {
     this.discountValue = sale.discountValue();
     this.discountAmount = sale.discountAmount();
     this.discountReason = sale.discountReason();
+    this.customerId = sale.customerId();
     this.total = sale.total();
     this.itemCount = sale.itemCount();
     this.completedAt = sale.completedAt();

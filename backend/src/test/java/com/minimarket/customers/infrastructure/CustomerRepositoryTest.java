@@ -196,6 +196,37 @@ class CustomerRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
+  @DisplayName("findAnyById enxerga o cliente desativado, ao contrário do findById")
+  void findAnyByIdSeesDisabledCustomer() {
+    UUID id = insert("Ana Souza", "11144477735", null, null, null);
+
+    assertThat(customerRepository.findAnyById(id))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.active()).isTrue();
+              assertThat(found.deletedAt()).isNull();
+            });
+
+    customerRepository.disable(id);
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(customerRepository.findById(id))
+        .as("o detalhe e a edição do 502b continuam sem ver o desativado")
+        .isEmpty();
+    assertThat(customerRepository.findAnyById(id))
+        .as("o vínculo da venda (811) precisa distinguir desativado de inexistente")
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.name()).isEqualTo("Ana Souza");
+              assertThat(found.active()).isFalse();
+              assertThat(found.deletedAt()).isNotNull();
+            });
+    assertThat(customerRepository.findAnyById(UUID.randomUUID())).isEmpty();
+  }
+
+  @Test
+  @TestTransaction
   @DisplayName("existsActiveTaxId ignora cliente desativado, CPF desconhecido e nulo")
   void checksActiveTaxId() {
     UUID id = insert("Ana Souza", "11144477735", null, null, null);

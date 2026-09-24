@@ -67,8 +67,10 @@ class SaleRepositoryTest extends IntegrationTestBase {
   private UUID beans;
   private UUID coffee;
   private UUID banana;
+  private UUID customerId;
   private final List<UUID> saleIds = new ArrayList<>();
   private final List<UUID> productIds = new ArrayList<>();
+  private final List<UUID> customerIds = new ArrayList<>();
   private final List<UUID> userIds = new ArrayList<>();
 
   @BeforeEach
@@ -83,6 +85,7 @@ class SaleRepositoryTest extends IntegrationTestBase {
     beans = createProduct("Feijão 1kg", "UN", "4.50");
     coffee = createProduct("Café 500g", "UN", "18.90");
     banana = createProduct("Banana prata", "KG", "6.99");
+    customerId = createCustomer("Ana Souza");
   }
 
   @AfterEach
@@ -95,6 +98,9 @@ class SaleRepositoryTest extends IntegrationTestBase {
     deleteIfPresent("cash_sessions", closedSessionId);
     for (UUID productId : productIds) {
       execute("delete from products where id = ?", productId);
+    }
+    for (UUID customerId : customerIds) {
+      execute("delete from customers where id = ?", customerId);
     }
     for (UUID userId : userIds) {
       execute("delete from users where id = ?", userId);
@@ -308,6 +314,57 @@ class SaleRepositoryTest extends IntegrationTestBase {
             });
     assertThat(lineNumbers(sale.id())).containsExactly(1, 2, 3);
     assertThat(itemCountOf(sale.id())).isEqualTo(3);
+  }
+
+  @Test
+  @Transactional
+  @DisplayName("linkCustomer grava customer_id e o round-trip restaura o cliente vinculado")
+  void linksCustomerAndRoundTrips() {
+    Sale sale = openSale(1, openSessionId, operatorA, DAY_ONE);
+    sale.addItem(rice, "7891000315507", "Arroz 5kg", "UN", new BigDecimal("25.00"), BigDecimal.ONE);
+    sale.linkCustomer(customerId);
+    saleRepository.insert(sale);
+    flushAndClear();
+
+    assertThat(saleRepository.findById(sale.id()))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.customerId()).isEqualTo(customerId);
+              assertThat(found.items()).hasSize(1);
+            });
+    assertThat(saleColumn("customer_id", sale.id())).isEqualTo(customerId);
+    assertThat(saleColumn("version", sale.id())).as("o vínculo é estado da venda").isEqualTo(0L);
+
+    Sale loaded = saleRepository.findById(sale.id()).orElseThrow();
+    loaded.unlinkCustomer();
+    saleRepository.update(loaded);
+    flushAndClear();
+
+    assertThat(saleRepository.findById(sale.id()))
+        .hasValueSatisfying(found -> assertThat(found.customerId()).isNull());
+    assertThat(saleColumn("customer_id", sale.id())).as("a coluna volta a nulo").isNull();
+  }
+
+  @Test
+  @Transactional
+  @DisplayName("venda concluída com cliente rehidrata o vínculo antes da conclusão")
+  void roundTripsCustomerOfCompletedSale() {
+    Sale sale = openSale(1, openSessionId, operatorA, DAY_ONE);
+    sale.addItem(rice, "7891000315507", "Arroz 5kg", "UN", new BigDecimal("25.00"), BigDecimal.ONE);
+    sale.linkCustomer(customerId);
+    sale.complete(DAY_ONE.plusSeconds(30));
+    saleRepository.insert(sale);
+    flushAndClear();
+
+    assertThat(saleRepository.findById(sale.id()))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.status()).isEqualTo(SaleStatus.COMPLETED);
+              assertThat(found.customerId())
+                  .as("o mapper vincula o cliente antes de concluir a venda")
+                  .isEqualTo(customerId);
+              assertThat(found.completedAt()).isEqualTo(DAY_ONE.plusSeconds(30));
+            });
   }
 
   @Test
@@ -618,6 +675,17 @@ class SaleRepositoryTest extends IntegrationTestBase {
             unit,
             new BigDecimal(price));
     productIds.add(id);
+    return id;
+  }
+
+  /** Cliente do cenário do vínculo (passo 811): ativo, como o default da tabela. */
+  private UUID createCustomer(String name) throws SQLException {
+    UUID id =
+        insertReturningId(
+            "insert into customers (id, store_id, name) values (uuidv7(), ?, ?) returning id",
+            storeId,
+            name);
+    customerIds.add(id);
     return id;
   }
 

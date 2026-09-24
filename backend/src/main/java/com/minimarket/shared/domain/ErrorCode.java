@@ -22,6 +22,7 @@ public enum ErrorCode {
   CATEGORY_NOT_FOUND(404, "Categoria não encontrada"),
   PRODUCT_NOT_FOUND(404, "Produto não encontrado"),
   CUSTOMER_NOT_FOUND(404, "Cliente não encontrado"),
+  CUSTOMER_INACTIVE(422, "Cliente inativo"),
   CASH_REGISTER_NOT_FOUND(404, "Caixa não encontrado"),
   CASH_SESSION_NOT_OPEN(404, "Sessão de caixa não aberta"),
   CASH_SESSION_NOT_FOUND(404, "Sessão de caixa não encontrada"),

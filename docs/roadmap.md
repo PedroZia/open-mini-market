@@ -695,10 +695,16 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** aplica percentual e valor; acima do limite → 403/422; OPERADOR → 403; remover desconto volta ao subtotal.
   **Commit:** `feat(sales): aplica desconto com permissao e motivo`
 
-- [ ] **811 — API de desconto e cliente**
-  **Objetivo:** expor desconto e vínculo de cliente. **Depende:** 810, 502
-  **Implementar:** `PUT/DELETE /sales/{id}/discount`, `PUT/DELETE /sales/{id}/customer`; cliente precisa estar ativo.
-  **Testes/aceite:** 200 nos quatro endpoints; cliente inativo → 422.
+- [x] **811a — Domínio e casos de uso do vínculo de cliente**
+  **Objetivo:** vincular e desvincular cliente na venda aberta. **Depende:** 810, 502
+  **Implementar:** `Sale.linkCustomer(UUID)`/`unlinkCustomer()` com guarda de venda aberta; `customer_id` no `SaleEntity`/`SaleMapper` (rehidrata na ordem itens → desconto → cliente → `complete()`); `CustomerStore.findAnyById` (enxerga o desativado, como o `ProductStore.findById`) + teste de integração; `LinkCustomerUseCase`/`UnlinkCustomerUseCase` (+ commands) com a guarda do 809, `findById` + `update` e auditoria `SALE_CUSTOMER_LINKED`/`SALE_CUSTOMER_UNLINKED` na mesma transação (desvincular sem vínculo é no-op, como a remoção de desconto do 810); cliente inexistente → 404 `CUSTOMER_NOT_FOUND` e inativo → 422 `CUSTOMER_INACTIVE` (código novo). Passo dividido do 811 original (diff estimado acima de ~300 linhas); o restante é o 811b.
+  **Testes/aceite:** unitários de link/unlink (404/422/409/403, no-op sem vínculo, auditoria) e do domínio (`linkCustomer`/`unlinkCustomer`, imutável após concluída); integração: link grava `customer_id` e o round-trip `findById` restaura o cliente.
+  **Commit:** `feat(sales): vincula cliente a venda`
+
+- [ ] **811b — API de desconto e cliente**
+  **Objetivo:** expor desconto e vínculo de cliente. **Depende:** 811a
+  **Implementar:** `PUT/DELETE /sales/{id}/discount` (`sale.discount.apply`) e `PUT/DELETE /sales/{id}/customer` (`sale.create`), os quatro com 200 e o `SaleDetailResponse`, que ganha `discountType`, `discountValue` e `discountReason`; 4 rotas novas em `API_ROUTES`.
+  **Testes/aceite:** 200 nos quatro endpoints; cliente inativo → 422; cliente inexistente → 404; OPERADOR → 403 nos dois de desconto (matriz real); venda de outro caixa → 403; venda concluída → 409; forma inválida → 400.
   **Commit:** `feat(sales): expoe desconto e cliente na venda`
 
 - [ ] **812 — Consulta de vendas**
