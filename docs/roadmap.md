@@ -867,6 +867,12 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** os dois testes verdes.
   **Commit:** `test(auth): cobre health e negativas de permissao`
 
+- [ ] **1012 — Papéis não podem zerar os ADMINS**
+  **Objetivo:** fechar a invariante "sempre ≥1 ADMIN ativo" também na troca de papéis (`PUT /api/v1/users/{id}`), sob concorrência. **Depende:** 111, 1008
+  **Implementar:** o caso de uso de troca de papéis recusa a atualização que removeria o papel ADMIN do último ADMIN ativo → **409 CONFLICT** no estilo do 112; mesma trava do 1008 (`RoleStore.lockActiveUserIdsWithRole`) com revalidação sob o lock, para dois updates concorrentes não zerarem os admins; contrato da API inalterado além do 409 novo (com 2+ admins a remoção continua permitida).
+  **Testes/aceite:** sequencial (último admin perde o papel → 409 com papéis intactos; com 2 admins, remover de um → 200) + concorrente (dois PUTs removendo ADMIN dos dois últimos admins simultaneamente → exatamente um 200 e um 409, sobra 1 ADMIN ativo; ExecutorService + latch, sem sleep; skill `teste-concorrencia`); fixtures limpas no `@AfterEach`.
+  **Commit:** `fix(users): impede remover o ultimo admin por papeis`
+
 ---
 
 ## Fase 11 — TUI (PDV)
