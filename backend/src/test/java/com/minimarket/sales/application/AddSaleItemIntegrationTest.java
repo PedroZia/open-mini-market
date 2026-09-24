@@ -80,6 +80,9 @@ class AddSaleItemIntegrationTest extends IntegrationTestBase {
 
   private UUID productId;
 
+  /** Caixa da sessão do cenário: é o caixa que a guarda de posse confere (passo 809a). */
+  private UUID registerId;
+
   private UUID cashSessionId;
 
   private final List<UUID> saleIds = new ArrayList<>();
@@ -91,7 +94,8 @@ class AddSaleItemIntegrationTest extends IntegrationTestBase {
 
     Sale updated =
         useCase.execute(
-            new AddSaleItemCommand(sale.id(), " " + BARCODE + " ", null, new BigDecimal("2")));
+            new AddSaleItemCommand(
+                sale.id(), registerId, " " + BARCODE + " ", null, new BigDecimal("2")));
 
     assertThat(updated.id()).isEqualTo(sale.id());
     assertThat(updated.items()).hasSize(1);
@@ -136,9 +140,11 @@ class AddSaleItemIntegrationTest extends IntegrationTestBase {
   void sumsRepeatedProductInSingleLine() throws SQLException {
     Sale sale = openScenario("Café 500g", "UN", "18.90");
 
-    useCase.execute(new AddSaleItemCommand(sale.id(), BARCODE, null, new BigDecimal("2")));
+    useCase.execute(
+        new AddSaleItemCommand(sale.id(), registerId, BARCODE, null, new BigDecimal("2")));
     Sale updated =
-        useCase.execute(new AddSaleItemCommand(sale.id(), null, productId, new BigDecimal("3.5")));
+        useCase.execute(
+            new AddSaleItemCommand(sale.id(), registerId, null, productId, new BigDecimal("3.5")));
 
     assertThat(updated.items()).as("uma linha por produto, não duas").hasSize(1);
     assertThat(updated.items().getFirst().quantity()).isEqualByComparingTo("5.500");
@@ -165,12 +171,12 @@ class AddSaleItemIntegrationTest extends IntegrationTestBase {
   /** Operador, caixa aberto, venda e produto do cenário — venda pelo caminho real do passo 805. */
   private Sale openScenario(String name, String unit, String price) throws SQLException {
     userId = newOperator();
-    UUID register = cashRegisterId("CAIXA-01");
+    registerId = cashRegisterId("CAIXA-01");
     cashSessionId =
         openCashSessionUseCase
-            .execute(new OpenCashSessionCommand(register, new BigDecimal("100.00"), userId, null))
+            .execute(new OpenCashSessionCommand(registerId, new BigDecimal("100.00"), userId, null))
             .id();
-    Sale sale = createSaleUseCase.execute(new CreateSaleCommand(register, userId));
+    Sale sale = createSaleUseCase.execute(new CreateSaleCommand(registerId, userId));
     saleIds.add(sale.id());
     productId =
         callInOwnTransaction(

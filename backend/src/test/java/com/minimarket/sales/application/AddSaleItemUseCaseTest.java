@@ -3,23 +3,20 @@ package com.minimarket.sales.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.catalog.application.NewProduct;
 import com.minimarket.catalog.application.ProductSort;
 import com.minimarket.catalog.application.ProductStore;
 import com.minimarket.catalog.application.ProductSummary;
 import com.minimarket.sales.domain.Sale;
 import com.minimarket.sales.domain.SaleItem;
-import com.minimarket.sales.domain.SaleStatus;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.shared.domain.ForbiddenException;
 import com.minimarket.shared.domain.NotFoundException;
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +39,8 @@ class AddSaleItemUseCaseTest {
       UUID.fromString("0199a2b3-0000-7000-8000-000000000020");
   private static final UUID CASH_REGISTER_ID =
       UUID.fromString("0199a2b3-0000-7000-8000-000000000010");
+  private static final UUID ANOTHER_REGISTER_ID =
+      UUID.fromString("0199a2b3-0000-7000-8000-000000000011");
   private static final UUID OPERATOR_ID = UUID.fromString("0199a2b3-0000-7000-8000-000000000001");
   private static final Instant NOW = Instant.parse("2026-09-24T13:00:00Z");
   private static final String BARCODE = "7891000100103";
@@ -55,6 +54,9 @@ class AddSaleItemUseCaseTest {
   @BeforeEach
   void setUp() {
     useCase = new AddSaleItemUseCase();
+    SaleAccessGuard saleAccessGuard = new SaleAccessGuard();
+    saleAccessGuard.saleStore = saleStore;
+    useCase.saleAccessGuard = saleAccessGuard;
     useCase.saleStore = saleStore;
     useCase.productStore = productStore;
     useCase.auditRecorder = auditRecorder;
@@ -69,7 +71,8 @@ class AddSaleItemUseCaseTest {
 
     Sale sale =
         useCase.execute(
-            new AddSaleItemCommand(SALE_ID, " 7891000100103 ", null, new BigDecimal("2")));
+            new AddSaleItemCommand(
+                SALE_ID, CASH_REGISTER_ID, " 7891000100103 ", null, new BigDecimal("2")));
 
     assertThat(productStore.lookedUpBarcode)
         .as("o barcode chega normalizado ao ProductStore, como no bipe do passo 409")
@@ -92,7 +95,7 @@ class AddSaleItemUseCaseTest {
     assertThat(saleStore.updated).as("o agregado alterado é o que vai para o banco").isSameAs(sale);
     assertThat(saleStore.updateCount).isEqualTo(1);
 
-    Recorded event = auditRecorder.only();
+    FakeAuditRecorder.Event event = auditRecorder.only();
     assertThat(event.action()).isEqualTo("SALE_ITEM_ADDED");
     assertThat(event.entityType()).isEqualTo("SALE");
     assertThat(event.entityId()).isEqualTo(SALE_ID);
@@ -114,7 +117,9 @@ class AddSaleItemUseCaseTest {
     productStore.byId = product(null, "Banana prata", "KG", "7.49", true, null);
 
     Sale sale =
-        useCase.execute(new AddSaleItemCommand(SALE_ID, null, PRODUCT_ID, new BigDecimal("1.235")));
+        useCase.execute(
+            new AddSaleItemCommand(
+                SALE_ID, CASH_REGISTER_ID, null, PRODUCT_ID, new BigDecimal("1.235")));
 
     assertThat(productStore.lookedUpBarcode).as("sem barcode não há consulta por código").isNull();
     SaleItem item = sale.items().getFirst();
@@ -132,11 +137,13 @@ class AddSaleItemUseCaseTest {
   @DisplayName("mesmo produto de novo soma a quantidade numa linha só e mantém o snapshot antigo")
   void sumsRepeatedProductInSingleLineKeepingSnapshot() {
     productStore.byBarcode = product(BARCODE, "Arroz 5kg", "UN", "9.90", true, null);
-    useCase.execute(new AddSaleItemCommand(SALE_ID, BARCODE, null, new BigDecimal("2")));
+    useCase.execute(
+        new AddSaleItemCommand(SALE_ID, CASH_REGISTER_ID, BARCODE, null, new BigDecimal("2")));
     productStore.byBarcode = product(BARCODE, "Arroz 5kg promocional", "UN", "5.00", true, null);
 
     Sale sale =
-        useCase.execute(new AddSaleItemCommand(SALE_ID, BARCODE, null, new BigDecimal("3")));
+        useCase.execute(
+            new AddSaleItemCommand(SALE_ID, CASH_REGISTER_ID, BARCODE, null, new BigDecimal("3")));
 
     assertThat(sale.items()).as("uma linha por produto, não duas").hasSize(1);
     SaleItem item = sale.items().getFirst();
@@ -157,7 +164,8 @@ class AddSaleItemUseCaseTest {
     assertThatThrownBy(
             () ->
                 useCase.execute(
-                    new AddSaleItemCommand(SALE_ID, BARCODE, null, new BigDecimal("1"))))
+                    new AddSaleItemCommand(
+                        SALE_ID, CASH_REGISTER_ID, BARCODE, null, new BigDecimal("1"))))
         .isInstanceOfSatisfying(
             NotFoundException.class,
             error -> {
@@ -178,7 +186,8 @@ class AddSaleItemUseCaseTest {
     assertThatThrownBy(
             () ->
                 useCase.execute(
-                    new AddSaleItemCommand(SALE_ID, BARCODE, null, new BigDecimal("1"))))
+                    new AddSaleItemCommand(
+                        SALE_ID, CASH_REGISTER_ID, BARCODE, null, new BigDecimal("1"))))
         .isInstanceOfSatisfying(
             BusinessException.class,
             error -> {
@@ -198,7 +207,8 @@ class AddSaleItemUseCaseTest {
     assertThatThrownBy(
             () ->
                 useCase.execute(
-                    new AddSaleItemCommand(SALE_ID, null, PRODUCT_ID, new BigDecimal("1"))))
+                    new AddSaleItemCommand(
+                        SALE_ID, CASH_REGISTER_ID, null, PRODUCT_ID, new BigDecimal("1"))))
         .isInstanceOfSatisfying(
             BusinessException.class,
             error -> assertThat(error.code()).isEqualTo(ErrorCode.PRODUCT_INACTIVE));
@@ -216,7 +226,8 @@ class AddSaleItemUseCaseTest {
     assertThatThrownBy(
             () ->
                 useCase.execute(
-                    new AddSaleItemCommand(SALE_ID, BARCODE, null, new BigDecimal("1"))))
+                    new AddSaleItemCommand(
+                        SALE_ID, CASH_REGISTER_ID, BARCODE, null, new BigDecimal("1"))))
         .isInstanceOfSatisfying(
             ConflictException.class,
             error -> {
@@ -238,7 +249,8 @@ class AddSaleItemUseCaseTest {
     assertThatThrownBy(
             () ->
                 useCase.execute(
-                    new AddSaleItemCommand(SALE_ID, BARCODE, null, new BigDecimal("1"))))
+                    new AddSaleItemCommand(
+                        SALE_ID, CASH_REGISTER_ID, BARCODE, null, new BigDecimal("1"))))
         .isInstanceOfSatisfying(
             NotFoundException.class,
             error -> {
@@ -251,11 +263,56 @@ class AddSaleItemUseCaseTest {
   }
 
   @Test
+  @DisplayName("venda de outro caixa lança ForbiddenException(ACCESS_DENIED) sem tocar no agregado")
+  void deniesSaleOfAnotherRegister() {
+    productStore.byBarcode = product(BARCODE, "Arroz 5kg", "UN", "9.90", true, null);
+
+    assertThatThrownBy(
+            () ->
+                useCase.execute(
+                    new AddSaleItemCommand(
+                        SALE_ID, ANOTHER_REGISTER_ID, BARCODE, null, new BigDecimal("1"))))
+        .isInstanceOfSatisfying(
+            ForbiddenException.class,
+            error -> {
+              assertThat(error.code()).isEqualTo(ErrorCode.ACCESS_DENIED);
+              assertThat(error.getMessage()).contains(SALE_ID.toString());
+            });
+
+    assertThat(productStore.lookedUpBarcode)
+        .as("quem não é dono da venda nem descobre se o produto existe")
+        .isNull();
+    assertThat(saleStore.sale.items()).isEmpty();
+    assertThat(saleStore.updateCount).isZero();
+    assertThat(auditRecorder.recorded).isEmpty();
+  }
+
+  @Test
+  @DisplayName(
+      "sessão sem caixa vinculado lança ForbiddenException(ACCESS_DENIED) sem tocar no agregado")
+  void deniesSessionWithoutBoundRegister() {
+    productStore.byBarcode = product(BARCODE, "Arroz 5kg", "UN", "9.90", true, null);
+
+    assertThatThrownBy(
+            () ->
+                useCase.execute(
+                    new AddSaleItemCommand(SALE_ID, null, BARCODE, null, new BigDecimal("1"))))
+        .isInstanceOfSatisfying(
+            ForbiddenException.class,
+            error -> assertThat(error.code()).isEqualTo(ErrorCode.ACCESS_DENIED));
+
+    assertThat(saleStore.updateCount).isZero();
+    assertThat(auditRecorder.recorded).isEmpty();
+  }
+
+  @Test
   @DisplayName("sem barcode e sem productId é 400 VALIDATION_ERROR, sem consultar nada")
   void rejectsCommandWithoutBarcodeAndProductId() {
     assertThatThrownBy(
             () ->
-                useCase.execute(new AddSaleItemCommand(SALE_ID, "   ", null, new BigDecimal("1"))))
+                useCase.execute(
+                    new AddSaleItemCommand(
+                        SALE_ID, CASH_REGISTER_ID, "   ", null, new BigDecimal("1"))))
         .isInstanceOfSatisfying(
             BusinessException.class,
             error -> assertThat(error.code()).isEqualTo(ErrorCode.VALIDATION_ERROR));
@@ -289,62 +346,6 @@ class AddSaleItemUseCaseTest {
         NOW,
         deletedAt,
         0L);
-  }
-
-  /**
-   * Dublê de {@link SaleStore}: guarda a venda do cenário e o que o caso de uso mandou atualizar —
-   * leitura, busca e lock são exercitados pelos testes do passo 803.
-   */
-  private static final class FakeSaleStore implements SaleStore {
-
-    private Sale sale;
-    private Sale updated;
-    private int updateCount;
-
-    @Override
-    public Optional<Sale> findById(UUID id) {
-      return Optional.ofNullable(sale).filter(found -> found.id().equals(id));
-    }
-
-    @Override
-    public void update(Sale sale) {
-      updateCount++;
-      updated = sale;
-    }
-
-    @Override
-    public void insert(Sale sale) {
-      throw new UnsupportedOperationException("insert não é usado por AddSaleItem");
-    }
-
-    @Override
-    public List<SaleSummary> search(
-        Instant from,
-        Instant to,
-        SaleStatus status,
-        UUID cashSessionId,
-        UUID operatorUserId,
-        int page,
-        int size) {
-      throw new UnsupportedOperationException("search não é usado por AddSaleItem");
-    }
-
-    @Override
-    public long count(
-        Instant from, Instant to, SaleStatus status, UUID cashSessionId, UUID operatorUserId) {
-      throw new UnsupportedOperationException("count não é usado por AddSaleItem");
-    }
-
-    @Override
-    public Optional<Sale> lockById(UUID id) {
-      throw new UnsupportedOperationException("lockById não é usado por AddSaleItem");
-    }
-
-    @Override
-    public boolean existsOpenByCashSession(UUID cashSessionId) {
-      throw new UnsupportedOperationException(
-          "existsOpenByCashSession não é usado por AddSaleItem");
-    }
   }
 
   /**
@@ -432,38 +433,4 @@ class AddSaleItemUseCaseTest {
       throw new UnsupportedOperationException("existsActiveBarcode não é usado por AddSaleItem");
     }
   }
-
-  /**
-   * Dublê de {@link AuditRecorder}: guarda o que o caso de uso pediu para gravar, sem CDI e sem
-   * banco. A subclasse só sobrescreve {@code record} — o caminho de verdade (contexto + INSERT) é
-   * do passo 303 e tem teste próprio contra PostgreSQL.
-   */
-  private static final class FakeAuditRecorder extends AuditRecorder {
-
-    private final List<Recorded> recorded = new ArrayList<>();
-
-    @Override
-    public void record(
-        String action,
-        String entityType,
-        UUID entityId,
-        String reason,
-        Map<String, Object> details) {
-      recorded.add(new Recorded(action, entityType, entityId, reason, details));
-    }
-
-    /** Único evento do cenário; o teste falha se o caso de uso gravou zero ou dois. */
-    private Recorded only() {
-      assertThat(recorded).as("eventos de auditoria do cenário").hasSize(1);
-      return recorded.getFirst();
-    }
-  }
-
-  /** Evento como o caso de uso o entregou ao gravador. */
-  private record Recorded(
-      String action,
-      String entityType,
-      UUID entityId,
-      String reason,
-      Map<String, Object> details) {}
 }

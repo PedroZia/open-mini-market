@@ -677,10 +677,16 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** adiciona item novo; soma item repetido; produto inexistente → 404; venda concluída → 409 `SALE_NOT_OPEN`.
   **Commit:** `feat(sales): adiciona itens a venda`
 
-- [ ] **809 — API de itens**
-  **Objetivo:** manipular itens via HTTP. **Depende:** 808
-  **Implementar:** `POST /sales/{id}/items`, `PATCH /sales/{id}/items/{itemId}`, `DELETE /sales/{id}/items/{itemId}`; venda só acessível pela sessão de caixa dona (403 caso contrário).
-  **Testes/aceite:** 200 com totais recalculados; 403 em venda de outro caixa; 404 item inexistente.
+- [x] **809a — Guarda de posse e casos de uso de item**
+  **Objetivo:** alterar e remover item, com a venda só acessível pela sessão de caixa dona (BR-11, §9.4). **Depende:** 808
+  **Implementar:** `SaleAccessGuard.requireOwned(saleId, cashRegisterId)` em `sales/application` (venda inexistente → 404 `SALE_NOT_FOUND`; caixa da sessão nulo ou diferente do caixa da venda → 403 `ACCESS_DENIED`) e `requireOpen` (409 `SALE_NOT_OPEN`); `AddSaleItemCommand` ganha `cashRegisterId` e o caso de uso do 808 passa pela guarda; `ChangeSaleItemQuantityUseCase` (item fora da venda → 404 `SALE_ITEM_NOT_FOUND`, código novo) e `RemoveSaleItemUseCase`, ambos com `findById` + `update` (mesmo caminho otimista do 808) e auditoria `SALE_ITEM_QUANTITY_CHANGED`/`SALE_ITEM_REMOVED` na mesma transação.
+  **Testes/aceite:** unitários dos dois casos de uso novos e da posse no `AddSaleItem`: 200/estado com totais recalculados e evento; 403 venda de outro caixa; 404 venda; 404 item; 409 venda concluída.
+  **Commit:** `feat(sales): adiciona casos de uso de item com posse`
+
+- [ ] **809b — API de itens**
+  **Objetivo:** manipular itens via HTTP. **Depende:** 809a
+  **Implementar:** `POST /sales/{id}/items`, `PATCH /sales/{id}/items/{itemId}`, `DELETE /sales/{id}/items/{itemId}` (200 com `SaleDetailResponse` — id, número, status, caixa/sessão/operador, cliente, totais, desconto, `itemCount`, timestamps e `items[]` —, `{itemId}` = `productId`), DTOs `SaleItemRequest`/`SaleItemQuantityRequest`/`SaleItemResponse`, permissão `sale.create` nas três e as 3 rotas em `API_ROUTES`.
+  **Testes/aceite:** 200 com totais recalculados nos três; 403 em venda de outro caixa; 404 item inexistente; 409 venda concluída; 400 forma inválida; 401 sem token nas 3 rotas.
   **Commit:** `feat(sales): expoe inclusao, alteracao e remocao de itens`
 
 - [ ] **810 — Caso de uso `ApplyDiscount`**

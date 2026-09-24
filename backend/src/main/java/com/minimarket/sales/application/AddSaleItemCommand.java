@@ -15,11 +15,17 @@ import java.util.UUID;
  * VALIDATION_ERROR} no caso de uso. Código interno e etiqueta de balança (BR-14) ficam para o passo
  * 1104b.
  *
+ * <p>{@code cashRegisterId} é o caixa da sessão autenticada, montado pela API (passo 809b) do
+ * {@code OperationContext} — nunca do corpo: a {@link SaleAccessGuard} só deixa a operação seguir
+ * na venda do caixa da sessão (BR-11, §9.4).
+ *
  * @param saleId venda que recebe o item
+ * @param cashRegisterId caixa da sessão autenticada; nulo é sessão sem vínculo de caixa e a guarda
+ *     recusa com 403
  * @param barcode código de barras lido, como veio do leitor; nulo ou em branco quando o produto vem
  *     pelo id
  * @param productId produto escolhido; ignorado quando há barcode
  * @param quantity quantidade vendida, maior que zero
  */
 public record AddSaleItemCommand(
-    UUID saleId, String barcode, UUID productId, BigDecimal quantity) {}
+    UUID saleId, UUID cashRegisterId, String barcode, UUID productId, BigDecimal quantity) {}

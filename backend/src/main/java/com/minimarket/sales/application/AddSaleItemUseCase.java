@@ -4,9 +4,7 @@ import com.minimarket.audit.application.AuditRecorder;
 import com.minimarket.catalog.application.ProductStore;
 import com.minimarket.catalog.application.ProductSummary;
 import com.minimarket.sales.domain.Sale;
-import com.minimarket.sales.domain.SaleStatus;
 import com.minimarket.shared.domain.BusinessException;
-import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.NotFoundException;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -36,12 +34,14 @@ import java.util.UUID;
  * (a desativação do 412 grava os dois de uma vez) — o soft-deletado é invisível para a porta e cai
  * no 404.
  *
- * <p>A venda é lida por {@link SaleStore#findById}, não por {@code lockById}: a leitura deixa a
- * linha no contexto de persistência e o {@code update} do 803 confere a versão no flush — quem
- * alterou a mesma venda entre a leitura e a gravação recebe 409 {@code CONCURRENT_MODIFICATION}, o
- * caminho que o 814 exercita. Venda inexistente é 404 {@code SALE_NOT_FOUND}; venda fora de {@code
- * OPEN} é 409 {@code SALE_NOT_OPEN}, conferido <em>antes</em> de mutar o agregado — a recusa do
- * domínio (422) fica como backstop.
+ * <p>A venda vem pela {@link SaleAccessGuard} (BR-11, §9.4): venda inexistente é 404 {@code
+ * SALE_NOT_FOUND} para qualquer sessão, venda de outro caixa é 403 {@code ACCESS_DENIED} e venda
+ * fora de {@code OPEN} é 409 {@code SALE_NOT_OPEN}, conferido <em>antes</em> de mutar o agregado —
+ * a recusa do domínio (422) fica como backstop. A checagem da venda precede a resolução do produto:
+ * quem não é dono não descobre nem se o produto existe. A leitura é por {@link SaleStore#findById},
+ * não por {@code lockById}: a linha fica no contexto de persistência e o {@code update} do 803
+ * confere a versão no flush — quem alterou a mesma venda entre a leitura e a gravação recebe 409
+ * {@code CONCURRENT_MODIFICATION}, o caminho que o 814 exercita.
  *
  * <p>Item do produto que já está na venda é somado na mesma linha, mantendo o snapshot da primeira
  * inclusão (BR-01): o preço que vale é o capturado lá, nunca o do cadastro de agora. Quem decide
@@ -50,7 +50,7 @@ import java.util.UUID;
  *
  * <p>Auditoria (§7.2): {@code SALE_ITEM_ADDED} na mesma transação, com a venda em {@code entityId}
  * e produto, barcode, quantidade e os totais/itemCount resultantes em {@code details}. Devolve o
- * agregado atualizado — quem monta a resposta é a API (passo 809).
+ * agregado atualizado — quem monta a resposta é a API (passo 809b).
  */
 @ApplicationScoped
 public class AddSaleItemUseCase {
@@ -67,6 +67,9 @@ public class AddSaleItemUseCase {
    */
   @Inject SaleStore saleStore;
 
+  /** Guarda de posse e estado da venda (BR-11): a inclusão só segue na venda do caixa da sessão. */
+  @Inject SaleAccessGuard saleAccessGuard;
+
   /** Porta do catálogo: o produto vem por barcode (409) ou por id, nunca do cliente. */
   @Inject ProductStore productStore;
 
@@ -74,15 +77,18 @@ public class AddSaleItemUseCase {
   @Inject AuditRecorder auditRecorder;
 
   /**
-   * 400 {@code VALIDATION_ERROR} sem barcode e sem produto; 404 {@code PRODUCT_NOT_FOUND} para
-   * produto inexistente; 422 {@code PRODUCT_INACTIVE} para produto desativado; 404 {@code
-   * SALE_NOT_FOUND} para venda inexistente; 409 {@code SALE_NOT_OPEN} para venda concluída. Devolve
-   * o agregado com o item incluído e os totais recalculados.
+   * 404 {@code SALE_NOT_FOUND} para venda inexistente; 403 {@code ACCESS_DENIED} para venda de
+   * outro caixa; 409 {@code SALE_NOT_OPEN} para venda concluída; 400 {@code VALIDATION_ERROR} sem
+   * barcode e sem produto; 404 {@code PRODUCT_NOT_FOUND} para produto inexistente; 422 {@code
+   * PRODUCT_INACTIVE} para produto desativado. Devolve o agregado com o item incluído e os totais
+   * recalculados.
    */
   @Transactional
   public Sale execute(AddSaleItemCommand command) {
+    Sale sale =
+        SaleAccessGuard.requireOpen(
+            saleAccessGuard.requireOwned(command.saleId(), command.cashRegisterId()));
     ProductSummary product = resolveProduct(command);
-    Sale sale = requireOpenSale(command.saleId());
     sale.addItem(
         product.id(),
         product.barcode(),
@@ -158,27 +164,6 @@ public class AddSaleItemUseCase {
           ErrorCode.PRODUCT_INACTIVE, "produto %s está inativo".formatted(product.id()));
     }
     return product;
-  }
-
-  /**
-   * Venda que recebe o item: 404 {@code SALE_NOT_FOUND} para id desconhecido e 409 {@code
-   * SALE_NOT_OPEN} quando ela não está aberta — a checagem é antecipada para a recusa não depender
-   * do 422 do domínio, que fica como backstop.
-   */
-  private Sale requireOpenSale(UUID saleId) {
-    Sale sale =
-        saleStore
-            .findById(saleId)
-            .orElseThrow(
-                () ->
-                    new NotFoundException(
-                        ErrorCode.SALE_NOT_FOUND, "venda %s não encontrada".formatted(saleId)));
-    if (sale.status() != SaleStatus.OPEN) {
-      throw new ConflictException(
-          ErrorCode.SALE_NOT_OPEN,
-          "venda %s está %s e não aceita novos itens".formatted(sale.id(), sale.status()));
-    }
-    return sale;
   }
 
   /**

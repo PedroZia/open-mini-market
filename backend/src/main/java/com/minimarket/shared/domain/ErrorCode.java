@@ -26,6 +26,7 @@ public enum ErrorCode {
   CASH_SESSION_NOT_OPEN(404, "Sessão de caixa não aberta"),
   CASH_SESSION_NOT_FOUND(404, "Sessão de caixa não encontrada"),
   SALE_NOT_FOUND(404, "Venda não encontrada"),
+  SALE_ITEM_NOT_FOUND(404, "Item da venda não encontrado"),
   METHOD_NOT_ALLOWED(405, "Método não permitido"),
   CONFLICT(409, "Conflito de estado"),
   USERNAME_ALREADY_EXISTS(409, "Username já está em uso"),
