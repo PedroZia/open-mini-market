@@ -159,6 +159,21 @@ class CategoryRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
+  @DisplayName("existsById enxerga categoria desativada e ignora id desconhecido")
+  void checksExistenceById() {
+    UUID id = categoryRepository.insert(new NewCategory(storeId(), "Bebidas", null, 1));
+    categoryRepository.deactivate(id);
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(categoryRepository.existsById(id))
+        .as("a checagem não filtra active: desativada continua existindo")
+        .isTrue();
+    assertThat(categoryRepository.existsById(UUID.randomUUID())).isFalse();
+  }
+
+  @Test
+  @TestTransaction
   @DisplayName("nome duplicado na mesma loja vira ConflictException no insert")
   void translatesDuplicateNameOnInsert() {
     categoryRepository.insert(new NewCategory(storeId(), "Bebidas", null, 1));

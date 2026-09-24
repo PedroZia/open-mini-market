@@ -397,7 +397,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de integração para cada método, incluindo busca por nome parcial e ordenação por preço/nome.
   **Commit:** `feat(catalog): adiciona repositorio de produtos`
 
-- [ ] **405 — Caso de uso `CreateProduct`**
+- [x] **405 — Caso de uso `CreateProduct`**
   **Objetivo:** criar produto com validações. **Depende:** 404
   **Implementar:** normaliza barcode (trim, sem espaços), valida preço ≥ 0, `unit` ∈ {UN, KG}, categoria existente, barcode único entre ativos; auditoria `PRODUCT_CREATED`.
   **Testes/aceite:** unitários das validações + teste de auditoria.

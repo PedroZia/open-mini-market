@@ -41,4 +41,10 @@ public interface CategoryStore {
 
   /** Como {@link #existsByName}, ignorando a própria categoria: é o caso do update. */
   boolean existsByNameExceptId(String name, UUID id);
+
+  /**
+   * Indica se existe categoria com o id, ativa ou desativada: quem decide se a categoria pode
+   * receber produto é o caso de uso; a checagem não filtra {@code active}.
+   */
+  boolean existsById(UUID id);
 }

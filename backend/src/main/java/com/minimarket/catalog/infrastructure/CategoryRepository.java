@@ -100,6 +100,12 @@ public class CategoryRepository implements CategoryStore {
     return exists(name, id);
   }
 
+  /** {@inheritDoc} */
+  @Override
+  public boolean existsById(UUID id) {
+    return entityManager.find(CategoryEntity.class, id) != null;
+  }
+
   /** Checagem de nome com a cláusula de exclusão só quando há id a ignorar. */
   private boolean exists(String name, UUID exceptId) {
     TypedQuery<UUID> query =
