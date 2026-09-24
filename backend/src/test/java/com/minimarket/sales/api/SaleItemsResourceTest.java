@@ -131,13 +131,16 @@ class SaleItemsResourceTest extends IntegrationTestBase {
             "discountReason",
             "discountAmount",
             "total",
+            "paidAmount",
+            "changeAmount",
             "itemCount",
             "createdAt",
             "completedAt",
             "cancelReason",
             "cancelledByUserId",
             "cancelledAt",
-            "items");
+            "items",
+            "payments");
     assertThat(body.get("id")).isEqualTo(saleId.toString());
     assertThat(body.get("status")).isEqualTo("OPEN");
     assertThat(body.get("customerId")).as("venda sem cliente vinculado").isNull();

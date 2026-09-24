@@ -1,10 +1,14 @@
 package com.minimarket.sales.api;
 
 import com.minimarket.auth.application.AuthorizationService;
+import com.minimarket.sales.application.AddPaymentCommand;
+import com.minimarket.sales.application.AddPaymentUseCase;
 import com.minimarket.sales.application.AddSaleItemCommand;
 import com.minimarket.sales.application.AddSaleItemUseCase;
 import com.minimarket.sales.application.ApplyDiscountCommand;
 import com.minimarket.sales.application.ApplyDiscountUseCase;
+import com.minimarket.sales.application.CancelPaymentCommand;
+import com.minimarket.sales.application.CancelPaymentUseCase;
 import com.minimarket.sales.application.CancelSaleCommand;
 import com.minimarket.sales.application.CancelSaleUseCase;
 import com.minimarket.sales.application.ChangeSaleItemQuantityCommand;
@@ -17,6 +21,7 @@ import com.minimarket.sales.application.LinkCustomerCommand;
 import com.minimarket.sales.application.LinkCustomerUseCase;
 import com.minimarket.sales.application.ListSalesQuery;
 import com.minimarket.sales.application.ListSalesUseCase;
+import com.minimarket.sales.application.PaymentStore;
 import com.minimarket.sales.application.RemoveDiscountCommand;
 import com.minimarket.sales.application.RemoveDiscountUseCase;
 import com.minimarket.sales.application.RemoveSaleItemCommand;
@@ -25,6 +30,7 @@ import com.minimarket.sales.application.SalePage;
 import com.minimarket.sales.application.SaleSummary;
 import com.minimarket.sales.application.UnlinkCustomerCommand;
 import com.minimarket.sales.application.UnlinkCustomerUseCase;
+import com.minimarket.sales.domain.Payment;
 import com.minimarket.sales.domain.Sale;
 import com.minimarket.sales.domain.SaleItem;
 import com.minimarket.sales.domain.SaleStatus;
@@ -106,15 +112,27 @@ import java.util.UUID;
  * SALE_ALREADY_COMPLETED}.
  *
  * <p>A consulta (passo 812) tem duas rotas: o detalhe {@code GET /sales/{id}} devolve a venda
- * inteira — o mesmo {@link SaleDetailResponse} das operações acima, com itens, desconto e cliente —
- * e o histórico {@code GET /sales} devolve a página do envelope padrão. O detalhe <em>não</em> usa
- * {@code @RequirePermission}: o §4.5 não tem permissão de leitura de venda e a posse (BR-11, §9.4)
- * é de quem opera o caixa; a permissão de gestão {@code report.read} entra como bypass — resolvida
- * aqui pelo {@link AuthorizationService} e passada ao caso de uso, como o 305 faz com o porteiro
- * declarativo. Assim o OPERADOR lê a venda do seu caixa e recebe 403 {@code ACCESS_DENIED} na do
- * outro, enquanto o GERENTE lê qualquer uma. O histórico exige {@code report.read} na rota: é visão
- * de loja, não do caixa. Pagamentos ficam na Fase 9 — a tabela ainda não existe — então o detalhe
- * não tem {@code paidAmount}/{@code changeAmount}.
+ * inteira — o mesmo {@link SaleDetailResponse} das operações acima, com itens, desconto, cliente e
+ * pagamentos — e o histórico {@code GET /sales} devolve a página do envelope padrão. O detalhe
+ * <em>não</em> usa {@code @RequirePermission}: o §4.5 não tem permissão de leitura de venda e a
+ * posse (BR-11, §9.4) é de quem opera o caixa; a permissão de gestão {@code report.read} entra como
+ * bypass — resolvida aqui pelo {@link AuthorizationService} e passada ao caso de uso, como o 305
+ * faz com o porteiro declarativo. Assim o OPERADOR lê a venda do seu caixa e recebe 403 {@code
+ * ACCESS_DENIED} na do outro, enquanto o GERENTE lê qualquer uma. O histórico exige {@code
+ * report.read} na rota: é visão de loja, não do caixa.
+ *
+ * <p>Os pagamentos (passo 905) são as duas rotas do §9.3: {@code POST /sales/{id}/payments} recebe
+ * {@code {method, amount, tenderedAmount?}} e devolve <strong>201</strong> com a {@link
+ * SaleDetailResponse} — o pagamento criado, com o troco calculado pelo servidor, mais o {@code
+ * paidAmount}/{@code changeAmount} da venda (BR-05, BR-12) —, e {@code DELETE
+ * /sales/{id}/payments/{paymentId}} cancela o pagamento e devolve <strong>200</strong> com o mesmo
+ * detalhe, o pagamento agora {@code CANCELLED} e o pago recalculado. As duas exigem {@code
+ * payment.add} (BR-04/§4.5): registrar e desfazer pagamento são a mesma sensibilidade — o OPERADOR
+ * tem a permissão, quem não tem recebe 403 do porteiro. O 201 é <em>sem</em> {@code Location}: não
+ * existe rota de leitura de um pagamento isolado (o pagamento é parte do detalhe da venda), o mesmo
+ * critério da abertura. O {@code POST} é idempotente por contrato (§8) e o {@code DELETE} não pede
+ * {@code Idempotency-Key} — o §8 não lista {@code DELETE} —, mas repetir o cancelamento é no-op de
+ * estado (200, sem evento), como remover desconto sem desconto.
  */
 @Path(SalesResource.PATH)
 public class SalesResource {
@@ -147,6 +165,18 @@ public class SalesResource {
 
   /** Cancelamento da venda aberta (passo 813): a rota que o expõe nasce neste passo. */
   @Inject CancelSaleUseCase cancelSaleUseCase;
+
+  /** Registro do pagamento (passo 904): a rota que o expõe nasce no 905. */
+  @Inject AddPaymentUseCase addPaymentUseCase;
+
+  /** Cancelamento do pagamento (passo 905): a rota que o expõe nasce neste passo. */
+  @Inject CancelPaymentUseCase cancelPaymentUseCase;
+
+  /**
+   * Pagamentos da venda (passo 905): o detalhe é montado com eles — {@code paidAmount}, {@code
+   * changeAmount} e a lista vêm do que está gravado, não do agregado (que só guarda os totais).
+   */
+  @Inject PaymentStore paymentStore;
 
   /** Idempotência da abertura (§8, passo 807): a chave identifica o gesto de abrir a venda. */
   @Inject IdempotencyGuard idempotencyGuard;
@@ -397,6 +427,83 @@ public class SalesResource {
   }
 
   /**
+   * Registra o pagamento na venda aberta (passo 905) e devolve 201 com a venda inteira — o
+   * pagamento criado com o troco calculado pelo servidor e o {@code paidAmount}/{@code
+   * changeAmount} recalculados (BR-05, BR-12). A forma e o valor chegam no corpo; o caixa da sessão
+   * e o operador saem do {@code OperationContext}, nunca do corpo (BR-11).
+   *
+   * <p>Exige {@code payment.add}: sem a permissão o interceptor do {@code RequirePermission}
+   * responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar, e o caso de uso repete a
+   * checagem como backstop. É operação de dinheiro idempotente por contrato (§8): o {@link
+   * IdempotencyGuard} exige o header {@code Idempotency-Key} (sem ele, 400 {@code
+   * IDEMPOTENCY_KEY_REQUIRED}) e o retry com a mesma chave devolve a resposta gravada com {@code
+   * Idempotency-Replayed: true}, sem registrar de novo. O 201 é sem {@code Location}: não existe
+   * rota de leitura de um pagamento isolado — ele é parte do detalhe da venda.
+   *
+   * <p>Venda inexistente é 404 {@code SALE_NOT_FOUND}; venda de outro caixa é 403 {@code
+   * ACCESS_DENIED}; venda fora de {@code OPEN} é 409 {@code SALE_NOT_OPEN}; forma ou valor ausentes
+   * são 400 {@code VALIDATION_ERROR} da forma, validada antes do caso de uso; acima do restante é
+   * 422 {@code PAYMENT_EXCEEDS_TOTAL} e o valor entregue inválido do dinheiro, 422 {@code
+   * INVALID_TENDERED_AMOUNT} — todos do caso de uso, que a API não antecipa.
+   */
+  @POST
+  @Path("/{id}/payments")
+  @RequirePermission(Permission.PAYMENT_ADD)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response addPayment(
+      @PathParam("id") UUID id,
+      @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey,
+      @Valid SalePaymentRequest request) {
+    return idempotencyGuard.execute(
+        idempotencyKey,
+        HttpMethod.POST,
+        PATH + "/" + id + "/payments",
+        request,
+        () ->
+            Response.status(Response.Status.CREATED)
+                .entity(toDetailResponse(registerPayment(id, request)))
+                .build());
+  }
+
+  /** Ação idempotente: registra o pagamento e monta o 201 com a venda como ela ficou. */
+  private Sale registerPayment(UUID id, SalePaymentRequest request) {
+    return addPaymentUseCase.execute(
+        new AddPaymentCommand(
+            id,
+            operationContext.cashRegisterId(),
+            request.method(),
+            request.amount(),
+            request.tenderedAmount(),
+            operationContext.userId()));
+  }
+
+  /**
+   * Cancela o pagamento da venda aberta (passo 905) e devolve 200 com a venda inteira — o pagamento
+   * {@code CANCELLED} no corpo e o {@code paidAmount}/{@code changeAmount} recalculados a partir
+   * dos pagamentos que restaram aprovados (BR-05, BR-12). Desfazer não apaga: a linha do pagamento
+   * fica no histórico com o instante do cancelamento.
+   *
+   * <p>Exige a mesma permissão de quem registra, {@code payment.add} (BR-04): desfazer um pagamento
+   * é tão sensível quanto fazê-lo, a mesma escolha do desconto. Não pede {@code Idempotency-Key} —
+   * o §8 não lista {@code DELETE} — e repetir o cancelamento é no-op de estado (200, sem evento).
+   * Venda inexistente é 404 {@code SALE_NOT_FOUND}; venda de outro caixa é 403 {@code
+   * ACCESS_DENIED}; venda fora de {@code OPEN} é 409 {@code SALE_NOT_OPEN}; pagamento que não está
+   * na venda é 404 {@code PAYMENT_NOT_FOUND} — todos do caso de uso.
+   */
+  @DELETE
+  @Path("/{id}/payments/{paymentId}")
+  @RequirePermission(Permission.PAYMENT_ADD)
+  @Produces(MediaType.APPLICATION_JSON)
+  public SaleDetailResponse cancelPayment(
+      @PathParam("id") UUID id, @PathParam("paymentId") UUID paymentId) {
+    Sale sale =
+        cancelPaymentUseCase.execute(
+            new CancelPaymentCommand(id, operationContext.cashRegisterId(), paymentId));
+    return toDetailResponse(sale);
+  }
+
+  /**
    * Detalhe da venda (passo 812): a venda inteira — cabeçalho, itens, desconto e cliente. Sem
    * {@code @RequirePermission}: o §4.5 não tem permissão de leitura de venda e a visibilidade é da
    * guarda do caso de uso — a sessão lê a venda do seu caixa (BR-11, §9.4) e quem tem {@code
@@ -469,10 +576,12 @@ public class SalesResource {
   }
 
   /**
-   * A venda inteira como as rotas de item, desconto e cliente a devolvem; itens na ordem de
-   * inclusão.
+   * A venda inteira como as rotas de item, desconto, cliente e pagamento a devolvem; itens e
+   * pagamentos na ordem de criação. Os pagamentos saem da porta — o agregado guarda só o {@code
+   * paidAmount}/{@code changeAmount} derivados deles —, então o detalhe reflete o que está gravado,
+   * cancelados inclusive.
    */
-  private static SaleDetailResponse toDetailResponse(Sale sale) {
+  private SaleDetailResponse toDetailResponse(Sale sale) {
     return new SaleDetailResponse(
         sale.id(),
         sale.number(),
@@ -487,13 +596,16 @@ public class SalesResource {
         sale.discountReason(),
         sale.discountAmount(),
         sale.total(),
+        sale.paidAmount(),
+        sale.changeAmount(),
         sale.itemCount(),
         sale.createdAt(),
         sale.completedAt(),
         sale.cancelReason(),
         sale.cancelledByUserId(),
         sale.cancelledAt(),
-        sale.items().stream().map(SalesResource::toItemResponse).toList());
+        sale.items().stream().map(SalesResource::toItemResponse).toList(),
+        paymentStore.listBySale(sale.id()).stream().map(SalesResource::toPaymentResponse).toList());
   }
 
   /** Item com o snapshot do momento da inclusão (BR-01) — nada de entidade JPA em JSON. */
@@ -506,6 +618,20 @@ public class SalesResource {
         item.unitPrice(),
         item.quantity(),
         item.lineTotal());
+  }
+
+  /** Pagamento da venda com o troco que o servidor calculou (BR-12) — nada de entidade JPA. */
+  private static PaymentResponse toPaymentResponse(Payment payment) {
+    return new PaymentResponse(
+        payment.id(),
+        payment.method(),
+        payment.amount(),
+        payment.tenderedAmount(),
+        payment.changeAmount(),
+        payment.status(),
+        payment.createdByUserId(),
+        payment.createdAt(),
+        payment.cancelledAt());
   }
 
   /** Linha do histórico: o cabeçalho da projeção do 803, sem os itens (o detalhe tem os seus). */

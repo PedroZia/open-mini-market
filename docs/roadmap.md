@@ -759,7 +759,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** pagamento parcial; pagamento que completa; dinheiro com troco; tendered insuficiente → 422; venda de outro caixa → 403.
   **Commit:** `feat(sales): registra pagamentos`
 
-- [ ] **905 — API de pagamentos**
+- [x] **905 — API de pagamentos**
   **Objetivo:** pagar pela API. **Depende:** 904
   **Implementar:** `POST /sales/{id}/payments` (idempotente) e `DELETE /sales/{id}/payments/{paymentId}` (cancelar pagamento antes da conclusão).
   **Testes/aceite:** 201 com troco; replay idempotente não duplica; cancelamento recalcula `paidAmount`.

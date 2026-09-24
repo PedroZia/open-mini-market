@@ -177,7 +177,7 @@ class SalesQueryResourceTest extends IntegrationTestBase {
     Map<String, Object> body = response.jsonPath().getMap("$");
 
     assertThat(body)
-        .as("contrato do detalhe: sem storeId, sem version e sem pagamento (Fase 9)")
+        .as("contrato do detalhe: sem storeId, sem version e com pagamentos (passo 905)")
         .containsOnlyKeys(
             "id",
             "number",
@@ -192,13 +192,16 @@ class SalesQueryResourceTest extends IntegrationTestBase {
             "discountReason",
             "discountAmount",
             "total",
+            "paidAmount",
+            "changeAmount",
             "itemCount",
             "createdAt",
             "completedAt",
             "cancelReason",
             "cancelledByUserId",
             "cancelledAt",
-            "items");
+            "items",
+            "payments");
     assertThat(body.get("id")).isEqualTo(saleOne.toString());
     assertThat(body.get("status")).isEqualTo("OPEN");
     assertThat(body.get("cashSessionId")).isEqualTo(sessionId.toString());

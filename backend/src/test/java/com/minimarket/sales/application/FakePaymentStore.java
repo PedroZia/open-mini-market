@@ -7,11 +7,11 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Dublê de {@link PaymentStore} dos unitários do registro de pagamento (passo 904): guarda os
- * pagamentos já gravados da venda, o que o caso de uso mandou inserir e a venda consultada. O
- * round-trip real (insert/list/sum contra PostgreSQL) é exercitado pelo {@code
- * PaymentRepositoryTest} e pelo {@code AddPaymentIntegrationTest} — aqui o que importa é o que o
- * caso de uso fez com o agregado e o que repassou à porta.
+ * Dublê de {@link PaymentStore} dos unitários do registro (passo 904) e do cancelamento (passo
+ * 905): guarda os pagamentos já gravados da venda, o que o caso de uso mandou inserir ou cancelar e
+ * a venda consultada. O round-trip real (insert/list/sum/cancel contra PostgreSQL) é exercitado
+ * pelo {@code PaymentRepositoryTest} e pelos testes de API — aqui o que importa é o que o caso de
+ * uso fez com o agregado e o que repassou à porta.
  */
 final class FakePaymentStore implements PaymentStore {
 
@@ -20,6 +20,9 @@ final class FakePaymentStore implements PaymentStore {
 
   /** Pagamentos que o caso de uso mandou inserir, na ordem. */
   final List<Payment> inserted = new ArrayList<>();
+
+  /** Pagamentos que o caso de uso mandou cancelar, na ordem. */
+  final List<Payment> cancelled = new ArrayList<>();
 
   /** Venda da última {@code listBySale}; nula quando não houve consulta. */
   UUID listedSaleId;
@@ -37,13 +40,14 @@ final class FakePaymentStore implements PaymentStore {
     payments.add(payment);
   }
 
+  /** Cancela como o banco faria: o estado do domínio já está no pagamento da lista. */
   @Override
   public void cancel(Payment payment) {
-    throw new UnsupportedOperationException("cancel não é usado por AddPayment");
+    cancelled.add(payment);
   }
 
   @Override
   public BigDecimal sumApprovedBySale(UUID saleId) {
-    throw new UnsupportedOperationException("sumApprovedBySale não é usado por AddPayment");
+    throw new UnsupportedOperationException("sumApprovedBySale não é usado pelos casos de uso");
   }
 }
