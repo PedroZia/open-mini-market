@@ -41,6 +41,8 @@ class SeedDevMigrationTest extends IntegrationTestBase {
     try (Connection connection = dataSource.getConnection()) {
       connection.setAutoCommit(false);
       try (Statement statement = connection.createStatement()) {
+        // A FK de cash_registers (V11) impede apagar a loja antes dos caixas que apontam para ela.
+        statement.executeUpdate("delete from cash_registers");
         // Apaga a loja dentro da transação (rollback no fim) para provar que o seed a recria.
         statement.executeUpdate("delete from stores where code = 'MATRIZ'");
 

@@ -483,9 +483,9 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 6 — Caixa
 
-- [ ] **601 — Migration `cash_registers` + seed**
+- [x] **601 — Migration `cash_registers` + seed**
   **Objetivo:** existir o caixa físico. **Depende:** 004
-  **Implementar:** `V10__cash_registers.sql` + seed `CAIXA-01` na loja `MATRIZ`.
+  **Implementar:** `V11__cash_registers.sql` + seed `CAIXA-01` na loja `MATRIZ`.
   **Testes/aceite:** existe 1 caixa ativo com código `CAIXA-01`.
   **Commit:** `feat(cash): cria tabela de caixas e seed do caixa 1`
 
