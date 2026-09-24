@@ -495,9 +495,9 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 com status correto após abrir/fechar (teste preparado para fase seguinte).
   **Commit:** `feat(cash): lista caixas disponiveis`
 
-- [ ] **603 — Migration `cash_sessions` + `cash_movements`**
+- [x] **603 — Migration `cash_sessions` + `cash_movements`**
   **Objetivo:** sessão de caixa e movimentos de dinheiro. **Depende:** 601
-  **Implementar:** `V11__cash_sessions.sql` + `V12__cash_movements.sql` conforme §5.3, **incluindo o índice único parcial de sessão aberta por caixa**.
+  **Implementar:** `V12__cash_sessions.sql` + `V13__cash_movements.sql` conforme §5.3, **incluindo o índice único parcial de sessão aberta por caixa**.
   **Testes/aceite:** dois `INSERT` de sessão aberta no mesmo caixa → o segundo falha por violação de índice único.
   **Commit:** `feat(cash): cria sessoes e movimentos de caixa`
 
