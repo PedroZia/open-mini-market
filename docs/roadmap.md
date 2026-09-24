@@ -805,7 +805,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** filtros combinados funcionam; OPERADOR → 403; ordenação decrescente por `occurred_at`.
   **Commit:** `feat(audit): expoe consulta de auditoria`
 
-- [ ] **1002 — Histórico por entidade**
+- [x] **1002 — Histórico por entidade**
   **Objetivo:** reconstruir a vida de uma venda. **Depende:** 1001
   **Implementar:** consulta por `entityType`+`entityId` retornando linha do tempo legível; usar no detalhe da venda (futuro link no Web).
   **Testes/aceite:** venda com 6 eventos aparece em ordem cronológica com ator e motivo.
