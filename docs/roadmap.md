@@ -735,7 +735,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 9 — Pagamentos e conclusão
 
-- [ ] **901 — Migration `payments`**
+- [x] **901 — Migration `payments`**
   **Objetivo:** pagamentos por venda. **Depende:** 801
   **Implementar:** `V20__payments.sql` conforme §5.3 (múltiplos pagamentos, `tendered_amount`, `change_amount`, status).
   **Testes/aceite:** migration aplica; `amount > 0` garantido por check.
