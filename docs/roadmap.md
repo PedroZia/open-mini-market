@@ -573,7 +573,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 3 testes verdes e determinísticos (usar `ExecutorService` + latch, sem `sleep` arbitrário).
   **Commit:** `test(cash): cobre concorrencia de abertura e fechamento`
 
-- [ ] **614 — Autorização e auditoria do caixa**
+- [x] **614 — Autorização e auditoria do caixa**
   **Objetivo:** fechar o módulo. **Depende:** 606–612
   **Implementar:** suíte de permissões (`cash.open`, `cash.close`, `cash.withdrawal`, `cash.supply`) e auditoria de todas as operações.
   **Testes/aceite:** OPERADOR abre/fecha e não faz sangria; GERENTE faz sangria; eventos conferidos.
