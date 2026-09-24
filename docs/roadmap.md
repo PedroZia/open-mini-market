@@ -373,11 +373,17 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** migration aplica; nome duplicado na mesma loja falha.
   **Commit:** `feat(catalog): cria tabela de categorias`
 
-- [ ] **402 — Categoria: repositório e CRUD**
-  **Objetivo:** manter categorias. **Depende:** 401, 306
-  **Implementar:** entidade + repo + `GET/POST/PUT/DELETE /api/v1/categories` (delete = desativar) com `product.read`/`category.write`.
+- [x] **402a — Categoria: entidade e repositório**
+  **Objetivo:** persistir categorias. **Depende:** 401
+  **Implementar:** `CategoryEntity` em `catalog/infrastructure`, porta `CategoryStore` em `catalog/application`, `CategoryRepository` (insert com UUIDv7, `findById`, `findAll` ordenado por `sort_order`/nome, atualização, desativar, checagem de nome duplicado por loja); violação 23505 traduzida para `ConflictException(CATEGORY_NAME_ALREADY_EXISTS)`. Passo dividido do 402 original (diff estimado acima de ~300 linhas); o restante é o 402b.
+  **Testes/aceite:** testes de integração de cada método; nome duplicado na mesma loja falha.
+  **Commit:** `feat(catalog): adiciona entidade e repositorio de categorias`
+
+- [ ] **402b — Categoria: casos de uso e CRUD na API**
+  **Objetivo:** manter categorias. **Depende:** 402a, 306
+  **Implementar:** casos de uso (listar, criar, atualizar, desativar) + `GET/POST/PUT/DELETE /api/v1/categories` (delete = desativar) com `product.read`/`category.write`; `CATEGORY_NOT_FOUND`; rotas novas na lista `API_ROUTES` do `RouteSecurityTest`.
   **Testes/aceite:** CRUD completo na API; 403 para OPERADOR escrevendo; 409 nome duplicado.
-  **Commit:** `feat(catalog): adiciona CRUD de categorias`
+  **Commit:** `feat(catalog): expoe CRUD de categorias`
 
 - [ ] **403 — Migration `products`**
   **Objetivo:** cadastro de produtos com barcode e preço. **Depende:** 401

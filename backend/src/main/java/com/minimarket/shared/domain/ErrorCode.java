@@ -21,6 +21,7 @@ public enum ErrorCode {
   METHOD_NOT_ALLOWED(405, "Método não permitido"),
   CONFLICT(409, "Conflito de estado"),
   USERNAME_ALREADY_EXISTS(409, "Username já está em uso"),
+  CATEGORY_NAME_ALREADY_EXISTS(409, "Nome de categoria já está em uso"),
   BUSINESS_ERROR(422, "Regra de negócio violada"),
   ACCOUNT_LOCKED(423, "Conta bloqueada"),
   RATE_LIMITED(429, "Muitas requisições"),
