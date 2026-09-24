@@ -1,5 +1,7 @@
 package com.minimarket.catalog.api;
 
+import com.minimarket.catalog.application.ChangeProductPriceCommand;
+import com.minimarket.catalog.application.ChangeProductPriceUseCase;
 import com.minimarket.catalog.application.CreateProductCommand;
 import com.minimarket.catalog.application.CreateProductUseCase;
 import com.minimarket.catalog.application.GetProductByBarcodeUseCase;
@@ -20,6 +22,7 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
+import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
@@ -39,7 +42,8 @@ import java.util.UUID;
  * <p>A escrita exige {@code product.write}: sem a permissão o interceptor do {@code
  * RequirePermission} responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar. A edição
  * (passo 410) exige ainda o {@code If-Match} com a versão lida no detalhe — é o contrato do lock
- * otimista (§9.4).
+ * otimista (§9.4) — e a alteração de preço (passo 411) exige {@code price.write} e o motivo no
+ * corpo.
  *
  * <p>O 201 devolve o produto como o banco o guardou (barcode normalizado, preço em escala 2, {@code
  * active}, timestamps e {@code version}) — os mesmos valores que o detalhe de 408 mostrará.
@@ -59,6 +63,8 @@ public class ProductsResource {
   @Inject GetProductByBarcodeUseCase getProductByBarcodeUseCase;
 
   @Inject UpdateProductUseCase updateProductUseCase;
+
+  @Inject ChangeProductPriceUseCase changeProductPriceUseCase;
 
   @Context UriInfo uriInfo;
 
@@ -155,6 +161,26 @@ public class ProductsResource {
                 request.unit(),
                 request.description(),
                 request.minQuantity())));
+  }
+
+  /**
+   * Altera o preço com motivo obrigatório (passo 411) — é a única forma de mudar preço: o {@code
+   * PUT} de cadastro não o aceita. Exige {@code price.write} (OPERADOR não tem) e devolve o {@link
+   * ProductResponse} com o preço e o {@code version} novos; o antes/depois fica na auditoria
+   * ({@code PRODUCT_PRICE_CHANGED}). Id desconhecido, produto desativado ou soft-deletado → 404
+   * {@code PRODUCT_NOT_FOUND}; motivo em branco ou preço negativo → 400 {@code VALIDATION_ERROR};
+   * preço igual ao atual é no-op e responde 200 sem evento.
+   */
+  @PATCH
+  @Path("/{id}/price")
+  @RequirePermission(Permission.PRICE_WRITE)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public ProductResponse changePrice(
+      @PathParam("id") UUID id, @Valid ChangeProductPriceRequest request) {
+    return toResponse(
+        changeProductPriceUseCase.execute(
+            new ChangeProductPriceCommand(id, request.price(), request.reason())));
   }
 
   /**

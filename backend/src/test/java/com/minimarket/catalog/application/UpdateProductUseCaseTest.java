@@ -315,6 +315,11 @@ class UpdateProductUseCaseTest {
     }
 
     @Override
+    public Optional<ProductSummary> updatePrice(UUID id, BigDecimal price) {
+      throw new UnsupportedOperationException("updatePrice não é usado por UpdateProduct");
+    }
+
+    @Override
     public Optional<ProductSummary> findByBarcode(String barcode) {
       throw new UnsupportedOperationException("findByBarcode não é usado por UpdateProduct");
     }

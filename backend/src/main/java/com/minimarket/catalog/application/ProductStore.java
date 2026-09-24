@@ -64,6 +64,13 @@ public interface ProductStore {
       BigDecimal minQuantity);
 
   /**
+   * Grava o preço do produto não deletado (passo 411) — cadastro, barcode e status não passam por
+   * aqui. Devolve a projeção já atualizada, com o {@code version} novo para o {@code If-Match}
+   * seguinte; vazio quando não existe produto não deletado com o id — o 404 é do caso de uso.
+   */
+  Optional<ProductSummary> updatePrice(UUID id, BigDecimal price);
+
+  /**
    * Soft delete: grava {@code deleted_at} e nada mais (o {@code active} é regra do caso de uso de
    * desativar/reativar) e libera o barcode para outro produto, como no índice único parcial. Id
    * desconhecido é no-op.

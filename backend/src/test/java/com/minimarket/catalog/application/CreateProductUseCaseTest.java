@@ -289,6 +289,11 @@ class CreateProductUseCaseTest {
     public void softDelete(UUID id) {
       throw new UnsupportedOperationException("softDelete não é usado por CreateProduct");
     }
+
+    @Override
+    public Optional<ProductSummary> updatePrice(UUID id, BigDecimal price) {
+      throw new UnsupportedOperationException("updatePrice não é usado por CreateProduct");
+    }
   }
 
   /**

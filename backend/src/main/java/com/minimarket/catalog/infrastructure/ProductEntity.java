@@ -118,6 +118,11 @@ public class ProductEntity {
     this.minQuantity = minQuantity;
   }
 
+  /** Preço novo do passo 411; cadastro, barcode e status não mudam por aqui. */
+  void updatePrice(BigDecimal price) {
+    this.price = price;
+  }
+
   void markDeleted(Instant deletedAt) {
     this.deletedAt = deletedAt;
   }

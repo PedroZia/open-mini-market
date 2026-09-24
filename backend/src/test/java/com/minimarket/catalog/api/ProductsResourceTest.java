@@ -34,9 +34,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Produtos na API: criação (passo 406), listagem com busca e filtros (passo 407), detalhe (passo
- * 408), bipe por código de barras (passo 409) e edição com {@code If-Match} (passo 410) contra
- * PostgreSQL real (Dev Services): as rotas de verdade, com o ADMIN da fixture e um OPERADOR criado
- * pelo caso de uso e autenticado por login real, como no {@code PermissionMatrixTest}.
+ * 408), bipe por código de barras (passo 409), edição com {@code If-Match} (passo 410) e alteração
+ * de preço auditada (passo 411) contra PostgreSQL real (Dev Services): as rotas de verdade, com o
+ * ADMIN da fixture e um OPERADOR criado pelo caso de uso e autenticado por login real, como no
+ * {@code PermissionMatrixTest}.
  *
  * <p>A listagem é semeada pela porta {@code ProductStore} (sem caso de uso nem auditoria, em
  * transação própria). O request HTTP commita: o {@link #removeRowsCreatedByThisTest()} apaga ao fim
@@ -788,6 +789,118 @@ class ProductsResourceTest extends IntegrationTestBase {
     assertThat(event.afterMinQuantity()).isEqualTo("2.500");
   }
 
+  @Test
+  @DisplayName(
+      "PATCH /api/v1/products/{id}/price muda o preço e grava PRODUCT_PRICE_CHANGED com motivo")
+  void changesPriceAndAudits() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null, STORED_BARCODE);
+
+    Response response = patchPrice(adminToken(), id, priceBody("19.99", "promoção do dia"));
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.contentType()).contains("application/json");
+
+    Map<String, Object> json = response.jsonPath().getMap("$");
+    assertThat(json)
+        .as("contrato: nem storeId nem deletedAt vazam")
+        .containsOnlyKeys(
+            "id",
+            "name",
+            "barcode",
+            "description",
+            "categoryId",
+            "unit",
+            "price",
+            "minQuantity",
+            "active",
+            "version",
+            "createdAt",
+            "updatedAt");
+    assertThat(number(json.get("price"))).isEqualByComparingTo("19.99");
+    assertThat(json.get("version")).as("lock otimista avançou").isEqualTo(1);
+    assertThat(json.get("barcode")).as("o preço não mexe no cadastro").isEqualTo(STORED_BARCODE);
+    assertThat(json.get("name")).isEqualTo(name("Arroz 5kg"));
+    assertThat(json.get("active")).isEqualTo(true);
+    assertThat(storedPrice(id)).as("o banco guardou o preço novo").isEqualTo("19.99");
+
+    PriceEvent event = priceEventOf(id);
+    assertThat(event.entityType()).isEqualTo("PRODUCT");
+    assertThat(event.source())
+        .as("evento da requisição autenticada, não de sistema")
+        .isNotEqualTo("SYSTEM");
+    assertThat(event.actorUsername()).isEqualTo(TestAdmin.USERNAME);
+    assertThat(event.reason()).isEqualTo("promoção do dia");
+    assertThat(event.beforePrice()).isEqualTo("24.90");
+    assertThat(event.afterPrice()).isEqualTo("19.99");
+  }
+
+  @Test
+  @DisplayName("OPERADOR não altera preço: 403 ACCESS_DENIED citando price.write, sem gravar nada")
+  void deniesOperatorOnPriceChange() throws SQLException {
+    String username = "produtos.preco.operador." + SUFFIX;
+    createUser(username, OPERATOR_ROLE);
+    String token = login(username);
+    UUID id = seedProduct("Café 500g", "18.90", null);
+
+    Response response = patchPrice(token, id, priceBody("17.90", "promoção"));
+
+    assertThat(response.statusCode()).isEqualTo(403);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("ACCESS_DENIED");
+    assertThat(response.jsonPath().getString("detail")).contains("price.write");
+    assertThat(storedPrice(id)).as("o 403 barra antes do caso de uso").isEqualTo("18.90");
+    assertThat(priceEventCount(id)).as("o 403 não audita").isZero();
+  }
+
+  @Test
+  @DisplayName("PATCH de preço sem motivo, com motivo em branco ou preço negativo responde 400")
+  void rejectsInvalidPriceChangeShape() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+
+    assertPriceChangeInvalid(id, "{\"price\": 19.99}", "reason");
+    assertPriceChangeInvalid(id, "{\"price\": 19.99, \"reason\": \"   \"}", "reason");
+    assertPriceChangeInvalid(id, "{\"price\": -0.01, \"reason\": \"promoção\"}", "price");
+
+    assertThat(storedPrice(id)).as("o 400 não altera o preço").isEqualTo("24.90");
+    assertThat(priceEventCount(id)).as("o 400 não audita").isZero();
+  }
+
+  @Test
+  @DisplayName("PATCH de preço de produto inexistente, desativado ou soft-deletado responde 404")
+  void hidesUnknownInactiveAndDeletedFromPriceChange() throws SQLException {
+    UUID inactive = seedProduct("Detergente 500ml", "3.79", null);
+    setActiveDirectly(inactive, false);
+    UUID deleted = seedProduct("Café 500g", "18.90", null);
+    softDeleteViaPort(deleted);
+
+    for (UUID id : List.of(UUID.randomUUID(), inactive, deleted)) {
+      Response response = patchPrice(adminToken(), id, priceBody("1.00", "promoção"));
+
+      assertThat(response.statusCode()).as("produto %s", id).isEqualTo(404);
+      assertThat(response.contentType()).contains("application/problem+json");
+      assertThat(response.jsonPath().getString("code")).isEqualTo("PRODUCT_NOT_FOUND");
+      assertThat(priceEventCount(id)).as("o 404 não audita").isZero();
+    }
+
+    assertThat(storedPrice(deleted)).as("o 404 não altera o preço").isEqualTo("18.90");
+  }
+
+  @Test
+  @DisplayName("preço igual ao atual é no-op: 200 com o produto e sem evento novo de auditoria")
+  void keepsPriceWhenUnchanged() throws SQLException {
+    UUID id = seedProduct("Arroz 5kg", "24.90", null);
+
+    // 24.9 e 24.90 são o mesmo preço: a normalização em escala 2 não pode inventar um reajuste.
+    Response response = patchPrice(adminToken(), id, priceBody("24.9", "reajuste sem efeito"));
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    Map<String, Object> json = response.jsonPath().getMap("$");
+    assertThat(number(json.get("price"))).isEqualByComparingTo("24.90");
+    assertThat(json.get("version")).as("o no-op não toca na linha").isEqualTo(0);
+    assertThat(storedPrice(id)).isEqualTo("24.90");
+    assertThat(priceEventCount(id)).as("o no-op não inventa evento").isZero();
+  }
+
   /**
    * O request HTTP commita: some ao fim de cada teste o que esta classe criou — os eventos de
    * auditoria (do OPERADOR e os que apontam para os produtos criados) antes das sessões, do usuário
@@ -910,6 +1023,36 @@ class ProductsResourceTest extends IntegrationTestBase {
       request = request.header("If-Match", ifMatch);
     }
     return request.when().put(PATH + "/" + id).then().extract().response();
+  }
+
+  /** PATCH da alteração de preço (passo 411) com o token e o corpo JSON informados. */
+  private static Response patchPrice(String token, UUID id, String body) {
+    return given()
+        .header(AUTHORIZATION, "Bearer " + token)
+        .contentType("application/json")
+        .body(body)
+        .when()
+        .patch(PATH + "/" + id + "/price")
+        .then()
+        .extract()
+        .response();
+  }
+
+  /** Corpo do PATCH de preço com o preço e o motivo informados. */
+  private static String priceBody(String price, String reason) {
+    return "{\"price\": %s, \"reason\": \"%s\"}".formatted(price, reason);
+  }
+
+  /** O 400 padrão da bean validation no PATCH de preço: campo apontado em {@code errors[]}. */
+  private void assertPriceChangeInvalid(UUID id, String body, String field) {
+    Response response = patchPrice(adminToken(), id, body);
+
+    assertThat(response.statusCode()).as("corpo %s", body).isEqualTo(400);
+    assertThat(response.contentType()).contains("application/problem+json");
+    assertThat(response.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR");
+    assertThat(response.jsonPath().getList("errors.field", String.class))
+        .as("campo apontado")
+        .contains(field);
   }
 
   /**
@@ -1134,6 +1277,22 @@ class ProductsResourceTest extends IntegrationTestBase {
   }
 
   /**
+   * Preço do produto no banco, no formato textual do numeric(14,2); falha se a linha não existe.
+   */
+  private String storedPrice(UUID id) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select price::text as price from products where id = ?::uuid")) {
+      statement.setString(1, id.toString());
+      try (ResultSet resultSet = statement.executeQuery()) {
+        assertThat(resultSet.next()).as("produto %s gravado", id).isTrue();
+        return resultSet.getString("price");
+      }
+    }
+  }
+
+  /**
    * Evento {@code PRODUCT_UPDATED} do produto, com o antes/depois extraído do jsonb por chave;
    * falha se houver zero ou mais de um evento para o alvo.
    */
@@ -1177,6 +1336,51 @@ class ProductsResourceTest extends IntegrationTestBase {
     }
   }
 
+  /**
+   * Evento {@code PRODUCT_PRICE_CHANGED} do produto, com o antes/depois extraído do jsonb por
+   * chave; falha se houver zero ou mais de um evento para o alvo.
+   */
+  private PriceEvent priceEventOf(UUID id) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select entity_type, source, actor_username, reason,"
+                    + " details->'before'->>'price' as before_price,"
+                    + " details->'after'->>'price' as after_price"
+                    + " from audit_events where action = 'PRODUCT_PRICE_CHANGED'"
+                    + " and entity_id = ?::uuid")) {
+      statement.setString(1, id.toString());
+      try (ResultSet resultSet = statement.executeQuery()) {
+        assertThat(resultSet.next()).as("evento PRODUCT_PRICE_CHANGED do produto %s", id).isTrue();
+        PriceEvent event =
+            new PriceEvent(
+                resultSet.getString("entity_type"),
+                resultSet.getString("source"),
+                resultSet.getString("actor_username"),
+                resultSet.getString("reason"),
+                resultSet.getString("before_price"),
+                resultSet.getString("after_price"));
+        assertThat(resultSet.next()).as("uma alteração, um evento").isFalse();
+        return event;
+      }
+    }
+  }
+
+  /** Quantos eventos {@code PRODUCT_PRICE_CHANGED} o produto tem; o no-op e os 4xx exigem zero. */
+  private int priceEventCount(UUID id) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select count(*) from audit_events where action = 'PRODUCT_PRICE_CHANGED'"
+                    + " and entity_id = ?::uuid")) {
+      statement.setString(1, id.toString());
+      try (ResultSet resultSet = statement.executeQuery()) {
+        resultSet.next();
+        return resultSet.getInt(1);
+      }
+    }
+  }
+
   /** Quantos produtos vivos existem com o barcode informado; o 409 e o 403 não podem criar. */
   private int countActiveByBarcode(String barcode) throws SQLException {
     try (Connection connection = dataSource.getConnection();
@@ -1203,6 +1407,15 @@ class ProductsResourceTest extends IntegrationTestBase {
 
   /** Linha de {@code products} como o banco a guardou; preço no formato textual do numeric. */
   private record StoredProduct(String barcode, String price, boolean active) {}
+
+  /** Linha de {@code audit_events} do {@code PRODUCT_PRICE_CHANGED} com o antes/depois extraído. */
+  private record PriceEvent(
+      String entityType,
+      String source,
+      String actorUsername,
+      String reason,
+      String beforePrice,
+      String afterPrice) {}
 
   /** Linha de {@code audit_events} do {@code PRODUCT_UPDATED} com o antes/depois já extraído. */
   private record UpdateEvent(

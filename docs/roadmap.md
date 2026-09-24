@@ -433,7 +433,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** 200 com version correta; 409 `CONCURRENT_MODIFICATION` com version antiga; 428 se `If-Match` ausente (ou 400, conforme padrão adotado).
   **Commit:** `feat(catalog): permite editar produto com lock otimista`
 
-- [ ] **411 — Alteração de preço auditada**
+- [x] **411 — Alteração de preço auditada**
   **Objetivo:** preço muda com rastro. **Depende:** 410
   **Implementar:** `PATCH /products/{id}/price` com `{price, reason}`; permissão `price.write`; auditoria `PRODUCT_PRICE_CHANGED` com `before`/`after`.
   **Testes/aceite:** 200 muda preço e registra auditoria; OPERADOR recebe 403; motivo obrigatório.
