@@ -461,9 +461,9 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 5 — Clientes
 
-- [ ] **501 — Migration `customers`**
+- [x] **501 — Migration `customers`**
   **Objetivo:** cadastro de clientes. **Depende:** 004
-  **Implementar:** `V9__customers.sql` (§5.3) com índice único parcial de `tax_id`.
+  **Implementar:** `V10__customers.sql` (§5.3) com índice único parcial de `tax_id`.
   **Testes/aceite:** migration aplica; CPF duplicado ativo falha.
   **Commit:** `feat(customers): cria tabela de clientes`
 
