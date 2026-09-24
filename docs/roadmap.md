@@ -889,7 +889,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes com servidor fake: sucesso, 401, 409 com `code`, timeout, retry de GET e **não** retry de POST.
   **Commit:** `feat(tui): adiciona client de API tipado`
 
-- [ ] **1103 — Núcleo da TUI: máquina de estados**
+- [x] **1103 — Núcleo da TUI: máquina de estados**
   **Objetivo:** lógica pura e testável. **Depende:** 1101
   **Implementar:** `core/state.ts` (união discriminada: `Login`, `OpeningCash`, `SaleOpen`, `Paying`, `ClosingCash`, `Error`) + `core/reducer.ts` (transições puras a partir de ações: bipe, tecla, resposta da API).
   **Testes/aceite:** 15+ testes unitários das transições, sem renderização.

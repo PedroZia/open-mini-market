@@ -2,7 +2,7 @@ import { Box, Text, useApp, useInput } from 'ink';
 
 /**
  * Tela inicial da TUI. Só exibe o "hello" da fase 11 e encerra com `q`;
- * a máquina de estados entra no passo 1103.
+ * a máquina de estados vive em `core/state.ts` + `core/reducer.ts` e é usada pelas telas daqui em diante.
  */
 export function App() {
   const { exit } = useApp();
