@@ -369,6 +369,11 @@ class AddSaleItemUseCaseTest {
     }
 
     @Override
+    public Optional<ProductSummary> findByInternalCode(String internalCode) {
+      throw new UnsupportedOperationException("findByInternalCode não é usado por AddSaleItem");
+    }
+
+    @Override
     public Optional<ProductSummary> findById(UUID id) {
       return Optional.ofNullable(byId).filter(product -> product.id().equals(id));
     }

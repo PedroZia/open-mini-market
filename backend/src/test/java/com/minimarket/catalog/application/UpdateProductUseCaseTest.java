@@ -330,6 +330,11 @@ class UpdateProductUseCaseTest {
     }
 
     @Override
+    public Optional<ProductSummary> findByInternalCode(String internalCode) {
+      throw new UnsupportedOperationException("findByInternalCode não é usado por UpdateProduct");
+    }
+
+    @Override
     public List<ProductSummary> search(
         String search,
         UUID categoryId,

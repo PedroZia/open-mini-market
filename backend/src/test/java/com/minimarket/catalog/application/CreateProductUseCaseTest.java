@@ -9,6 +9,7 @@ import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.NotFoundException;
+import com.minimarket.shared.domain.ScaleEmbeddedField;
 import com.minimarket.shared.domain.Store;
 import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
@@ -258,6 +259,11 @@ class CreateProductUseCaseTest {
     }
 
     @Override
+    public Optional<ProductSummary> findByInternalCode(String internalCode) {
+      throw new UnsupportedOperationException("findByInternalCode não é usado por CreateProduct");
+    }
+
+    @Override
     public List<ProductSummary> search(
         String search,
         UUID categoryId,
@@ -375,7 +381,17 @@ class CreateProductUseCaseTest {
     @Override
     public Optional<Store> findByCode(String code) {
       return STORE_CODE.equals(code)
-          ? Optional.of(new Store(storeId, STORE_CODE, "Matriz", false, new BigDecimal("10.00")))
+          ? Optional.of(
+              new Store(
+                  storeId,
+                  STORE_CODE,
+                  "Matriz",
+                  false,
+                  new BigDecimal("10.00"),
+                  "2",
+                  5,
+                  ScaleEmbeddedField.WEIGHT,
+                  3))
           : Optional.empty();
     }
 

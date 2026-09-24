@@ -13,6 +13,7 @@ import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.FieldValidationException;
 import com.minimarket.shared.domain.OperationSource;
+import com.minimarket.shared.domain.ScaleEmbeddedField;
 import com.minimarket.shared.domain.Store;
 import com.minimarket.users.application.NewUser;
 import com.minimarket.users.application.PasswordHasher;
@@ -719,7 +720,17 @@ class LoginUseCaseTest {
 
     @Override
     public Optional<Store> findByCode(String code) {
-      return Optional.of(new Store(STORE_ID, code, "Loja " + code, false, BigDecimal.ZERO));
+      return Optional.of(
+          new Store(
+              STORE_ID,
+              code,
+              "Loja " + code,
+              false,
+              BigDecimal.ZERO,
+              "2",
+              5,
+              ScaleEmbeddedField.WEIGHT,
+              3));
     }
 
     @Override

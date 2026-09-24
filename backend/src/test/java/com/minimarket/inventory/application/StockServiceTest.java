@@ -7,6 +7,7 @@ import com.minimarket.inventory.domain.StockMovementType;
 import com.minimarket.shared.application.StoreLookup;
 import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ErrorCode;
+import com.minimarket.shared.domain.ScaleEmbeddedField;
 import com.minimarket.shared.domain.Store;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -320,7 +321,17 @@ class StockServiceTest {
       if (missing) {
         return Optional.empty();
       }
-      return Optional.of(new Store(STORE_ID, code, "Matriz", allowNegativeStock, null));
+      return Optional.of(
+          new Store(
+              STORE_ID,
+              code,
+              "Matriz",
+              allowNegativeStock,
+              null,
+              "2",
+              5,
+              ScaleEmbeddedField.WEIGHT,
+              3));
     }
 
     @Override

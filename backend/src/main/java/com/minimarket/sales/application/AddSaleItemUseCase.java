@@ -1,6 +1,7 @@
 package com.minimarket.sales.application;
 
 import com.minimarket.audit.application.AuditRecorder;
+import com.minimarket.catalog.application.BarcodeNormalizer;
 import com.minimarket.catalog.application.ProductStore;
 import com.minimarket.catalog.application.ProductSummary;
 import com.minimarket.sales.domain.Sale;
@@ -21,11 +22,11 @@ import java.util.UUID;
  * execução = uma transação (§2.2, regra 6): linha do item, totais da venda e evento saem juntos ou
  * não saem.
  *
- * <p>A resolução é do servidor (BR-14): o barcode chega bruto e passa pela <em>mesma</em>
- * normalização do bipe (passo 409) — trim e sem espaços internos, que o leitor às vezes insere — e
- * vai à porta {@link ProductStore#findByBarcode}, que não enxerga o soft-deletado. Sem barcode, o
- * produto vem do id ({@link ProductStore#findById}, que enxerga o soft-deletado de propósito).
- * Código interno e etiqueta de balança ficam para o passo 1104b: aqui é só o código exato.
+ * <p>A resolução é do servidor (BR-14): o barcode chega bruto e passa pela normalização única do
+ * {@link BarcodeNormalizer} (passo 1104b1) — trim e sem espaços internos, que o leitor às vezes
+ * insere — e vai à porta {@link ProductStore#findByBarcode}, que não enxerga o soft-deletado. Sem
+ * barcode, o produto vem do id ({@link ProductStore#findById}, que enxerga o soft-deletado de
+ * propósito). Código interno e etiqueta de balança ficam para o 1104b3: aqui é só o código exato.
  *
  * <p>Produto inexistente — ou soft-deletado, que o barcode não alcança — é 404 {@code
  * PRODUCT_NOT_FOUND}, o mesmo do bipe. Produto <em>inativo</em> é 422 {@code PRODUCT_INACTIVE}: a
@@ -115,7 +116,7 @@ public class AddSaleItemUseCase {
    * digitada no leitor.
    */
   private ProductSummary resolveProduct(AddSaleItemCommand command) {
-    String barcode = normalizeBarcode(command.barcode());
+    String barcode = BarcodeNormalizer.normalize(command.barcode());
     if (barcode != null) {
       return productStore
           .findByBarcode(barcode)
@@ -139,19 +140,6 @@ public class AddSaleItemUseCase {
     }
     throw new BusinessException(
         ErrorCode.VALIDATION_ERROR, "código de barras ou id do produto é obrigatório");
-  }
-
-  /**
-   * Mesma regra do {@code CreateProductUseCase} (passo 405) e do bipe (passo 409): trim, todos os
-   * espaços internos fora e nulo quando em branco — barcode em branco é o mesmo que ausente, e aí o
-   * produto vem do id.
-   */
-  private static String normalizeBarcode(String barcode) {
-    if (barcode == null) {
-      return null;
-    }
-    String normalized = barcode.trim().replaceAll("\\s+", "");
-    return normalized.isEmpty() ? null : normalized;
   }
 
   /**

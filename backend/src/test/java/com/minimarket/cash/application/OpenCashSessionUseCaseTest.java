@@ -15,6 +15,7 @@ import com.minimarket.shared.domain.BusinessException;
 import com.minimarket.shared.domain.ConflictException;
 import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.NotFoundException;
+import com.minimarket.shared.domain.ScaleEmbeddedField;
 import com.minimarket.shared.domain.Store;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -453,7 +454,17 @@ class OpenCashSessionUseCaseTest {
     @Override
     public Optional<Store> findByCode(String code) {
       return STORE_CODE.equals(code)
-          ? Optional.of(new Store(STORE_ID, STORE_CODE, "Matriz", false, new BigDecimal("10.00")))
+          ? Optional.of(
+              new Store(
+                  STORE_ID,
+                  STORE_CODE,
+                  "Matriz",
+                  false,
+                  new BigDecimal("10.00"),
+                  "2",
+                  5,
+                  ScaleEmbeddedField.WEIGHT,
+                  3))
           : Optional.empty();
     }
 

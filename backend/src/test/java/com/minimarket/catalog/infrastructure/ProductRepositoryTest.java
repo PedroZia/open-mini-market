@@ -99,6 +99,32 @@ class ProductRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
+  @DisplayName(
+      "findByInternalCode devolve o produto vivo do código interno e ignora o soft-deletado")
+  void findsByInternalCode() {
+    UUID banana = insertWithInternalCode("Banana prata kg", "00042", "6.99");
+    insertWithInternalCode("Tomate kg", "00077", "9.90");
+
+    assertThat(productRepository.findByInternalCode("00042"))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.id()).isEqualTo(banana);
+              assertThat(found.internalCode()).isEqualTo("00042");
+              assertThat(found.unit()).isEqualTo("KG");
+            });
+    assertThat(productRepository.findByInternalCode("00077")).isPresent();
+    assertThat(productRepository.findByInternalCode("99999")).isEmpty();
+    assertThat(productRepository.findByInternalCode(null)).isEmpty();
+
+    productRepository.softDelete(banana);
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(productRepository.findByInternalCode("00042")).isEmpty();
+  }
+
+  @Test
+  @TestTransaction
   @DisplayName("search casa trecho do nome sem diferenciar maiúsculas e sem termo devolve tudo")
   void searchesByNameIgnoringCase() {
     insert("Arroz Integral 1kg", "7891000000017", "12.90", null);
@@ -435,6 +461,35 @@ class ProductRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
+  @DisplayName("soft delete libera o código interno: o produto novo com o mesmo PLU é aceito")
+  void allowsInternalCodeFreedBySoftDelete() {
+    UUID antigo = insertWithInternalCode("Banana prata kg", "00042", "6.99");
+    productRepository.softDelete(antigo);
+    entityManager.flush();
+    entityManager.clear();
+
+    UUID novo = insertWithInternalCode("Banana nanica kg", "00042", "5.99");
+
+    assertThat(productRepository.findByInternalCode("00042"))
+        .hasValueSatisfying(
+            found -> {
+              assertThat(found.id()).isEqualTo(novo);
+              assertThat(found.name()).isEqualTo("Banana nanica kg");
+            });
+  }
+
+  @Test
+  @TestTransaction
+  @DisplayName("código interno duplicado entre produtos vivos falha no índice único parcial")
+  void translatesDuplicateInternalCodeOnInsert() {
+    insertWithInternalCode("Banana prata kg", "00042", "6.99");
+
+    assertThatThrownBy(() -> insertWithInternalCode("Banana nanica kg", "00042", "5.99"))
+        .isInstanceOf(ConflictException.class);
+  }
+
+  @Test
+  @TestTransaction
   @DisplayName(
       "update de linha já alterada por outra transação vira ConflictException(CONCURRENT_MODIFICATION)")
   void translatesStaleVersionOnUpdate() {
@@ -475,6 +530,27 @@ class ProductRepositoryTest extends IntegrationTestBase {
   /** Insere com os defaults que o teste não varia: unidade UN e quantidade mínima nula. */
   private UUID insert(String name, String barcode, String price, UUID categoryId) {
     return insert(name, barcode, price, categoryId, "UN", null);
+  }
+
+  /**
+   * Insere com código interno (etiqueta de balança, passo 1104b1) e unidade KG — o cadastro pela
+   * API ainda não informa o campo, então o teste usa o {@link NewProduct} completo.
+   */
+  private UUID insertWithInternalCode(String name, String internalCode, String price) {
+    UUID id =
+        productRepository.insert(
+            new NewProduct(
+                storeId(),
+                name,
+                null,
+                internalCode,
+                "descrição de " + name,
+                null,
+                "KG",
+                new BigDecimal(price),
+                null));
+    entityManager.clear();
+    return id;
   }
 
   private UUID category(String name) {

@@ -32,6 +32,13 @@ public class ProductEntity {
   @Column(name = "barcode")
   private String barcode;
 
+  /**
+   * PLU da etiqueta de balança (passo 1104b1, BR-14); imutável como o {@code barcode} — não há
+   * método de update.
+   */
+  @Column(name = "internal_code")
+  private String internalCode;
+
   @Column(name = "name")
   private String name;
 
@@ -79,6 +86,7 @@ public class ProductEntity {
       UUID storeId,
       String name,
       String barcode,
+      String internalCode,
       String description,
       UUID categoryId,
       String unit,
@@ -87,6 +95,7 @@ public class ProductEntity {
     this.storeId = storeId;
     this.name = name;
     this.barcode = barcode;
+    this.internalCode = internalCode;
     this.description = description;
     this.categoryId = categoryId;
     this.unit = unit;
@@ -161,6 +170,10 @@ public class ProductEntity {
 
   public String getBarcode() {
     return barcode;
+  }
+
+  public String getInternalCode() {
+    return internalCode;
   }
 
   public String getName() {

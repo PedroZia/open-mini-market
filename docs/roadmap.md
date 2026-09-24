@@ -901,11 +901,23 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** rajada rápida vira um barcode; digitação lenta não; `ENTER` isolado não; `3*` + bipe resulta em quantidade 3.
   **Commit:** `feat(tui): adiciona captura de codigo de barras`
 
-- [ ] **1104b — Etiqueta de balança (backend + TUI)**
-  **Objetivo:** vender a granel com etiqueta impressa pela balança. **Depende:** 1104a, 413
-  **Implementar:** configuração por loja (`internal_barcode_prefix`, tamanho do código interno, campo embutido `WEIGHT`/`PRICE`, casas decimais) + coluna `internal_code` em `products` (migration aditiva); resolução e cálculo de quantidade **no servidor** (BR-14); TUI apenas envia a string bruta.
+- [x] **1104b1 — Configuração de balança, código interno e normalizador**
+  **Objetivo:** preparar persistência e leitura do código interno. **Depende:** 413
+  **Implementar:** `V21__scale_labels.sql`: parâmetros da etiqueta em `stores` (prefixo, tamanho do código interno, campo embutido `WEIGHT`/`PRICE` e casas decimais, com os defaults da MATRIZ) + `products.internal_code` com índice único parcial espelhando o `ux_products_barcode`; o campo em `Store`/`StoreEntity`/`StoreRepository.toDomain`, `ProductEntity`, `ProductSummary` e `NewProduct` (só o `insert`); porta `ProductStore.findByInternalCode` ignorando o soft-deletado; `catalog/application/BarcodeNormalizer` para a normalização duplicada de 405/409/808. O cadastro **não** informa o campo e a API de produtos **não** o expõe. Passo dividido do 1104b original (diff estimado acima de ~300 linhas); o restante é o 1104b2 e o 1104b3.
+  **Testes/aceite:** unitário do normalizador; integração de `findByInternalCode` (ignora o soft-deletado) e do índice único parcial (`internal_code` duplicado vivo falha; o soft delete libera); parâmetros da etiqueta lidos pela porta `StoreLookup`.
+  **Commit:** `feat(catalog): prepara cadastro e leitura do codigo interno`
+
+- [ ] **1104b2 — Parser puro da etiqueta de balança**
+  **Objetivo:** decodificar a etiqueta sem banco nem HTTP. **Depende:** 1104b1
+  **Implementar:** parser puro em `catalog/domain`: string bruta + parâmetros da loja → código interno e quantidade embutida (peso em kg ou preço total), sem resolver produto nem calcular total.
+  **Testes/aceite:** unitário puro das etiquetas de peso e de preço nas configurações da loja; etiqueta fora do formato recusada.
+  **Commit:** `feat(catalog): interpreta etiqueta de balanca`
+
+- [ ] **1104b3 — Etiqueta de balança no bipe e no item da venda**
+  **Objetivo:** vender a granel com etiqueta impressa pela balança. **Depende:** 1104b2, 1104a
+  **Implementar:** resolução e cálculo de quantidade **no servidor** (BR-14) no `GET /products/barcode/{barcode}` (devolve a `quantity` sugerida) e no `POST /sales/{id}/items` (etiqueta vira item em kg com o total correto); código inválido → 422 `INVALID_INTERNAL_BARCODE` (código novo em `ErrorCode`); TUI apenas envia a string bruta.
   **Testes/aceite:** etiqueta de peso gera item em kg com total correto; etiqueta de preço gera total igual ao embutido (tolerância R$ 0,01); código inválido → 422 `INVALID_INTERNAL_BARCODE`; testes com etiquetas reais das balanças da loja.
-  **Commit:** `feat(catalog): interpreta etiqueta de balanca no servidor`
+  **Commit:** `feat(sales): vende etiqueta de balanca no item da venda`
 
 - [ ] **1104c — Autoteste do leitor (F11)**
   **Objetivo:** diagnosticar o leitor sem chamar suporte técnico. **Depende:** 1104a

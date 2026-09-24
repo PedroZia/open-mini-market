@@ -39,6 +39,7 @@ class ProductsMigrationTest extends IntegrationTestBase {
                 "id",
                 "store_id",
                 "barcode",
+                "internal_code",
                 "sku",
                 "name",
                 "description",
@@ -63,6 +64,12 @@ class ProductsMigrationTest extends IntegrationTestBase {
         .contains("(store_id, barcode)")
         .contains("deleted_at IS NULL")
         .contains("barcode IS NOT NULL");
+    assertThat(indexDefinition("ux_products_internal_code"))
+        .as("índice único do código interno (V21), espelho do de barcode")
+        .contains("UNIQUE")
+        .contains("(store_id, internal_code)")
+        .contains("deleted_at IS NULL")
+        .contains("internal_code IS NOT NULL");
     assertThat(indexDefinition("ix_products_store_active"))
         .as("índice de listagem por loja/ativo")
         .contains("(store_id, active)");

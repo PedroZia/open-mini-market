@@ -26,8 +26,8 @@ import org.hibernate.exception.ConstraintViolationException;
  *
  * <p>{@link #findById} devolve também produto soft-deletado — quem decide o que fazer com {@code
  * deletedAt} é o caso de uso (o passo 412 precisa reativar o registro); {@link #findByBarcode},
- * {@link #search}, {@link #update}, {@link #updatePrice}, {@link #updateCostPrice} e {@link
- * #existsActiveBarcode} sempre ignoram deletados.
+ * {@link #findByInternalCode}, {@link #search}, {@link #update}, {@link #updatePrice}, {@link
+ * #updateCostPrice} e {@link #existsActiveBarcode} sempre ignoram deletados.
  *
  * <p>Implementa a porta {@link ProductStore}: é por ela que {@code application} grava produto sem
  * tocar em JPA.
@@ -48,6 +48,7 @@ public class ProductRepository implements ProductStore {
             product.storeId(),
             product.name(),
             product.barcode(),
+            product.internalCode(),
             product.description(),
             product.categoryId(),
             product.unit(),
@@ -74,6 +75,21 @@ public class ProductRepository implements ProductStore {
                 "select p from ProductEntity p where p.barcode = :barcode and p.deletedAt is null",
                 ProductEntity.class)
             .setParameter("barcode", barcode)
+            .setMaxResults(1)
+            .getResultList();
+    return found.stream().findFirst().map(ProductRepository::toSummary);
+  }
+
+  /** {@inheritDoc} */
+  @Override
+  public Optional<ProductSummary> findByInternalCode(String internalCode) {
+    List<ProductEntity> found =
+        entityManager
+            .createQuery(
+                "select p from ProductEntity p where p.internalCode = :internalCode and p.deletedAt"
+                    + " is null",
+                ProductEntity.class)
+            .setParameter("internalCode", internalCode)
             .setMaxResults(1)
             .getResultList();
     return found.stream().findFirst().map(ProductRepository::toSummary);
@@ -269,10 +285,12 @@ public class ProductRepository implements ProductStore {
    * request pode gravar o mesmo barcode. O flush antecipado (no {@code insert} e também no {@code
    * update}, que compartilha a tabela) faz a violação do índice único parcial {@code
    * ux_products_barcode} aparecer aqui e virar {@link ConflictException} com o mesmo código do
-   * caminho comum — o backstop do banco nunca responde 500. {@code products} só tem esse índice
-   * único além da chave primária (o id é UUIDv7 gerado na aplicação), então SQLState 23505 aqui só
-   * pode ser barcode duplicado entre produtos vivos; qualquer outra falha de persistência sobe como
-   * está.
+   * caminho comum — o backstop do banco nunca responde 500. {@code products} só tem índices únicos
+   * sobre código de barras — {@code ux_products_barcode} e o {@code ux_products_internal_code} do
+   * passo 1104b1, que o cliente enxerga como o mesmo conflito (o código interno é o código de
+   * barras que a balança imprime, BR-14) — além da chave primária (o id é UUIDv7 gerado na
+   * aplicação), então SQLState 23505 aqui só pode ser código duplicado entre produtos vivos;
+   * qualquer outra falha de persistência sobe como está.
    *
    * <p>O mesmo flush é o backstop do lock otimista do {@code update}: o Hibernate sinaliza a versão
    * vencida (o {@code where version = ?} não achou a linha) e o stale vira o 409 {@code
@@ -356,6 +374,7 @@ public class ProductRepository implements ProductStore {
         entity.getId(),
         entity.getStoreId(),
         entity.getBarcode(),
+        entity.getInternalCode(),
         entity.getName(),
         entity.getDescription(),
         entity.getCategoryId(),

@@ -29,6 +29,14 @@ public interface ProductStore {
   Optional<ProductSummary> findByBarcode(String barcode);
 
   /**
+   * Produto não deletado pelo código interno (PLU da etiqueta de balança, passo 1104b1, BR-14).
+   * Mesmo contrato de {@link #findByBarcode}: só produto vivo, sem filtro de loja — o índice único
+   * parcial {@code ux_products_internal_code} é {@code (store_id, internal_code)} e o MVP tem loja
+   * única (§5.3).
+   */
+  Optional<ProductSummary> findByInternalCode(String internalCode);
+
+  /**
    * Página de produtos não deletados (soft-deletado nunca aparece) com filtro textual em {@code
    * name} sem diferenciar maiúsculas ({@code search} em branco = sem filtro), filtro de categoria e
    * de status ({@code null} = sem filtro). {@code sort} é a whitelist já resolvida pelo caso de uso

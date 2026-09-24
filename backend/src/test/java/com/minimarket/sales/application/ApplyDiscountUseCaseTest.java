@@ -12,6 +12,7 @@ import com.minimarket.shared.domain.ErrorCode;
 import com.minimarket.shared.domain.ForbiddenException;
 import com.minimarket.shared.domain.NotFoundException;
 import com.minimarket.shared.domain.Permission;
+import com.minimarket.shared.domain.ScaleEmbeddedField;
 import com.minimarket.shared.domain.Store;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -472,7 +473,16 @@ class ApplyDiscountUseCaseTest {
 
   /** Loja do cenário com o limite de desconto informado. */
   private static Store store(String maxDiscountPercent) {
-    return new Store(STORE_ID, STORE_CODE, "Minimercado", true, new BigDecimal(maxDiscountPercent));
+    return new Store(
+        STORE_ID,
+        STORE_CODE,
+        "Minimercado",
+        true,
+        new BigDecimal(maxDiscountPercent),
+        "2",
+        5,
+        ScaleEmbeddedField.WEIGHT,
+        3);
   }
 
   /**

@@ -41,6 +41,10 @@ public class StoreRepository implements StoreLookup {
         entity.getCode(),
         entity.getName(),
         entity.isAllowNegativeStock(),
-        entity.getMaxDiscountPercent());
+        entity.getMaxDiscountPercent(),
+        entity.getInternalBarcodePrefix(),
+        entity.getInternalCodeLength(),
+        entity.getScaleEmbeddedField(),
+        entity.getScaleEmbeddedDecimals());
   }
 }

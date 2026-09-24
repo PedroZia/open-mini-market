@@ -18,11 +18,11 @@ import java.util.UUID;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
- * Cria produto (passo 405): normaliza o barcode, exige preço não negativo, unidade da whitelist
- * {@code UN}/{@code KG} e categoria existente quando informada, e recusa barcode já usado por
- * produto vivo. Uma execução = uma transação (§2.2, regra 6): as checagens e o insert vivem juntos,
- * e o adaptador ainda traduz o 23505 do índice único como backstop caso outra requisição grave o
- * mesmo barcode no meio do caminho.
+ * Cria produto (passo 405): normaliza o barcode pela regra única do {@link BarcodeNormalizer},
+ * exige preço não negativo, unidade da whitelist {@code UN}/{@code KG} e categoria existente quando
+ * informada, e recusa barcode já usado por produto vivo. Uma execução = uma transação (§2.2, regra
+ * 6): as checagens e o insert vivem juntos, e o adaptador ainda traduz o 23505 do índice único como
+ * backstop caso outra requisição grave o mesmo barcode no meio do caminho.
  *
  * <p>A loja não vem do cliente: é a configurada ({@code minimarket.store.default-code}), como no
  * {@code GetMetaUseCase} — o MVP tem loja única (§5.3). O produto nasce ativo e sem {@code
@@ -67,7 +67,7 @@ public class CreateProductUseCase {
    */
   @Transactional
   public CreateProductResult execute(CreateProductCommand command) {
-    String barcode = normalizeBarcode(command.barcode());
+    String barcode = BarcodeNormalizer.normalize(command.barcode());
     BigDecimal price = requireValidPrice(command.price());
     String unit = requireValidUnit(command.unit());
     requireExistingCategory(command.categoryId());
@@ -101,19 +101,6 @@ public class CreateProductUseCase {
         .orElseThrow(
             () ->
                 new IllegalStateException("produto %s não encontrado após o insert".formatted(id)));
-  }
-
-  /**
-   * O barcode é a string crua do cliente: passa por trim, perde todos os espaços internos (o leitor
-   * às vezes insere separador) e vira nulo quando em branco — produto sem código é permitido, como
-   * no índice único parcial.
-   */
-  private static String normalizeBarcode(String barcode) {
-    if (barcode == null) {
-      return null;
-    }
-    String normalized = barcode.trim().replaceAll("\\s+", "");
-    return normalized.isEmpty() ? null : normalized;
   }
 
   /** Dinheiro entra com duas casas (§4.4), arredondando como as contas de venda. */

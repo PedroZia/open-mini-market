@@ -233,6 +233,12 @@ class ChangeProductPriceUseCaseTest {
     }
 
     @Override
+    public Optional<ProductSummary> findByInternalCode(String internalCode) {
+      throw new UnsupportedOperationException(
+          "findByInternalCode não é usado por ChangeProductPrice");
+    }
+
+    @Override
     public List<ProductSummary> search(
         String search,
         UUID categoryId,
