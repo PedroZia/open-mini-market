@@ -525,7 +525,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** migration aplica do zero (colunas + PK + índice); repositório: round-trip (inclusive corpo `null` em jsonb) e chave repetida → `ConflictException`; guard unitário sem Quarkus: sem header → 400, primeira chamada grava e devolve a ação, replay não roda a ação, hash/usuário divergente → 409, corrida perdida no record → replay do vencedor.
   **Commit:** `feat(shared): adiciona idempotencia de requisicoes`
 
-- [ ] **607 — API `POST /api/v1/cash-registers/{id}/open`**
+- [x] **607 — API `POST /api/v1/cash-registers/{id}/open`**
   **Objetivo:** abrir caixa pela API. **Depende:** 606
   **Implementar:** endpoint idempotente + resposta com sessão criada; vínculo da sessão autenticada ao caixa (atualiza `auth_sessions.cash_register_id`).
   **Testes/aceite:** 201; 409 já aberto; 403 sem `cash.open`; repetir com mesma `Idempotency-Key` devolve a mesma sessão.
