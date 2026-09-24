@@ -771,7 +771,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** conclusão move estoque e caixa corretamente; pagamento insuficiente → 422 `PAYMENT_INSUFFICIENT`; concluir duas vezes → 409/replay; rollback total quando qualquer item falha.
   **Commit:** `feat(sales): conclui venda com baixa de estoque e caixa`
 
-- [ ] **907 — API `POST /api/v1/sales/{id}/complete`**
+- [x] **907 — API `POST /api/v1/sales/{id}/complete`**
   **Objetivo:** concluir pela API. **Depende:** 906
   **Implementar:** endpoint idempotente com resposta completa (totais, troco, número).
   **Testes/aceite:** 200; replay devolve a mesma resposta com `Idempotency-Replayed: true` e **sem** segunda baixa de estoque (assertar saldo).

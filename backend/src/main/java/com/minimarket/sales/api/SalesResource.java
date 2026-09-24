@@ -13,6 +13,8 @@ import com.minimarket.sales.application.CancelSaleCommand;
 import com.minimarket.sales.application.CancelSaleUseCase;
 import com.minimarket.sales.application.ChangeSaleItemQuantityCommand;
 import com.minimarket.sales.application.ChangeSaleItemQuantityUseCase;
+import com.minimarket.sales.application.CompleteSaleCommand;
+import com.minimarket.sales.application.CompleteSaleUseCase;
 import com.minimarket.sales.application.CreateSaleCommand;
 import com.minimarket.sales.application.CreateSaleUseCase;
 import com.minimarket.sales.application.GetSaleCommand;
@@ -133,6 +135,16 @@ import java.util.UUID;
  * critério da abertura. O {@code POST} é idempotente por contrato (§8) e o {@code DELETE} não pede
  * {@code Idempotency-Key} — o §8 não lista {@code DELETE} —, mas repetir o cancelamento é no-op de
  * estado (200, sem evento), como remover desconto sem desconto.
+ *
+ * <p>A conclusão (passo 907) é o {@code POST /sales/{id}/complete}: exige {@code sale.complete} e o
+ * header {@code Idempotency-Key} (§8) e devolve <strong>200</strong> com o mesmo {@link
+ * SaleDetailResponse} das demais operações — agora com status {@code COMPLETED}, {@code
+ * completedAt}, número, totais, troco e os pagamentos que fecharam a conta. É transição de estado,
+ * como o cancelamento, e não criação: 200 sem {@code Location} e <em>sem corpo de requisição</em> —
+ * caixa e operador saem do {@code OperationContext} (BR-11) e o instante, do caso de uso —, e o
+ * passo 906 recusa com 422 {@code PAYMENT_INSUFFICIENT} enquanto o pagamento não cobrir o total
+ * (BR-05). Chave nova na venda já concluída é no-op (200, sem segundo movimento de estoque, de
+ * caixa ou evento): o caso de uso devolve a venda como está e o replay do mesmo gesto é do guard.
  */
 @Path(SalesResource.PATH)
 public class SalesResource {
@@ -165,6 +177,9 @@ public class SalesResource {
 
   /** Cancelamento da venda aberta (passo 813): a rota que o expõe nasce neste passo. */
   @Inject CancelSaleUseCase cancelSaleUseCase;
+
+  /** Conclusão da venda (passo 906): a rota que a expõe nasce neste passo. */
+  @Inject CompleteSaleUseCase completeSaleUseCase;
 
   /** Registro do pagamento (passo 904): a rota que o expõe nasce no 905. */
   @Inject AddPaymentUseCase addPaymentUseCase;
@@ -501,6 +516,52 @@ public class SalesResource {
         cancelPaymentUseCase.execute(
             new CancelPaymentCommand(id, operationContext.cashRegisterId(), paymentId));
     return toDetailResponse(sale);
+  }
+
+  /**
+   * Conclui a venda aberta e paga do caixa da sessão (passo 907) e devolve <strong>200</strong> com
+   * a venda como ela ficou: status {@code COMPLETED}, {@code completedAt}, número, totais, troco e
+   * os pagamentos que fecharam a conta — o mesmo {@link SaleDetailResponse} das demais operações.
+   * Os efeitos da conclusão (baixa de estoque e dinheiro no caixa) são do caso de uso do 906, na
+   * mesma transação da auditoria; a API não antecipa nenhuma checagem.
+   *
+   * <p>Exige {@code sale.complete} (BR-04/§4.5): sem a permissão o interceptor do {@code
+   * RequirePermission} responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar, e o
+   * OPERADOR tem a permissão — é ele quem fecha a venda no PDV. A posse é da guarda do caso de uso
+   * (BR-11, §9.4): venda de outro caixa é 403 {@code ACCESS_DENIED} e venda inexistente, 404 {@code
+   * SALE_NOT_FOUND}.
+   *
+   * <p>É operação de dinheiro/estoque idempotente por contrato (§8): o {@link IdempotencyGuard}
+   * exige o header {@code Idempotency-Key} (sem ele, 400 {@code IDEMPOTENCY_KEY_REQUIRED}) e o
+   * retry com a mesma chave devolve a resposta gravada com {@code Idempotency-Replayed: true}, sem
+   * uma segunda baixa de estoque nem um segundo movimento de caixa. Chave <em>nova</em> na venda já
+   * concluída também é 200: o caso de uso trata o estado como no-op (sem movimento e sem evento).
+   * Sem corpo de requisição: caixa e operador saem do {@code OperationContext}, nunca do cliente
+   * (BR-11), como na abertura — por isso a rota não declara {@code @Consumes}.
+   *
+   * <p>Venda cancelada é 409 {@code SALE_NOT_OPEN}; sem pagamento cobrindo o total é 422 {@code
+   * PAYMENT_INSUFFICIENT} (BR-05); sessão de caixa da venda fechada é 409 {@code
+   * CASH_SESSION_REQUIRED} e o item sem saldo (loja sem negativo) é 422 {@code INSUFFICIENT_STOCK}
+   * — todos do caso de uso, que derruba a transação inteira.
+   */
+  @POST
+  @Path("/{id}/complete")
+  @RequirePermission(Permission.SALE_COMPLETE)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response complete(
+      @PathParam("id") UUID id, @HeaderParam(IdempotencyGuard.KEY_HEADER) String idempotencyKey) {
+    return idempotencyGuard.execute(
+        idempotencyKey,
+        HttpMethod.POST,
+        PATH + "/" + id + "/complete",
+        null,
+        () -> Response.ok(toDetailResponse(completeSale(id))).build());
+  }
+
+  /** Ação idempotente: conclui a venda e monta o 200 com a venda como ela ficou. */
+  private Sale completeSale(UUID id) {
+    return completeSaleUseCase.execute(
+        new CompleteSaleCommand(id, operationContext.cashRegisterId(), operationContext.userId()));
   }
 
   /**
