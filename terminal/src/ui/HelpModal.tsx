@@ -6,8 +6,8 @@ import { Box, Text } from 'ink';
  * shell fecha, voltando para a venda exatamente como estava.
  *
  * A tela não age sobre nada: é o mesmo mapa que `core/keys` resolve para a tela de venda, com uma
- * linha do que cada tecla faz ali. O F12 entra aqui mesmo antes de o fluxo existir (1118), porque é
- * a tecla que a barra de status anuncia; TAB fica de fora porque é dos formulários, não da venda.
+ * linha do que cada tecla faz ali. O F12 entra aqui porque é a tecla que a barra de status anuncia;
+ * TAB fica de fora porque é dos formulários, não da venda.
  */
 
 /** Uma linha do mapa: a tecla como o teclado a mostra e o que ela faz na venda. */

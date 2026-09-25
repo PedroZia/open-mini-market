@@ -47,6 +47,11 @@ export type Action =
   /** Fechamento gravado pelo servidor (1115): leva a conferência dele para a tela do fechamento. */
   | { type: 'cashCloseSucceeded'; closing: CashClosingView }
   | { type: 'cashClosed' }
+  /**
+   * Troca de operador (F12, 1118): a sessão de login terminou **sem** fechar o caixa — a sessão de
+   * caixa continua aberta para o próximo operador, que entra pelo login como no início do turno.
+   */
+  | { type: 'sessionEnded' }
   | { type: 'apiFailed'; problem: ApiProblem }
   /**
    * Sessão caiu no meio da operação (401, 1117): o login volta com o aviso e a venda em andamento
@@ -172,6 +177,10 @@ function reduceSaleOpen(state: SaleOpenState, action: Action): State {
         : { kind: 'paying', ...cashContext(state), sale: state.sale, notice: state.notice };
     case 'cashClosingStarted':
       return { kind: 'closingCash', ...cashContext(state), sale: state.sale, closing: null };
+    case 'sessionEnded':
+      // F12 confirmado: a sessão de login terminou; o caixa continua aberto e o próximo operador
+      // entra pelo login — a venda (se havia) já foi cancelada pelo shell antes de chegar aqui
+      return { kind: 'login', failure: null };
     case 'apiFailed':
       return blocked(state, action.problem);
     default:

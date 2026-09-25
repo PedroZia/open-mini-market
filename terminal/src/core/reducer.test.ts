@@ -295,6 +295,18 @@ describe('reducer da operação', () => {
     expect(reduce(closing, { type: 'cashClosed' })).toEqual({ kind: 'login', failure: null });
   });
 
+  test('troca de operador encerra a sessão de login sem passar pelo caixa fechado (1118)', () => {
+    const state = selling();
+
+    expect(reduce(state, { type: 'sessionEnded' })).toEqual({ kind: 'login', failure: null });
+  });
+
+  test('troca de operador vale na venda ainda sem venda criada (o F12 não depende do bipe)', () => {
+    const state = cashOpened();
+
+    expect(reduce(state, { type: 'sessionEnded' })).toEqual({ kind: 'login', failure: null });
+  });
+
   test('F4 cancela a venda: volta à venda vazia, sem venda e sem bipe pendente', () => {
     expect(reduce(selling(), { type: 'saleCancelled' })).toEqual({
       kind: 'saleOpen',
@@ -363,17 +375,20 @@ describe('reducer da operação', () => {
       [initialState, { type: 'confirm' }],
       [initialState, { type: 'barcodeScanned', barcode: '7891000100103', quantity: 1 }],
       [initialState, { type: 'cashClosed' }],
+      [initialState, { type: 'sessionEnded' }],
       [initialState, { type: 'saleCompleted', receipt }],
       [initialState, { type: 'saleCancelled' }],
       [initialState, { type: 'cashCloseSucceeded', closing: closingView }],
       [loggedIn(), { type: 'paymentStarted' }],
       [loggedIn(), { type: 'cancel' }],
+      [loggedIn(), { type: 'sessionEnded' }],
       [cashOpened(), { type: 'cashOpened', sessionId: 'session-2' }],
       [cashOpened(), { type: 'saleCompleted', receipt }],
       [cashOpened(), { type: 'cashCloseSucceeded', closing: closingView }],
       [selling(), { type: 'cancel' }],
       [selling(), { type: 'cashClosed' }],
       [selling(), { type: 'cashCloseSucceeded', closing: closingView }],
+      [reduce(selling(), { type: 'paymentStarted' }), { type: 'sessionEnded' }],
     ];
 
     for (const [state, action] of cases) {

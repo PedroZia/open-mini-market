@@ -1,6 +1,9 @@
+import type { ApiClient } from '@minimarket/api-client';
 import { render } from 'ink-testing-library';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
+import { clearToken, getToken, setToken } from '../api/session';
+import { createTerminalApi } from '../api/terminalApi';
 import type {
   AddPaymentOutcome,
   AddSaleItemOutcome,
@@ -2296,5 +2299,160 @@ describe('App: resiliência de rede e sessão (1117)', () => {
     );
     expect(ui.lastFrame()).toContain('Usuário:');
     expect(ui.lastFrame()).not.toContain('Sangria (F7)');
+  });
+});
+
+describe('App: troca de operador (1118)', () => {
+  /** F12 no canal cru: o `useInput` do Ink não entrega as teclas F (1105). */
+  const F12 = '\u001b[24~';
+
+  afterEach(() => {
+    clearToken(); // o token vive na sessão em memória, entre um teste e outro
+  });
+
+  /**
+   * Logout **de verdade** sobre um client mínimo: é o `finally` da camada de API (1107) que esquece
+   * o token da sessão, e é isso que o F12 precisa provar — o dublê do `apiStub` não limpa nada.
+   */
+  function realLogout(): Promise<void> {
+    return createTerminalApi({ post: async () => undefined } as unknown as ApiClient).logout();
+  }
+
+  /** Venda com um item: o ponto de partida da troca com venda aberta. */
+  async function reachSaleWithItem(api: TerminalApi) {
+    const ui = render(<App api={api} />);
+    await reachSale(ui);
+    ui.stdin.write('7891000100103\r');
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+
+    return ui;
+  }
+
+  test('F12 sem venda confirma a troca: só o ENTER encerra a sessão, que volta ao login', async () => {
+    const logout = vi.fn(realLogout);
+    const ui = render(<App api={apiStub({ logout })} />);
+    await reachSale(ui);
+    // o login em dois passos (1107) já revogou a sessão provisória; daqui em diante só o F12 conta
+    logout.mockClear();
+    setToken('tok-antigo');
+
+    ui.stdin.write(F12);
+
+    await expectFrame(ui.lastFrame, 'Trocar operador (F12)');
+    expect(ui.lastFrame()).toContain('ENTER troca de operador · ESC volta');
+    expect(logout).not.toHaveBeenCalled(); // nada acontece antes do ENTER
+    expect(getToken()).toBe('tok-antigo');
+
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'Usuário:');
+    expect(ui.lastFrame()).toContain('PDV minimercado — entrada do operador');
+    expect(logout).toHaveBeenCalledTimes(1);
+    expect(getToken()).toBeNull(); // a sessão de login terminou
+  });
+
+  test('F12 com venda aberta bloqueia: confirma e nada vai à API antes do ENTER', async () => {
+    const cancelSale = vi.fn(async (): Promise<CancelSaleOutcome> => ({ ok: true }));
+    const logout = vi.fn(async () => undefined);
+    const ui = await reachSaleWithItem(apiStub({ cancelSale, logout }));
+    logout.mockClear(); // o login em dois passos (1107) já tinha revogado a sessão provisória
+
+    ui.stdin.write(F12);
+
+    await expectFrame(ui.lastFrame, 'Trocar operador (F12)');
+    expect(ui.lastFrame()).toContain('há venda aberta');
+    expect(ui.lastFrame()).toContain('ENTER cancela a venda e troca de operador · ESC volta');
+    expect(ui.lastFrame()).not.toContain('TOTAL: R$ 24,90'); // o corpo da venda saiu de cena
+    expect(cancelSale).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+
+    ui.stdin.write('\u001b'); // ESC volta para a venda, intacta
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Trocar operador (F12)');
+    });
+    expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90');
+    expect(cancelSale).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  test('ENTER cancela a venda com o motivo e encerra a sessão sem fechar o caixa', async () => {
+    const cancelSale = vi.fn(async (): Promise<CancelSaleOutcome> => ({ ok: true }));
+    const logout = vi.fn(realLogout);
+    const api = apiStub({ cancelSale, logout });
+    const ui = await reachSaleWithItem(api);
+    logout.mockClear(); // o login em dois passos (1107) já tinha revogado a sessão provisória
+    setToken('tok-antigo');
+
+    ui.stdin.write(F12);
+    await expectFrame(ui.lastFrame, 'ENTER cancela a venda e troca de operador');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'Usuário:');
+    expect(cancelSale).toHaveBeenCalledWith('sale-1', 'troca de operador', expect.any(String));
+    expect(logout).toHaveBeenCalledTimes(1);
+    // a venda sai primeiro: é o cancelamento que a libera para o próximo operador
+    expect(cancelSale.mock.invocationCallOrder[0] ?? 0).toBeLessThan(
+      logout.mock.invocationCallOrder.at(-1) ?? 0,
+    );
+    expect(getToken()).toBeNull();
+    // a sessão de **caixa** continua aberta: quem encerrou foi só a sessão de login
+    expect(api.closeCashSession).not.toHaveBeenCalled();
+  });
+
+  test('a troca lembra o caixa: o login nasce com o mesmo caixa selecionado', async () => {
+    const cancelSale = vi.fn(async (): Promise<CancelSaleOutcome> => ({ ok: true }));
+    // a lista volta em outra ordem depois da troca: sem a lembrança, o primeiro (02) é que estaria marcado
+    let listed = 0;
+    const listCashRegisters = vi.fn(async (): Promise<CashRegistersOutcome> => {
+      listed += 1;
+
+      return listed === 1
+        ? { ok: true, registers: [CAIXA_01, CAIXA_02] }
+        : { ok: true, registers: [CAIXA_02, CAIXA_01] };
+    });
+    const ui = await reachSaleWithItem(apiStub({ cancelSale, listCashRegisters }));
+
+    ui.stdin.write(F12);
+    await expectFrame(ui.lastFrame, 'Trocar operador (F12)');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'Usuário:');
+
+    await signIn(ui.lastFrame, ui.stdin);
+    await expectFrame(ui.lastFrame, 'Escolha o caixa');
+
+    expect(ui.lastFrame()).toContain('› 01 Caixa principal'); // o caixa da troca, não o primeiro da lista
+    expect(ui.lastFrame()).not.toContain('› 02');
+  });
+
+  test('falha do cancelamento não troca nada: a mensagem fica no modal e a venda continua', async () => {
+    const cancelSale = vi.fn(
+      async (): Promise<CancelSaleOutcome> => ({
+        ok: false,
+        kind: 'rejected',
+        message: 'sem permissão para cancelar a venda',
+      }),
+    );
+    const logout = vi.fn(async () => undefined);
+    const ui = await reachSaleWithItem(apiStub({ cancelSale, logout }));
+    logout.mockClear(); // o login em dois passos (1107) já tinha revogado a sessão provisória
+
+    ui.stdin.write(F12);
+    await expectFrame(ui.lastFrame, 'Trocar operador (F12)');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'sem permissão para cancelar a venda');
+    expect(ui.lastFrame()).toContain('Trocar operador (F12)'); // o modal segue à vista
+    expect(ui.lastFrame()).not.toContain('Usuário:'); // a sessão não terminou
+    expect(logout).not.toHaveBeenCalled();
+
+    ui.stdin.write('\u001b'); // e o ESC devolve a venda como estava
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Trocar operador (F12)');
+    });
+    expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90');
+    expect(cancelSale).toHaveBeenCalledTimes(1);
   });
 });

@@ -20,7 +20,9 @@ import type { LoginState, Operator } from '../core/state';
  * servidor e `apiFailed` vai para a tela de erro com volta. Nada de conta, total ou parse (BR-12).
  *
  * O `notice` do estado (1117) é o aviso da sessão que caiu no meio da operação — o login volta para
- * cá com a venda ainda em memória, e o mesmo caixa a retoma depois de abrir o turno de novo.
+ * cá com a venda ainda em memória, e o mesmo caixa a retoma depois de abrir o turno de novo. Na
+ * troca de operador (1118) não há venda a retomar: o caixa continua aberto e o
+ * `preferredRegisterId` faz a lista nascer com ele selecionado — o operador novo só confirma.
  *
  * O token fica só na sessão em memória (`src/api/session.ts`), nunca no estado da tela nem na
  * saída — a senha também não é renderizada em momento algum.
@@ -33,6 +35,11 @@ export type LoginScreenProps = {
   api: TerminalApi;
   /** Despacho do shell; toda transição nasce no reducer. */
   dispatch: Dispatch<Action>;
+  /**
+   * Caixa a deixar selecionado quando a lista chegar (troca de operador, 1118): o F12 mantém a
+   * sessão de caixa aberta, então o login seguinte nasce no **mesmo** caixa — o operador só confirma.
+   */
+  preferredRegisterId?: string | null;
 };
 
 /** Etapa da tela: credenciais e, com o login aceito, a escolha do caixa. */
@@ -46,7 +53,7 @@ type Stage =
       selected: number;
     };
 
-export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
+export function LoginScreen({ state, api, dispatch, preferredRegisterId }: LoginScreenProps) {
   const [stage, setStage] = useState<Stage>({ kind: 'credentials' });
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -159,8 +166,13 @@ export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
       return;
     }
 
+    // o caixa da troca de operador (1118) nasce selecionado; sem ele na lista, o primeiro mesmo
+    const preferred = outcome.registers.findIndex((register) => register.id === preferredRegisterId);
+
     setStage((current) =>
-      current.kind === 'registers' ? { ...current, registers: outcome.registers } : current,
+      current.kind === 'registers'
+        ? { ...current, registers: outcome.registers, selected: preferred < 0 ? 0 : preferred }
+        : current,
     );
   }
 

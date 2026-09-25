@@ -18,6 +18,7 @@ import { PriceLookupModal } from './PriceLookupModal';
 import { ReaderSelfTestScreen, type BarcodeResolver } from './ReaderSelfTestScreen';
 import { SaleScreen, type SaleScreenHandle } from './SaleScreen';
 import { SaleSuccessScreen } from './SaleSuccessScreen';
+import { SwitchOperatorModal } from './SwitchOperatorModal';
 import { useRawShortcuts } from './useRawShortcuts';
 
 /**
@@ -71,6 +72,16 @@ import { useRawShortcuts } from './useRawShortcuts';
  * operação; e o `online` da barra de status cai na falha de transporte e volta a cada resposta —
  * inclusive nas telas que tratam o próprio rodapé. A loja do cabeçalho vem do `GET /auth/me`, uma
  * vez por login, sem bloquear a venda se a chamada falhar.
+ *
+ * O 1118 fecha o ciclo do turno com o F12: a troca de operador é do shell e nunca é silenciosa —
+ * ela abre a confirmação do `SwitchOperatorModal` (com itens, o ENTER cancela a venda antes de
+ * encerrar a sessão; sem itens, o ENTER troca direto) e, confirmada, encerra a sessão de **login**
+ * (o `logout` da camada de API revoga e esquece o token) sem tocar na sessão de **caixa**, que
+ * segue aberta para o próximo operador. O `sessionEnded` do reducer volta ao login; o shell limpa
+ * as anotações locais (cliente, loja e o `ResumeTicket` da queda de sessão, que não vale para
+ * outra troca) e lembra o caixa que estava em uso para o login nascer com ele pré-selecionado
+ * ("mesmo caixa"). A falha do cancelamento não troca nada: a recusa fica no modal, com a venda
+ * intacta, e a falha bloqueante vai para a tela de erro, como no F4 (1115).
  */
 export function App({ api: rawApi }: { api: TerminalApi }) {
   const [state, dispatch] = useReducer(reduce, initialState);
@@ -91,6 +102,14 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
   const [customerOpen, setCustomerOpen] = useState(false);
   /** Modal do cancelamento aberto sobre a venda (F4, 1115): estado de UI, fora do reducer. */
   const [cancelSaleOpen, setCancelSaleOpen] = useState(false);
+  /** Confirmação da troca de operador aberta sobre a venda (F12, 1118): estado de UI, fora do reducer. */
+  const [switchOperatorOpen, setSwitchOperatorOpen] = useState(false);
+  /**
+   * Caixa em uso quando o F12 confirmou (1118): o login seguinte nasce com ele selecionado — a
+   * sessão de caixa continua aberta e o próximo operador entra no **mesmo** caixa. É anotação de
+   * tela, não estado da operação: morre quando o login sai de cena.
+   */
+  const [preferredRegister, setPreferredRegister] = useState<string | null>(null);
   /** Consulta de preço aberta sobre a venda (F2, 1116): estado de UI, fora do reducer. */
   const [priceLookupOpen, setPriceLookupOpen] = useState(false);
   /** Ajuda aberta sobre a venda (F1, 1116): estado de UI, fora do reducer. */
@@ -125,11 +144,14 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
    */
   useEffect(() => {
     if (state.kind === 'login') {
-      // login novo (logout, fechamento ou queda de sessão): a loja é perguntada de novo
+      // login novo (troca de operador, fechamento ou queda de sessão): a loja é perguntada de novo
       storeAsked.current = false;
       setStore(null);
       return;
     }
+
+    // saiu do login: o "mesmo caixa" da troca (1118) já foi escolhido — ou descartado
+    setPreferredRegister(null);
 
     if (state.kind !== 'saleOpen' || storeAsked.current) {
       return;
@@ -208,6 +230,13 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
         if (state.kind === 'saleOpen' && state.sale !== null && state.receipt === null) {
           setCancelSaleOpen(true);
         }
+      } else if (shortcut.name === 'switchOperator') {
+        // F12 (1118): a troca nunca é silenciosa — o modal confirma (e cancela a venda, se houver
+        // itens) antes de encerrar a sessão; com a tela de sucesso à vista o ENTER é dela, como
+        // nos demais overlays (1113/1114/1116)
+        if (state.kind === 'saleOpen' && state.receipt === null) {
+          setSwitchOperatorOpen(true);
+        }
       } else if (shortcut.name === 'withdrawal' || shortcut.name === 'supply') {
         // a gaveta é do caixa aberto, não da venda: o F7/F8 vale também antes do primeiro bipe.
         // Com a tela de sucesso à vista o ENTER é dela — a gaveta se mexe depois de dispensá-la.
@@ -234,6 +263,7 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
         setDiscountOpen(false);
         setCustomerOpen(false);
         setCancelSaleOpen(false);
+        setSwitchOperatorOpen(false);
         setCashMovement(null);
       }
     },
@@ -247,13 +277,15 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
             ? 'customer'
             : cancelSaleOpen
               ? 'cancelSale'
-              : priceLookupOpen
-                ? 'priceLookup'
-                : helpOpen
-                  ? 'help'
-                  : readerSelfTest
-                    ? 'readerSelfTest'
-                    : null),
+              : switchOperatorOpen
+                ? 'switchOperator'
+                : priceLookupOpen
+                  ? 'priceLookup'
+                  : helpOpen
+                    ? 'help'
+                    : readerSelfTest
+                      ? 'readerSelfTest'
+                      : null),
     },
   );
 
@@ -294,6 +326,26 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
     dispatch({ type: 'apiFailed', problem });
   }
 
+  /**
+   * F12 confirmado (1118): a sessão de login terminou e o caixa continua aberto. O shell esquece as
+   * anotações locais — o cliente vinculado era da venda que acabou de ser cancelada e a venda
+   * preservada de uma queda de sessão não vale para outra troca — e lembra o caixa em uso para o
+   * login nascer com ele selecionado ("mesmo caixa"). A transição é do reducer (`sessionEnded`):
+   * volta ao login sem passar pelo `cashClosed`, que significa caixa fechado.
+   */
+  function operatorSwitched(registerId: string): void {
+    setSwitchOperatorOpen(false);
+    setCustomer(null);
+    setPreferredRegister(registerId);
+    dispatch({ type: 'sessionEnded' });
+  }
+
+  /** Falha bloqueante do cancelamento da troca: fecha o modal e manda o problema para a tela de erro. */
+  function switchOperatorFailed(problem: ApiProblem): void {
+    setSwitchOperatorOpen(false);
+    dispatch({ type: 'apiFailed', problem });
+  }
+
   /** Falha bloqueante da consulta de preço: fecha o modal e manda o problema para a tela de erro (§11.4). */
   function priceLookupFailed(problem: ApiProblem): void {
     setPriceLookupOpen(false);
@@ -328,7 +380,14 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
 
   switch (state.kind) {
     case 'login':
-      return <LoginScreen state={state} api={api} dispatch={dispatch} />;
+      return (
+        <LoginScreen
+          state={state}
+          api={api}
+          dispatch={dispatch}
+          preferredRegisterId={preferredRegister}
+        />
+      );
     case 'openingCash':
       return <OpeningCashScreen state={state} api={api} dispatch={dispatch} />;
     case 'saleOpen':
@@ -380,6 +439,18 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
             api={api}
             onCancelled={saleCancelled}
             onFailed={saleCancelFailed}
+          />
+        );
+      }
+
+      if (switchOperatorOpen) {
+        return (
+          <SwitchOperatorModal
+            saleId={state.sale?.id ?? null}
+            itemCount={state.sale?.items.length ?? 0}
+            api={api}
+            onSwitched={() => operatorSwitched(state.register.id)}
+            onFailed={switchOperatorFailed}
           />
         );
       }

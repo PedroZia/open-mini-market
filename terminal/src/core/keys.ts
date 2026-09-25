@@ -63,8 +63,8 @@ export type Screen = State['kind'];
  * Modal bloqueante aberto sobre a tela (§11.3): enquanto um está aberto, o leitor e os atalhos não
  * atuam — só ESC, que o fecha antes de sair da tela. O autoteste do leitor (F11) entra aqui porque
  * é aberto como overlay da venda e bloqueia o resto da tela enquanto está à vista (1108); a
- * confirmação do DEL (1110) é local da tela de venda, mas o contexto é o mesmo: com ela aberta só
- * ESC resolve, e ENTER é o "sim" que o próprio overlay trata.
+ * confirmação do DEL (1110) e a da troca de operador (1118) são locais, mas o contexto é o mesmo:
+ * com ela aberta só ESC resolve, e ENTER é o "sim" que o próprio overlay trata.
  */
 export type ModalName =
   | 'help'
@@ -72,6 +72,7 @@ export type ModalName =
   | 'discount'
   | 'customer'
   | 'cancelSale'
+  | 'switchOperator'
   | 'withdrawal'
   | 'supply'
   | 'readerSelfTest'

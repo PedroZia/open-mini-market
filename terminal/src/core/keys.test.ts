@@ -313,6 +313,7 @@ describe('resolveShortcut: atalho por contexto', () => {
     'priceLookup',
     'discount',
     'customer',
+    'switchOperator',
     'withdrawal',
     'supply',
     'readerSelfTest',

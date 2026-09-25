@@ -1015,7 +1015,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** queda de rede simulada não perde itens; reconexão retoma a venda; 401 exige novo login.
   **Commit:** `feat(tui): trata falhas de rede e de sessao`
 
-- [ ] **1118 — Trocar operador (F12)**
+- [x] **1118 — Trocar operador (F12)**
   **Objetivo:** troca de turno no mesmo caixa. **Depende:** 1117
   **Implementar:** encerra a sessão atual (logout), exige nova autenticação no mesmo caixa; bloqueia troca se houver venda aberta (ou cancela após confirmação).
   **Testes/aceite:** troca funciona; venda aberta impede troca silenciosa.
