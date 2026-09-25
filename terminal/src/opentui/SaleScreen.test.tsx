@@ -9,6 +9,8 @@ import type {
   ApplyDiscountOutcome,
   BarcodeLookupOutcome,
   CancelSaleOutcome,
+  CashMovementOutcome,
+  CashMovementView,
   CreateSaleOutcome,
   CustomerOption,
   CustomerSaleOutcome,
@@ -32,7 +34,8 @@ import { SaleScreen } from "./SaleScreen"
  * bipe do leitor, a leitura digitada no campo, o multiplicador `3*`, o 404/422 com aviso, a falha
  * transitória com retry no ENTER e o bell —, a quantidade do item selecionado do 1125c (`+`/`-`
  * com `PATCH` absoluto, passo de `UN`/`KG`, uma mutação por vez e o aviso do DEL no limite) e os
- * modais do 1126a/1126b (F1, DEL/F3, F2 e F5 no `ModalFrame`, com o leitor desligado).
+ * modais do 1126a/1126b/1126c/1126d (F1, DEL/F3, F2, F5, F6, F12, F4 e a gaveta do F7/F8 no
+ * `ModalFrame`, com o leitor desligado).
  *
  * O harness tem o reducer real (1103) por trás da tela, como o shell, e a camada de API dublada com
  * `mock` (o runner do `src/opentui` é o `bun:test`): o que se testa é a operação da tela, nunca o
@@ -226,12 +229,15 @@ function renderSale(state: SaleOpenState, options: RenderOptions = {}) {
 function SaleHarness({
   api,
   initial,
+  customer = null,
   onAction,
   onCustomerChanged,
   onOperatorSwitched,
 }: {
   api: TerminalApi
   initial: SaleOpenState
+  /** Anotação local do cliente (F6/1126c, esquecida no F4/1126d): o `App` a guarda no shell. */
+  customer?: CustomerOption | null
   onAction?: (action: Action) => void
   onCustomerChanged?: (customer: CustomerOption | null) => void
   onOperatorSwitched?: () => void
@@ -251,7 +257,7 @@ function SaleHarness({
         dispatch(action)
       }}
       now={NOW}
-      customer={null}
+      customer={customer}
       store={null}
       online
       onCustomerChanged={onCustomerChanged ?? mock(() => {})}
@@ -265,12 +271,13 @@ function renderHarness(
   api: TerminalApi,
   initial: SaleOpenState = stateWith(null),
   onAction?: (action: Action) => void,
-  effects: Pick<RenderOptions, "onCustomerChanged" | "onOperatorSwitched"> = {},
+  effects: Pick<RenderOptions, "customer" | "onCustomerChanged" | "onOperatorSwitched"> = {},
 ) {
   return testRender(
     <SaleHarness
       api={api}
       initial={initial}
+      customer={effects.customer}
       onAction={onAction}
       onCustomerChanged={effects.onCustomerChanged}
       onOperatorSwitched={effects.onOperatorSwitched}
@@ -2340,6 +2347,457 @@ describe("SaleScreen: modais — cliente e troca de operador (1126c)", () => {
       expect(frame).toContain("há venda aberta com 1 item — a venda será cancelada")
       expect(cancelSale).not.toHaveBeenCalled()
       expect(logout).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+})
+
+/**
+ * Movimento da gaveta como o servidor o devolveu: a sangria de 12,50 sobre 150 deixa 137,50 — os
+ * dois números são dele, da mesma transação (BR-12).
+ */
+function cashMovement(
+  type: "WITHDRAWAL" | "SUPPLY",
+  amount: number,
+  before: number,
+  after: number,
+  aboveExpected = false,
+): CashMovementView {
+  return {
+    sessionId: "s1",
+    type,
+    amount,
+    reason: "não usado neste teste",
+    expectedBefore: before,
+    expectedAfter: after,
+    aboveExpected,
+  }
+}
+
+describe("SaleScreen: modais — cancelamento e gaveta (1126d)", () => {
+  test("F4 sem venda criada não abre (como o desconto)", async () => {
+    const cancelSale = mock(async (): Promise<CancelSaleOutcome> => ({ ok: true }))
+    const setup = await renderHarness(apiStub({ cancelSale }), stateWith(null))
+
+    try {
+      await pressNamed(setup, KeyCodes.F4)
+
+      const frame = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(frame).not.toContain("Cancelar a venda (F4)")
+      expect(cancelSale).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F4: motivo obrigatório, confirmação e o cancelamento zera a venda e esquece o cliente", async () => {
+    const attempts: Array<[string, string, string]> = []
+    const cancelSale = mock(
+      async (saleId: string, reason: string, key: string): Promise<CancelSaleOutcome> => {
+        attempts.push([saleId, reason, key])
+        return { ok: true }
+      },
+    )
+    const onCustomerChanged = mock((customer: CustomerOption | null) => {
+      void customer
+    })
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ cancelSale }),
+      stateWith(saleOf([ARROZ], { customerId: ANA.id })),
+      (action) => actions.push(action),
+      { customer: ANA, onCustomerChanged },
+    )
+
+    try {
+      await expectFrame(setup, "Cliente: Ana Souza")
+
+      await pressNamed(setup, KeyCodes.F4)
+
+      const opened = await expectFrame(setup, "Cancelar a venda (F4)")
+
+      expect(opened).toContain("a venda em andamento será descartada — o cliente é esquecido")
+      expect(opened).toContain("ENTER confirma · ESC volta para a venda")
+
+      // ENTER sem motivo não confirma nada (BR-04): a dica fica no próprio modal
+      await pressEnter(setup)
+      await expectFrame(setup, "informe o motivo do cancelamento")
+      expect(cancelSale).not.toHaveBeenCalled()
+
+      await typeHuman(setup, "errei a venda")
+      await expectFrame(setup, "› Motivo: errei a venda")
+
+      // o ENTER do formulário só confirma; quem chama a API é o ENTER da confirmação
+      await pressEnter(setup)
+      await expectFrame(setup, "cancelar a venda em andamento? ENTER confirma · ESC volta")
+      expect(cancelSale).not.toHaveBeenCalled()
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(attempts).toHaveLength(1)
+      expect(attempts[0]?.[0]).toBe(SALE_ID)
+      expect(attempts[0]?.[1]).toBe("errei a venda")
+      expect(attempts[0]?.[2]).toBeString()
+      expect(actions).toContainEqual({ type: "saleCancelled" })
+      expect(onCustomerChanged).toHaveBeenCalledWith(null)
+      expect(frame).not.toContain("Cancelar a venda (F4)") // a venda some e a tela volta ao vazio
+      expect(frame).not.toContain("Cliente: Ana Souza") // o cliente era daquela venda
+      expect(frame).toContain("venda cancelada")
+      expectLayout(frame, 80, 24)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F4: a recusa do servidor mantém a venda e volta ao formulário com o motivo digitado", async () => {
+    const cancelSale = mock(
+      async (): Promise<CancelSaleOutcome> => ({
+        ok: false,
+        kind: "rejected",
+        message: "sem permissão para cancelar a venda",
+      }),
+    )
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ cancelSale }),
+      stateWith(saleOf([ARROZ])),
+      (action) => actions.push(action),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F4)
+      await expectFrame(setup, "Cancelar a venda (F4)")
+      await typeHuman(setup, "cliente desistiu")
+      await pressEnter(setup)
+      await expectFrame(setup, "cancelar a venda em andamento?")
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "sem permissão para cancelar a venda")
+
+      expect(frame).toContain("Cancelar a venda (F4)") // a recusa não fecha o modal
+      expect(frame).toContain("› Motivo: cliente desistiu") // volta ao formulário com o digitado
+      expect(actions).not.toContainEqual({ type: "saleCancelled" })
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).toContain("TOTAL: R$ 24,90") // a venda ficou intacta
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F4: falha transitória mantém a confirmação e o ENTER refaz com a mesma chave", async () => {
+    const attempts: Array<[string, string, string]> = []
+    const cancelSale = mock(
+      async (saleId: string, reason: string, key: string): Promise<CancelSaleOutcome> => {
+        attempts.push([saleId, reason, key])
+        return sendFailure()
+      },
+    )
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ cancelSale }),
+      stateWith(saleOf([ARROZ])),
+      (action) => actions.push(action),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F4)
+      await expectFrame(setup, "Cancelar a venda (F4)")
+      await typeHuman(setup, "cliente desistiu")
+      await pressEnter(setup)
+      await pressEnter(setup)
+
+      const failed = await expectFrame(setup, "falha ao cancelar a venda — ENTER tenta de novo")
+
+      expect(failed).toContain("Cancelar a venda (F4)") // o modal espera o ENTER de novo
+      expect(cancelSale).toHaveBeenCalledTimes(1) // sem retry automático
+
+      await pressEnter(setup)
+      await until(() => attempts.length === 2)
+
+      // a tentativa é a mesma: a chave reusada faz uma resposta perdida virar replay, não um 2º cancelamento
+      expect(attempts[0]?.[2]).toBeString()
+      expect(attempts[1]?.[2]).toBe(attempts[0]?.[2])
+      expect(attempts[1]?.[1]).toBe("cliente desistiu")
+      expect(actions).not.toContainEqual({ type: "saleCancelled" })
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F4: ESC fecha sem chamar a API e a rajada do leitor não decide o cancelamento", async () => {
+    const cancelSale = mock(async (): Promise<CancelSaleOutcome> => ({ ok: true }))
+    const setup = await renderHarness(apiStub({ cancelSale }), stateWith(saleOf([ARROZ])))
+
+    try {
+      await pressNamed(setup, KeyCodes.F4)
+      await expectFrame(setup, "Cancelar a venda (F4)")
+      await typeHuman(setup, "cliente desistiu")
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).not.toContain("Cancelar a venda (F4)")
+      expect(cancelSale).not.toHaveBeenCalled()
+
+      // a rajada do leitor (o hardware não sabe que o scanner está desligado): o terminador colado
+      // nos caracteres não é o "sim" do operador
+      await pressNamed(setup, KeyCodes.F4)
+      await expectFrame(setup, "Cancelar a venda (F4)")
+      await waitMs(60) // o operador parou de digitar: o primeiro caractere do bipe não é rajada
+
+      await act(async () => {
+        await setup.mockInput.typeText(BARCODE)
+        setup.mockInput.pressEnter()
+      })
+
+      const frame = await expectFrame(setup, "Cancelar a venda (F4)")
+
+      expect(frame).not.toContain("cancelar a venda em andamento?") // o terminador não confirmou
+      expect(cancelSale).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F4: falha bloqueante vai para a tela de erro com o problema", async () => {
+    const problem: ApiProblem = {
+      status: 404,
+      code: "SALE_NOT_FOUND",
+      detail: "venda não encontrada",
+    }
+    const dispatch = dispatchSpy()
+    const cancelSale = mock(
+      async (): Promise<CancelSaleOutcome> => ({ ok: false, kind: "failed", problem }),
+    )
+    const setup = await renderSale(stateWith(saleOf([ARROZ])), {
+      api: apiStub({ cancelSale }),
+      dispatch,
+    })
+
+    try {
+      await pressNamed(setup, KeyCodes.F4)
+      await expectFrame(setup, "Cancelar a venda (F4)")
+      await typeHuman(setup, "cliente desistiu")
+      await pressEnter(setup)
+      await pressEnter(setup)
+
+      await until(() => dispatch.mock.calls.length > 0)
+
+      expect(dispatch).toHaveBeenCalledWith({ type: "apiFailed", problem })
+      expect(await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")).not.toContain(
+        "Cancelar a venda (F4)",
+      )
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F7 abre sem venda, mascara os centavos, exige motivo e confirma no rodapé", async () => {
+    const movement = cashMovement("WITHDRAWAL", 12.5, 150, 137.5)
+    const withdrawCash = mock(async (): Promise<CashMovementOutcome> => ({ ok: true, movement }))
+    const setup = await renderHarness(apiStub({ withdrawCash }), stateWith(null))
+
+    try {
+      await pressNamed(setup, KeyCodes.F7)
+
+      const opened = await expectFrame(setup, "Sangria (F7)")
+
+      expect(opened).toContain("› Valor: R$ 0,00")
+      expect(opened).toContain("digite o valor em centavos: 1250 vira R$ 12,50")
+      expect(opened).toContain("TAB troca o campo · ENTER registra · ESC cancela")
+
+      // ENTER sem valor não chama a API: sangrar/suprir é do caixa aberto, não da venda (BR-10)
+      await pressEnter(setup)
+      await expectFrame(setup, "informe o valor da sangria")
+      expect(withdrawCash).not.toHaveBeenCalled()
+
+      await typeHuman(setup, "1250")
+      await expectFrame(setup, "› Valor: R$ 12,50") // a máscara de centavos da abertura de caixa
+
+      await pressEnter(setup)
+
+      const missing = await expectFrame(setup, "informe o motivo da sangria")
+
+      expect(missing).toContain("Sangria (F7)")
+      expect(withdrawCash).not.toHaveBeenCalled()
+
+      await pressTab(setup)
+      await expectFrame(setup, "› Motivo:")
+      await typeHuman(setup, "troco para o banco")
+      await expectFrame(setup, "Motivo: troco para o banco")
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "sangria registrada: R$ 12,50")
+
+      expect(withdrawCash).toHaveBeenCalledWith(
+        CAIXA.id,
+        { amount: 12.5, reason: "troco para o banco" },
+        expect.any(String),
+      )
+      expect(frame).not.toContain("Sangria (F7)") // o modal saiu de cena
+      expect(frame).toContain("bipar o primeiro item para iniciar a venda")
+      expectLayout(frame, 80, 24)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F8 suprimento: os rótulos do F8, a rota do suprimento e o valor do servidor no rodapé", async () => {
+    const movement = cashMovement("SUPPLY", 50, 150, 200)
+    const supplyCash = mock(async (): Promise<CashMovementOutcome> => ({ ok: true, movement }))
+    const withdrawCash = mock(async (): Promise<CashMovementOutcome> => sendFailure())
+    const setup = await renderHarness(
+      apiStub({ supplyCash, withdrawCash }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F8)
+
+      await expectFrame(setup, "Suprimento (F8)")
+
+      await pressEnter(setup)
+      await expectFrame(setup, "informe o valor do suprimento")
+
+      await typeHuman(setup, "1250")
+      await expectFrame(setup, "› Valor: R$ 12,50")
+      await pressTab(setup)
+      await typeHuman(setup, "fundo de troco")
+      await pressEnter(setup)
+
+      // a confirmação é o movimento do servidor (R$ 50,00), nunca o valor digitado (BR-12)
+      const frame = await expectFrame(setup, "suprimento registrado: R$ 50,00")
+
+      expect(supplyCash).toHaveBeenCalledWith(
+        CAIXA.id,
+        { amount: 12.5, reason: "fundo de troco" },
+        expect.any(String),
+      )
+      expect(withdrawCash).not.toHaveBeenCalled()
+      expect(frame).not.toContain("Suprimento (F8)")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F7: a recusa volta ao formulário com o digitado e o ENTER refaz o movimento", async () => {
+    const movement = cashMovement("WITHDRAWAL", 12.5, 150, 137.5)
+    let attempts = 0
+    const withdrawCash = mock(async (): Promise<CashMovementOutcome> => {
+      attempts += 1
+
+      return attempts === 1
+        ? { ok: false, kind: "rejected", message: "sangria acima do esperado — confira a gaveta" }
+        : { ok: true, movement }
+    })
+    const setup = await renderHarness(apiStub({ withdrawCash }), stateWith(null))
+
+    try {
+      await pressNamed(setup, KeyCodes.F7)
+      await expectFrame(setup, "Sangria (F7)")
+      await typeHuman(setup, "1250")
+      await pressTab(setup)
+      await typeHuman(setup, "troco para o banco")
+      await pressEnter(setup)
+
+      const refused = await expectFrame(setup, "sangria acima do esperado — confira a gaveta")
+
+      expect(refused).toContain("Sangria (F7)") // a recusa não fecha o modal
+      expect(refused).toContain("Valor: R$ 12,50") // o digitado não se perde
+      expect(refused).toContain("Motivo: troco para o banco")
+      expect(withdrawCash).toHaveBeenCalledTimes(1)
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "sangria registrada: R$ 12,50")
+
+      expect(withdrawCash).toHaveBeenCalledTimes(2)
+      expect(frame).not.toContain("Sangria (F7)")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F7: falha transitória pede o ENTER de novo com a mesma chave", async () => {
+    const movement = cashMovement("WITHDRAWAL", 12.5, 150, 137.5)
+    let attempts = 0
+    const withdrawCash = mock<TerminalApi["withdrawCash"]>(async () => {
+      attempts += 1
+
+      return attempts === 1 ? sendFailure() : { ok: true, movement }
+    })
+    const setup = await renderHarness(apiStub({ withdrawCash }), stateWith(saleOf([ARROZ])))
+
+    try {
+      await pressNamed(setup, KeyCodes.F7)
+      await expectFrame(setup, "Sangria (F7)")
+      await typeHuman(setup, "1250")
+      await pressTab(setup)
+      await typeHuman(setup, "troco para o banco")
+      await pressEnter(setup)
+
+      const failed = await expectFrame(setup, "falha ao registrar a sangria — ENTER tenta de novo")
+
+      expect(failed).toContain("Sangria (F7)") // o formulário continua à vista
+      expect(withdrawCash).toHaveBeenCalledTimes(1) // sem retry automático
+
+      await pressEnter(setup)
+      await expectFrame(setup, "sangria registrada: R$ 12,50")
+
+      // a tentativa repetida é a mesma operação: repetir a chave evita sangrar duas vezes (§8)
+      expect(withdrawCash).toHaveBeenCalledTimes(2)
+      expect(withdrawCash.mock.calls[1]?.[2]).toBe(withdrawCash.mock.calls[0]?.[2])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F7: ESC fecha sem chamar a API e a rajada do leitor não vira valor nem registra", async () => {
+    const withdrawCash = mock(
+      async (): Promise<CashMovementOutcome> => ({
+        ok: true,
+        movement: cashMovement("WITHDRAWAL", 12.5, 150, 137.5),
+      }),
+    )
+    const setup = await renderHarness(apiStub({ withdrawCash }), stateWith(null))
+
+    try {
+      await pressNamed(setup, KeyCodes.F7)
+      await expectFrame(setup, "Sangria (F7)")
+      await typeHuman(setup, "1250")
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(back).not.toContain("Sangria (F7)")
+      expect(withdrawCash).not.toHaveBeenCalled()
+
+      // a rajada do leitor cai no campo do valor: só o primeiro caractere entra e o terminador
+      // colado nos caracteres não é o "sim" do operador (§11.3)
+      await pressNamed(setup, KeyCodes.F7)
+      await expectFrame(setup, "Sangria (F7)")
+      await waitMs(60)
+
+      await act(async () => {
+        await setup.mockInput.typeText(BARCODE)
+        setup.mockInput.pressEnter()
+      })
+
+      const frame = await expectFrame(setup, "Valor: R$ 0,07")
+
+      expect(withdrawCash).not.toHaveBeenCalled()
+      expect(frame).toContain("Sangria (F7)") // o formulário ficou como estava
     } finally {
       setup.renderer.destroy()
     }

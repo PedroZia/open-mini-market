@@ -10,6 +10,9 @@ import { useRenderer, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useRef, useState, type Dispatch } from "react"
 
 import type {
+  CashMovementIntent,
+  CashMovementKind,
+  CashMovementView,
   CustomerOption,
   SaleDiscountIntent,
   SendFailure,
@@ -22,6 +25,8 @@ import { moveSelection, nextQuantity, selectionIndex, touchedItem } from "../cor
 import { createScanner, type Scanner, type ScannerEvent } from "../core/scanner"
 import type { ApiProblem, SaleItemView, SaleOpenState, SaleView, ScanIntent } from "../core/state"
 import { keyEventToKeyName } from "./adapters/keys"
+import { CancelSaleModal } from "./CancelSaleModal"
+import { CashMovementModal, type CashMovementApplyResult } from "./CashMovementModal"
 import { CustomerModal, type CustomerApplyResult } from "./CustomerModal"
 import { DiscountModal, type DiscountApplyResult } from "./DiscountModal"
 import { HelpModal } from "./HelpModal"
@@ -56,17 +61,22 @@ import { theme } from "./theme"
  * do leitor deixou no campo é limpo no bipe — o primeiro caractere chega antes de o `\r` fechar a
  * leitura.
  *
- * Modais (1126a/1126b/1126c): a ajuda do F1, a confirmação do DEL/F3, a consulta de preço do F2, o
- * desconto do F5, o cliente do F6 e a troca de operador do F12 são estado **desta** tela (`modal`) e
- * saem no `ModalFrame` no lugar do corpo da venda — o leitor fica desligado (`barcodeEnabled: modal
- * === null`, §11.3) e o `handleKey` daqui devolve `false`: quem trata a tecla é o handler do próprio
- * modal, que o hook global chama **antes** deste listener (o `prependListener` põe o mais novo na
- * frente) e que consome o que é dele. Sem modal, a tela age como sempre.
+ * Modais (1126a–1126d): a ajuda do F1, a confirmação do DEL/F3, a consulta de preço do F2, o
+ * desconto do F5, o cliente do F6, a troca de operador do F12, o cancelamento da venda do F4 e a
+ * gaveta do F7/F8 são estado **desta** tela (`modal`) e saem no `ModalFrame` no lugar do corpo da
+ * venda — o leitor fica desligado (`barcodeEnabled: modal === null`, §11.3) e o `handleKey` daqui
+ * devolve `false`: quem trata a tecla é o handler do próprio modal, que o hook global chama
+ * **antes** deste listener (o `prependListener` põe o mais novo na frente) e que consome o que é
+ * dele. Sem modal, a tela age como sempre.
  *
  * O F6 (cliente) e o F12 (troca de operador) são anotações do **shell**: os dois modais devolvem o
  * fato por `onCustomerChanged` (o nome do cabeçalho é a seleção local da busca, não a resposta do
  * servidor) e `onOperatorSwitched` (o caixa em uso vira o preferido do login seguinte); a venda
- * recalculada continua vindo do `saleUpdated` da `runMutation`, como nas demais mutações.
+ * recalculada continua vindo do `saleUpdated` da `runMutation`, como nas demais mutações. O F4
+ * (1126d) é o outro lado disso: o servidor cancela a venda, o reducer volta ao estado vazio
+ * (`saleCancelled`) e o cliente anotado — que era daquela venda — é esquecido. O F7/F8 (1126d) são
+ * do **caixa aberto**, não da venda (BR-10): o movimento vai à API pela mesma trava de mutação da
+ * venda e a confirmação do rodapé é o movimento que o servidor gravou (BR-12).
  *
  * O envio é uma fila local (`queueRef`) drenada pelo `pump`, um bipe por vez, na ordem em que
  * chegaram: sem venda criada, o primeiro bipe abre a venda (`POST /sales`) e o item entra em
@@ -163,6 +173,18 @@ const LINK_FAILURE_NOTICE = "falha ao vincular o cliente — ENTER tenta de novo
 /** Falha transitória da remoção do vínculo (F6, 1126c): o modal fica à vista e o DEL refaz o `DELETE`. */
 const UNLINK_FAILURE_NOTICE = "falha ao remover o cliente — DEL tenta de novo"
 
+/** Confirmação do F4 (1126d): a venda foi descartada pelo servidor e a tela voltou ao estado vazio. */
+const SALE_CANCELLED_NOTICE = "venda cancelada"
+
+/**
+ * Confirmação do F7/F8 (1126d) no rodapé: o movimento que o servidor gravou, na voz de cada um —
+ * o valor exibido é o dele, da mesma transação (BR-12).
+ */
+const CASH_MOVEMENT_LABELS: Readonly<Record<CashMovementKind, string>> = {
+  withdrawal: "sangria registrada",
+  supply: "suprimento registrado",
+}
+
 /** `-` que zeraria a quantidade não vai à API: quem remove o item é o DEL (com confirmação, 1126). */
 const REMOVE_HINT = "use DEL para remover o item"
 
@@ -189,10 +211,11 @@ type Feedback =
   | { kind: "failure"; text: string }
 
 /**
- * Modal bloqueante aberto sobre a venda (1126a/1126b/1126c): a ajuda do F1, a confirmação do
- * DEL/F3, a consulta de preço do F2, o desconto do F5, o cliente do F6 e a troca de operador do F12.
- * O item guardado na confirmação é o alvo fixo do `DELETE` — com o modal à vista a seleção não se
- * move.
+ * Modal bloqueante aberto sobre a venda (1126a–1126d): a ajuda do F1, a confirmação do DEL/F3, a
+ * consulta de preço do F2, o desconto do F5, o cliente do F6, a troca de operador do F12, o
+ * cancelamento do F4 (o id da venda fica guardado: alvo fixo do `POST .../cancel`) e a gaveta do
+ * F7/F8. O item guardado na confirmação é o alvo fixo do `DELETE` — com o modal à vista a seleção
+ * não se move.
  */
 type SaleModal =
   | { kind: "help" }
@@ -201,6 +224,8 @@ type SaleModal =
   | { kind: "discount" }
   | { kind: "customer" }
   | { kind: "switchOperator" }
+  | { kind: "cancelSale"; saleId: string }
+  | { kind: "cashMovement"; movement: CashMovementKind }
 
 /**
  * Desfecho de uma mutação da venda (1125c/1126a/1126b) para quem a pediu decidir o que fica à
@@ -311,12 +336,14 @@ export function SaleScreen({
    * Ink): as setas movem a seleção com clamp nas pontas, `+`/`-` mexem na quantidade do item
    * selecionado, DEL e F3 abrem a **mesma** confirmação de remoção, o F1 abre a ajuda, o F2 a
    * consulta de preço (sem venda criada inclusive), o F5 o desconto (só com venda criada), o F6 o
-   * cliente (também só com venda criada) e o F12 a troca de operador (sempre: sem venda é confirmação
-   * direta) — tudo consumido, não chega ao campo de leitura —, e o ENTER refaz o bipe que ficou na
-   * fila depois de uma falha transitória. As intenções dos passos seguintes (1126d, 1127) não agem
-   * aqui: a tecla devolve `false` e o hook global a engole pelo mapa.
+   * cliente (também só com venda criada), o F12 a troca de operador (sempre: sem venda é confirmação
+   * direta), o F4 o cancelamento da venda (só com venda criada, como o desconto) e o F7/F8 a gaveta
+   * (sempre: sangrar e suprir são do caixa aberto, BR-10) — tudo consumido, não chega ao campo de
+   * leitura —, e o ENTER refaz o bipe que ficou na fila depois de uma falha transitória. As
+   * intenções dos passos seguintes (F9/F10/F11, do 1127/1129) não agem aqui: a tecla devolve
+   * `false` e o hook global a engole pelo mapa.
    *
-   * Com um modal à vista (1126a/1126b/1126c) a tela **não** age: o handler devolve `false` e quem
+   * Com um modal à vista (1126a–1126d) a tela **não** age: o handler devolve `false` e quem
    * trata a tecla é o handler do próprio modal, que roda antes deste (o `prependListener` do hook
    * global põe o listener mais novo na frente) e consome o que é dele — nenhuma tecla vaza entre os
    * dois.
@@ -387,8 +414,26 @@ export function SaleScreen({
           setModal({ kind: "switchOperator" })
           return true
 
+        case "cancelSale":
+          // F4 só com venda criada (como o desconto): sem venda não há o que cancelar; o id fica
+          // guardado no modal — alvo fixo do `POST .../cancel`
+          if (sale !== null) {
+            setModal({ kind: "cancelSale", saleId: sale.id })
+          }
+
+          return true
+
+        case "withdrawal":
+        case "supply":
+          // F7/F8 são do caixa aberto (BR-10), não da venda: abrem mesmo antes do primeiro bipe
+          setModal({
+            kind: "cashMovement",
+            movement: shortcut.name === "withdrawal" ? "withdrawal" : "supply",
+          })
+          return true
+
         default:
-          return false // F4/F7/F8/F9/F10/F11 são dos passos seguintes (1126d, 1127)
+          return false // F9/F10/F11 são do 1127/1129
       }
     }
 
@@ -639,6 +684,66 @@ export function SaleScreen({
   }
 
   /**
+   * F4 confirmado (1126d): o servidor cancelou a venda — o reducer volta ao estado vazio
+   * (`saleCancelled`), o cliente anotado (que era daquela venda) é esquecido e o rodapé confirma. A
+   * venda cancelada é imutável no servidor; o próximo bipe abre uma venda nova.
+   */
+  function saleCancelled(): void {
+    closeModal()
+    onCustomerChanged(null)
+    dispatch({ type: "saleCancelled" })
+    setFeedback({ kind: "success", text: SALE_CANCELLED_NOTICE })
+  }
+
+  /**
+   * ENTER da gaveta (F7/F8, 1126d): sangrar/suprir é do **caixa aberto**, não da venda (BR-10), e
+   * vai pela mesma trava das mutações da venda — uma por vez, com a fila de bipes drenada no
+   * `finally`. Quem grava o movimento, o esperado antes e o depois é o servidor (BR-12): o sucesso
+   * fecha o modal e confirma no rodapé com o valor dele; a recusa e a falha transitória voltam para
+   * o modal (que reusa a chave no retry); a bloqueante vai para a tela de erro.
+   */
+  async function sendCashMovement(
+    movement: CashMovementKind,
+    intent: CashMovementIntent,
+    idempotencyKey: string,
+  ): Promise<CashMovementApplyResult> {
+    const registerId = latest.current.register.id
+
+    mutatingRef.current = true
+    setMutating(true)
+
+    try {
+      const outcome =
+        movement === "withdrawal"
+          ? await api.withdrawCash(registerId, intent, idempotencyKey)
+          : await api.supplyCash(registerId, intent, idempotencyKey)
+
+      if (outcome.ok) {
+        closeModal()
+        setFeedback({ kind: "success", text: describeCashMovement(movement, outcome.movement) })
+        return { kind: "applied" }
+      }
+
+      if (outcome.kind === "rejected") {
+        // recusa que o próprio modal mostra (403/400/404/409): o rodapé da venda não muda
+        return { kind: "rejected", message: outcome.message }
+      }
+
+      if (outcome.kind === "retryable") {
+        // o modal fica com o aviso e o ENTER refaz com a mesma chave; o rodapé da venda não muda
+        return { kind: "retryable" }
+      }
+
+      dispatch({ type: "apiFailed", problem: outcome.problem })
+      return { kind: "failed" }
+    } finally {
+      mutatingRef.current = false
+      setMutating(false)
+      void pump() // bipes que chegaram durante o movimento esperam aqui
+    }
+  }
+
+  /**
    * Uma mutação de venda por vez: marca o "enviando…", chama a API e traduz o desfecho para quem a
    * pediu — sucesso vira `saleUpdated` com a venda que o servidor recalculou; o 404 do item que
    * sumiu avisa e a venda fica como está; a recusa do servidor (o desconto do F5) volta como
@@ -787,7 +892,7 @@ export function SaleScreen({
     dispatch({ type: "apiFailed", problem: failure.problem })
   }
 
-  // modal bloqueante (1126a/1126b/1126c): o corpo da venda sai de cena e o quadro do modal ocupa o
+  // modal bloqueante (1126a–1126d): o corpo da venda sai de cena e o quadro do modal ocupa o
   // lugar — o leitor já está desligado (`barcodeEnabled`) e o `handleKey` daqui não age enquanto ele existe
   if (modal !== null) {
     return (
@@ -821,6 +926,22 @@ export function SaleScreen({
             onSwitched={switchedOperator}
             onCancel={closeModal}
             onFailed={failModal}
+          />
+        ) : modal.kind === "cancelSale" ? (
+          <CancelSaleModal
+            saleId={modal.saleId}
+            api={api}
+            onCancelled={saleCancelled}
+            onCancel={closeModal}
+            onFailed={failModal}
+          />
+        ) : modal.kind === "cashMovement" ? (
+          <CashMovementModal
+            kind={modal.movement}
+            onSend={(intent, idempotencyKey) =>
+              sendCashMovement(modal.movement, intent, idempotencyKey)
+            }
+            onCancel={closeModal}
           />
         ) : (
           <DiscountModal onApply={applyDiscountFromModal} onCancel={closeModal} />
@@ -934,6 +1055,11 @@ function describeQuantity(item: SaleItemView | null): string {
 /** Confirmação do desconto (F5, 1126b): o desconto e o total que o servidor recalculou (BR-12). */
 function describeDiscount(sale: SaleView): string {
   return `desconto: ${formatAmount(sale.discountAmount)} — total ${formatAmount(sale.total)}`
+}
+
+/** Confirmação da gaveta (F7/F8, 1126d): o movimento com o valor que o servidor gravou (BR-12). */
+function describeCashMovement(kind: CashMovementKind, movement: CashMovementView): string {
+  return `${CASH_MOVEMENT_LABELS[kind]}: ${formatAmount(movement.amount)}`
 }
 
 /**

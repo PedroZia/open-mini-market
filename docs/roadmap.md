@@ -1119,7 +1119,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** vincular/desvincular com o nome no cabeçalho; F12 sem venda confirma, com venda aberta bloqueia e o ENTER decide; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta cliente e troca de operador`
 
-- [ ] **1126d — Modais: cancelar venda e gaveta**
+- [x] **1126d — Modais: cancelar venda e gaveta**
   **Objetivo:** portar F4, F7 e F8. **Depende:** 1126c
   **Implementar:** F4 cancelar venda (motivo + confirmação, venda some e cliente é esquecido) e F7/F8 sangria/suprimento (valor mascarado + motivo).
   **Testes/aceite:** cancelamento com motivo e falha sem perder a venda; sangria/suprimento com valor e motivo, recusa e retry; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
