@@ -1101,14 +1101,32 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `+`/`-`, granularidade de KG, `-` no limite vira aviso, falha transitória refaz; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): altera a quantidade do item na UI nova`
 
-- [ ] **1126 — Modais**
-  **Objetivo:** paridade dos modais da venda. **Depende:** 1125c
-  **Implementar:** F1 ajuda, F2 consulta de preço, F5 desconto, F6 cliente, F4 cancelar venda, F12 trocar operador, F7/F8 gaveta e confirmação do DEL, com um `ModalFrame` único; se estourar ~300 linhas, dividir e registrar antes (1126a/1126b).
-  **Testes/aceite:** testes de cada modal (recusa no modal, retry, ESC, lista com setas); gate do 1121 verde.
-  **Commit:** `feat(tui): migra os modais para OpenTUI`
+- [ ] **1126a — Modais: infraestrutura, ajuda e remoção de item**
+  **Objetivo:** criar o `ModalFrame` único e portar F1 ajuda e a confirmação do DEL/F3. **Depende:** 1125c
+  **Implementar:** `ModalFrame` (borda/título/rodapé) e roteamento de teclado por contexto (`screen`/`modal`) com o leitor **desligado** em modal (`scanner.setEnabled(false)`, §11.3); confirmação do DEL/F3 no item selecionado (`DELETE` via `runMutation`, ESC fecha sem chamar nada); F1 ajuda com o mapa de teclas. Passo dividido do 1126 original (4 subpassos); os demais modais são 1126b/c/d.
+  **Testes/aceite:** DEL/F3 abre a confirmação, ENTER remove e recalcula, ESC não chama a API, rajada não vira item com modal aberto, F1 abre/fecha; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): cria os modais e porta a ajuda e a remocao`
+
+- [ ] **1126b — Modais: consulta de preço e desconto**
+  **Objetivo:** portar F2 e F5. **Depende:** 1126a
+  **Implementar:** F2 consulta de preço (busca por código/nome, lista com setas, sem mexer na venda) e F5 desconto (valor + motivo, recusa no modal, retry), ambos no `ModalFrame`.
+  **Testes/aceite:** busca e lista com setas no F2; desconto aplicado com o recálculo do servidor, recusa e retry no F5; ESC fecha; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): porta consulta de preco e desconto`
+
+- [ ] **1126c — Modais: cliente e troca de operador**
+  **Objetivo:** portar F6 e F12. **Depende:** 1126b
+  **Implementar:** F6 cliente (busca, vincular e remover vínculo) e F12 trocar operador (bloqueia com venda aberta, confirmação, caixa preferido no login seguinte).
+  **Testes/aceite:** vincular/desvincular com o nome no cabeçalho; F12 sem venda confirma, com venda aberta bloqueia e o ENTER decide; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): porta cliente e troca de operador`
+
+- [ ] **1126d — Modais: cancelar venda e gaveta**
+  **Objetivo:** portar F4, F7 e F8. **Depende:** 1126c
+  **Implementar:** F4 cancelar venda (motivo + confirmação, venda some e cliente é esquecido) e F7/F8 sangria/suprimento (valor mascarado + motivo).
+  **Testes/aceite:** cancelamento com motivo e falha sem perder a venda; sangria/suprimento com valor e motivo, recusa e retry; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): porta cancelamento e gaveta`
 
 - [ ] **1127 — Pagamento, sucesso e fechamento**
-  **Objetivo:** portar o fim da venda e o fechamento de caixa. **Depende:** 1126
+  **Objetivo:** portar o fim da venda e o fechamento de caixa. **Depende:** 1126d
   **Implementar:** `PaymentScreen`, `SaleSuccessScreen` (troco em destaque) e `ClosingCashScreen` (contado/diferença).
   **Testes/aceite:** pagamento parcial/múltiplo, troco, bloqueio por venda aberta, ENTER da próxima venda; gate do 1121 verde.
   **Commit:** `feat(tui): migra pagamento e fechamento para OpenTUI`
