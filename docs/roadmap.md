@@ -997,7 +997,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** sangria reduz e suprimento aumenta o esperado; motivo obrigatório; sem permissão mostra erro claro.
   **Commit:** `feat(tui): adiciona sangria e suprimento`
 
-- [ ] **1115 — Fluxo: fechamento de caixa (F10)**
+- [x] **1115 — Fluxo: fechamento de caixa (F10)**
   **Objetivo:** encerrar o turno. **Depende:** 1114, 909
   **Implementar:** resumo (esperado por forma de pagamento, sangrias, suprimentos), campo de valor contado, exibição da diferença, confirmação e logout opcional.
   **Testes/aceite:** diferença calculada corretamente; bloqueio quando há venda aberta (409 tratado); após fechar volta ao login.

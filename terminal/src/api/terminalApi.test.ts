@@ -1411,3 +1411,222 @@ describe('createTerminalApi: sangria e suprimento (1114)', () => {
     });
   });
 });
+
+describe('createTerminalApi: fechamento de caixa e cancelamento da venda (1115)', () => {
+  test('o resumo é lido da sessão e normalizado para a tela, com os mapas zero-preenchidos do servidor', async () => {
+    const get = vi.fn(async () => ({
+      sessionId: 'session-1',
+      status: 'OPEN',
+      openingAmount: 10,
+      expectedAmount: 34.9,
+      countedAmount: null,
+      differenceAmount: null,
+      totalsByType: { OPENING: 10, SALE: 24.9, WITHDRAWAL: 0, SUPPLY: 0 },
+      paymentsByMethod: { CASH: 24.9, PIX: 0, DEBIT: 0, CREDIT: 0, VOUCHER: 0 },
+    }));
+    const api = createTerminalApi(stubClient({ get }));
+
+    expect(await api.cashSessionSummary('session-1')).toEqual({
+      ok: true,
+      summary: {
+        sessionId: 'session-1',
+        status: 'OPEN',
+        openingAmount: 10,
+        expectedAmount: 34.9,
+        countedAmount: null, // nulos enquanto a sessão está aberta
+        differenceAmount: null,
+        totalsByType: { OPENING: 10, SALE: 24.9, WITHDRAWAL: 0, SUPPLY: 0 },
+        paymentsByMethod: { CASH: 24.9, PIX: 0, DEBIT: 0, CREDIT: 0, VOUCHER: 0 },
+      },
+    });
+    expect(get).toHaveBeenCalledWith('/api/v1/cash-sessions/session-1/summary');
+  });
+
+  test('resumo fora do contrato cai nos zeros da tela; falha de rede bloqueia com o problema', async () => {
+    const empty = createTerminalApi(stubClient({ get: async () => ({}) }));
+    const offline = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+
+    expect(await empty.cashSessionSummary('session-1')).toEqual({
+      ok: true,
+      summary: {
+        sessionId: '',
+        status: '',
+        openingAmount: 0,
+        expectedAmount: 0,
+        countedAmount: null,
+        differenceAmount: null,
+        totalsByType: {},
+        paymentsByMethod: {},
+      },
+    });
+    expect(await offline.cashSessionSummary('session-1')).toEqual({
+      ok: false,
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+  });
+
+  test('o fechamento manda o contado e a chave do chamador, e devolve a conferência do servidor', async () => {
+    const post = vi.fn(async () => ({
+      id: 'session-1',
+      status: 'CLOSED',
+      countedAmount: 30,
+      expectedAmount: 34.9,
+      differenceAmount: -4.9,
+    }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(await api.closeCashSession('r1', { countedAmount: 30 }, 'key-9')).toEqual({
+      ok: true,
+      closing: { countedAmount: 30, expectedAmount: 34.9, differenceAmount: -4.9 },
+    });
+    // o `{id}` da rota é o **caixa**, não a sessão (passo 611)
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/cash-registers/r1/close',
+      { countedAmount: 30 },
+      { idempotencyKey: 'key-9' },
+    );
+  });
+
+  test('a observação opcional só vai no corpo quando informada', async () => {
+    const post = vi.fn(async () => ({
+      countedAmount: 30,
+      expectedAmount: 34.9,
+      differenceAmount: -4.9,
+    }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    await api.closeCashSession('r1', { countedAmount: 30, notes: 'faltou troco' }, 'key-9');
+
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/cash-registers/r1/close',
+      { countedAmount: 30, notes: 'faltou troco' },
+      { idempotencyKey: 'key-9' },
+    );
+  });
+
+  test('403 vira recusa fixa e a venda em andamento diz o que fazer; 400 mostra o detail', async () => {
+    const denied = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão cash.close' });
+        },
+      }),
+    );
+    const openSales = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(409, {
+            code: 'SESSION_HAS_OPEN_SALES',
+            detail: 'Sessão de caixa com venda em andamento',
+          });
+        },
+      }),
+    );
+    const invalid = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(400, {
+            code: 'VALIDATION_ERROR',
+            detail: 'countedAmount deve ser maior ou igual a zero',
+          });
+        },
+      }),
+    );
+
+    expect(await denied.closeCashSession('r1', { countedAmount: 30 }, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para fechar o caixa',
+    });
+    expect(await openSales.closeCashSession('r1', { countedAmount: 30 }, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'há venda em andamento — cancele a venda (F4) antes de fechar',
+    });
+    expect(await invalid.closeCashSession('r1', { countedAmount: -1 }, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'countedAmount deve ser maior ou igual a zero',
+    });
+  });
+
+  test('rede é transitória (retry com a mesma chave) e 200 sem a conferência é falha bloqueante', async () => {
+    const offline = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+    const noClosing = createTerminalApi(stubClient({ post: async () => ({ status: 'CLOSED' }) }));
+
+    expect(await offline.closeCashSession('r1', { countedAmount: 30 }, 'k')).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+    expect(await noClosing.closeCashSession('r1', { countedAmount: 30 }, 'k')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'fechamento sem conferência na resposta' },
+    });
+  });
+
+  test('o cancelamento manda o motivo e a chave, e devolve só o fato de a venda ter sido cancelada', async () => {
+    const post = vi.fn(async () => ({ id: 'sale-1', number: 7, status: 'CANCELLED' }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(await api.cancelSale('sale-1', 'cliente desistiu', 'key-10')).toEqual({ ok: true });
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/sales/sale-1/cancel',
+      { reason: 'cliente desistiu' },
+      { idempotencyKey: 'key-10' },
+    );
+  });
+
+  test('403 sem sale.cancel vira recusa fixa; 400 do motivo mostra o detail; 409 bloqueia na tela de erro', async () => {
+    const denied = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão sale.cancel' });
+        },
+      }),
+    );
+    const invalid = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(400, { code: 'VALIDATION_ERROR', detail: 'reason obrigatório' });
+        },
+      }),
+    );
+    const notOpen = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(409, { code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' });
+        },
+      }),
+    );
+
+    expect(await denied.cancelSale('sale-1', 'desistiu', 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para cancelar a venda',
+    });
+    expect(await invalid.cancelSale('sale-1', '', 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'reason obrigatório',
+    });
+    expect(await notOpen.cancelSale('sale-1', 'desistiu', 'k')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 409, code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' },
+    });
+  });
+});

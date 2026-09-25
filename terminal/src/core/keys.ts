@@ -71,6 +71,7 @@ export type ModalName =
   | 'priceLookup'
   | 'discount'
   | 'customer'
+  | 'cancelSale'
   | 'withdrawal'
   | 'supply'
   | 'readerSelfTest'

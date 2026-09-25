@@ -18,6 +18,9 @@ import type {
   OpenCashRegisterOutcome,
   SaleItemMutationOutcome,
   SearchCustomersOutcome,
+  CancelSaleOutcome,
+  CashSessionSummaryOutcome,
+  CloseCashSessionOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import { CashMovementModal } from './CashMovementModal';
@@ -110,6 +113,27 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
       async (): Promise<CashMovementOutcome> => ({
         ok: true,
         movement: { ...withdrawal(10, 150, 160), type: 'SUPPLY' },
+      }),
+    ),
+    // o fechamento e o cancelamento (1115) são do shell: aqui só fecha o contrato
+    cashSessionSummary: vi.fn(
+      async (): Promise<CashSessionSummaryOutcome> => ({
+        ok: false,
+        problem: { status: 0, code: null, detail: 'não usado na gaveta' },
+      }),
+    ),
+    closeCashSession: vi.fn(
+      async (): Promise<CloseCashSessionOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'não usado na gaveta' },
+      }),
+    ),
+    cancelSale: vi.fn(
+      async (): Promise<CancelSaleOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'não usado na gaveta' },
       }),
     ),
     ...overrides,

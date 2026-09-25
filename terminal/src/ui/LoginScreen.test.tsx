@@ -17,6 +17,9 @@ import type {
   OpenCashRegisterOutcome,
   SaleItemMutationOutcome,
   SearchCustomersOutcome,
+  CancelSaleOutcome,
+  CashSessionSummaryOutcome,
+  CloseCashSessionOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import { LoginScreen } from './LoginScreen';
@@ -149,6 +152,27 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     supplyCash: vi.fn(
       async (): Promise<CashMovementOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'não usado na tela de login' },
+      }),
+    ),
+    // o fechamento e o cancelamento (1115) são do shell: aqui só fecha o contrato
+    cashSessionSummary: vi.fn(
+      async (): Promise<CashSessionSummaryOutcome> => ({
+        ok: false,
+        problem: { status: 0, code: null, detail: 'não usado na tela de login' },
+      }),
+    ),
+    closeCashSession: vi.fn(
+      async (): Promise<CloseCashSessionOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'não usado na tela de login' },
+      }),
+    ),
+    cancelSale: vi.fn(
+      async (): Promise<CancelSaleOutcome> => ({
         ok: false,
         kind: 'retryable',
         problem: { status: 0, code: null, detail: 'não usado na tela de login' },

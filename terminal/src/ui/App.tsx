@@ -3,34 +3,37 @@ import { useReducer, useRef, useState } from 'react';
 import type { CashMovementKind, CustomerOption, TerminalApi } from '../api/terminalApi';
 import { reduce } from '../core/reducer';
 import { initialState, type ApiProblem, type SaleView } from '../core/state';
+import { CancelSaleModal } from './CancelSaleModal';
 import { CashMovementModal } from './CashMovementModal';
+import { ClosingCashScreen } from './ClosingCashScreen';
 import { CustomerModal } from './CustomerModal';
 import { DiscountModal } from './DiscountModal';
 import { ErrorScreen } from './ErrorScreen';
 import { LoginScreen } from './LoginScreen';
 import { OpeningCashScreen } from './OpeningCashScreen';
 import { PaymentScreen, type PaymentScreenHandle } from './PaymentScreen';
-import { PlaceholderScreen } from './PlaceholderScreen';
 import { ReaderSelfTestScreen, type BarcodeResolver } from './ReaderSelfTestScreen';
-import { SaleScreen } from './SaleScreen';
+import { SaleScreen, type SaleScreenHandle } from './SaleScreen';
 import { SaleSuccessScreen } from './SaleSuccessScreen';
 import { useRawShortcuts } from './useRawShortcuts';
 
 /**
  * Shell da TUI (§11.2): guarda o estado da operação no reducer puro (1103) e desenha uma tela por
- * `kind`. Login (1106), abertura de caixa (1107), venda (1108/1109) e pagamento (1113) são as telas
- * implementadas; o fechamento ainda aparece como placeholder até o passo que o implementa — a troca
- * de tela é sempre do reducer, nunca da tela.
+ * `kind`. Login (1106), abertura de caixa (1107), venda (1108/1109), pagamento (1113) e fechamento
+ * de caixa (1115) são as telas implementadas — a troca de tela é sempre do reducer, nunca da tela.
  *
  * O canal cru do teclado (F1–F12, que o `useInput` do Ink não entrega) é do shell: o hook resolve o
  * atalho no contexto da tela e aqui só se age nas **intenções** com comportamento — o autoteste do
- * leitor no F11 (1108), o desconto no F5 (1111), o cliente no F6 (1112), a sangria no F7 e o
- * suprimento no F8 (1114) e o pagamento no F9 (1113), os quatro primeiros abertos **como overlay da
- * venda**: o corpo da venda sai de cena, então a rajada do leitor não vira item, e com o modal
- * aberto o mapa só resolve ESC (`closeModal`, §11.3). O F5/F6 sem venda criada não abre nada: não há
- * desconto nem cliente a vincular antes do primeiro bipe (1109) — e o F9 depende do reducer, que só
- * abre o pagamento com venda e itens (1113). O F7/F8, ao contrário, abre com o caixa da sessão
- * mesmo sem venda: sangrar e suprir são operações da gaveta, não da venda (1114).
+ * leitor no F11 (1108), o cancelamento do item no F3, o cancelamento da venda no F4 e o fechamento
+ * no F10 (1115), o desconto no F5 (1111), o cliente no F6 (1112), a sangria no F7 e o suprimento no
+ * F8 (1114) e o pagamento no F9 (1113), todos menos o F10 abertos **como overlay da venda**: o corpo
+ * da venda sai de cena, então a rajada do leitor não vira item, e com o modal aberto o mapa só
+ * resolve ESC (`closeModal`, §11.3). O F5/F6 sem venda criada não abre nada: não há desconto nem
+ * cliente a vincular antes do primeiro bipe (1109) — o F4 segue a mesma regra, porque sem venda não
+ * há o que cancelar —, e o F9 depende do reducer, que só abre o pagamento com venda e itens (1113).
+ * O F7/F8, ao contrário, abre com o caixa da sessão mesmo sem venda: sangrar e suprir são operações
+ * da gaveta, não da venda (1114). O F3 não tem lógica própria: ele chama o `askRemove` do DEL pelo
+ * handle da tela de venda (1115).
  *
  * O pagamento é uma tela, não um overlay: o F9 do shell abre (`paymentStarted`) e, já no pagamento,
  * o mesmo F9 **conclui** — a tecla chega pelo canal cru e o shell chama o `complete()` da tela pelo
@@ -40,7 +43,15 @@ import { useRawShortcuts } from './useRawShortcuts';
  * O cliente vinculado é o único pedaço da view que não cabe no reducer: o `SaleDetailResponse` só
  * traz o `customerId`, então o shell guarda o par `{id, name}` que a busca local capturou (1112) e o
  * cabeçalho mostra esse nome enquanto a venda do servidor apontar para o mesmo id — o vínculo real
- * é o do servidor, o nome é a anotação da seleção, e ela é esquecida quando a venda conclui (1113).
+ * é o do servidor, o nome é a anotação da seleção, e ela é esquecida quando a venda conclui (1113)
+ * ou é cancelada no F4 (1115).
+ *
+ * Os fluxos do 1115 fecham o turno: o F3 cai no mesmo `askRemove` do DEL pelo handle da tela de
+ * venda (a confirmação do remover é uma só), o F4 abre o modal do cancelamento — venda cancelada
+ * volta ao estado vazio e a anotação local do cliente morre com ela — e o F10 leva para o
+ * `closingCash`, a primeira tela do shell que não é overlay: o resumo e o contado são dela, e a
+ * diferença que ela exibe vem do corpo do close (BR-12). Com o caixa fechado, o ENTER da tela faz o
+ * logout e qualquer outra tecla volta ao login sem revogar a sessão.
  */
 export function App({ api }: { api: TerminalApi }) {
   const [state, dispatch] = useReducer(reduce, initialState);
@@ -50,12 +61,16 @@ export function App({ api }: { api: TerminalApi }) {
   const [discountOpen, setDiscountOpen] = useState(false);
   /** Modal de cliente aberto sobre a venda (1112): estado de UI, fora do reducer. */
   const [customerOpen, setCustomerOpen] = useState(false);
+  /** Modal do cancelamento aberto sobre a venda (F4, 1115): estado de UI, fora do reducer. */
+  const [cancelSaleOpen, setCancelSaleOpen] = useState(false);
   /** Modal da gaveta aberto sobre a venda (1114): sangria (F7) ou suprimento (F8), fora do reducer. */
   const [cashMovement, setCashMovement] = useState<CashMovementKind | null>(null);
   /** Cliente que esta sessão vinculou, com o nome da busca; `null` na venda anônima (1112). */
   const [customer, setCustomer] = useState<CustomerOption | null>(null);
   /** Handle da tela de pagamento: é por ele que o F9 do canal cru conclui a venda (1113). */
   const paymentRef = useRef<PaymentScreenHandle | null>(null);
+  /** Handle da tela de venda: é por ele que o F3 do canal cru abre a confirmação do DEL (1115). */
+  const saleRef = useRef<SaleScreenHandle | null>(null);
 
   useRawShortcuts(
     (shortcut) => {
@@ -75,6 +90,14 @@ export function App({ api }: { api: TerminalApi }) {
         if (state.kind === 'saleOpen' && state.sale !== null) {
           setCustomerOpen(true);
         }
+      } else if (shortcut.name === 'cancelItem') {
+        // F3 e DEL fazem o mesmo: a confirmação do remover é do handler da tela de venda (1110)
+        saleRef.current?.askRemove();
+      } else if (shortcut.name === 'cancelSale') {
+        // sem venda criada não há o que cancelar; a tela de sucesso é do ENTER (1113)
+        if (state.kind === 'saleOpen' && state.sale !== null && state.receipt === null) {
+          setCancelSaleOpen(true);
+        }
       } else if (shortcut.name === 'withdrawal' || shortcut.name === 'supply') {
         // a gaveta é do caixa aberto, não da venda: o F7/F8 vale também antes do primeiro bipe.
         // Com a tela de sucesso à vista o ENTER é dela — a gaveta se mexe depois de dispensá-la.
@@ -89,10 +112,16 @@ export function App({ api }: { api: TerminalApi }) {
           // abre o pagamento: o reducer ignora fora da venda ou com a venda sem itens (1113)
           dispatch({ type: 'paymentStarted' });
         }
+      } else if (shortcut.name === 'closeCash') {
+        // F10: o fechamento é do caixa aberto; com a tela de sucesso à vista o ENTER é dela (1113)
+        if (state.kind === 'saleOpen' && state.receipt === null) {
+          dispatch({ type: 'cashClosingStarted' });
+        }
       } else if (shortcut.name === 'closeModal') {
         setReaderSelfTest(false);
         setDiscountOpen(false);
         setCustomerOpen(false);
+        setCancelSaleOpen(false);
         setCashMovement(null);
       }
     },
@@ -104,9 +133,11 @@ export function App({ api }: { api: TerminalApi }) {
           ? 'discount'
           : customerOpen
             ? 'customer'
-            : readerSelfTest
-              ? 'readerSelfTest'
-              : null),
+            : cancelSaleOpen
+              ? 'cancelSale'
+              : readerSelfTest
+                ? 'readerSelfTest'
+                : null),
     },
   );
 
@@ -132,6 +163,19 @@ export function App({ api }: { api: TerminalApi }) {
   /** Venda concluída (1113): o nome do cliente era da venda que fechou e não vale para a próxima. */
   function saleCompleted(): void {
     setCustomer(null);
+  }
+
+  /** Venda cancelada no servidor (F4, 1115): a venda some e o nome anotado era dela. */
+  function saleCancelled(): void {
+    setCancelSaleOpen(false);
+    setCustomer(null);
+    dispatch({ type: 'saleCancelled' });
+  }
+
+  /** Falha bloqueante do cancelamento: fecha o modal e manda o problema para a tela de erro (§11.4). */
+  function saleCancelFailed(problem: ApiProblem): void {
+    setCancelSaleOpen(false);
+    dispatch({ type: 'apiFailed', problem });
   }
 
   /** Falha bloqueante do cliente: fecha o modal e manda o problema para a tela de erro (§11.4). */
@@ -207,10 +251,22 @@ export function App({ api }: { api: TerminalApi }) {
         );
       }
 
+      if (cancelSaleOpen && state.sale !== null) {
+        return (
+          <CancelSaleModal
+            saleId={state.sale.id}
+            api={api}
+            onCancelled={saleCancelled}
+            onFailed={saleCancelFailed}
+          />
+        );
+      }
+
       return readerSelfTest ? (
         <ReaderSelfTestScreen resolve={resolveBarcode} />
       ) : (
         <SaleScreen
+          ref={saleRef}
           state={state}
           now={new Date()}
           api={api}
@@ -229,7 +285,7 @@ export function App({ api }: { api: TerminalApi }) {
         />
       );
     case 'closingCash':
-      return <PlaceholderScreen title="Fechamento de caixa" step="1115" />;
+      return <ClosingCashScreen state={state} api={api} dispatch={dispatch} />;
     case 'error':
       return <ErrorScreen problem={state.problem} dispatch={dispatch} />;
   }

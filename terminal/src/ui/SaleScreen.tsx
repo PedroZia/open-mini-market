@@ -1,5 +1,5 @@
 import { Box, Text, useInput, useStdout } from 'ink';
-import { useEffect, useRef, useState, type Dispatch } from 'react';
+import { useEffect, useImperativeHandle, useRef, useState, type Dispatch, type Ref } from 'react';
 
 import type {
   CustomerOption,
@@ -19,7 +19,8 @@ import { inputChars } from './scannerInput';
  * Tela de venda (passos 1108 a 1110, §11.3): o layout principal do operador — cabeçalho com caixa,
  * operador e hora, lista dos últimos itens com o selecionado destacado, painel de totais e barra de
  * status com os atalhos — e a operação: o bipe que vira item, o `+`/`-` que corrige a quantidade e
- * o DEL que remove com confirmação.
+ * o DEL que remove com confirmação. O F3 (cancelar item) é do canal cru do shell e cai no **mesmo**
+ * `askRemove` do DEL pelo handle da tela (1115): a confirmação do remover é uma só.
  *
  * A tela não calcula nada (BR-12): subtotal, desconto e total saem de `state.sale`, como o servidor
  * mandou; antes do primeiro bipe a venda é `null` e a tela mostra a lista vazia com zeros de
@@ -60,7 +61,15 @@ export type SaleScreenProps = {
   dispatch: Dispatch<Action>;
   /** Cliente vinculado com o nome que a busca local capturou (1112); `null` na venda anônima. */
   customer: CustomerOption | null;
+  /** O shell chama `askRemove()` no F3 do canal cru — a tecla não passa pelo `useInput`. */
+  ref?: Ref<SaleScreenHandle>;
 };
+
+/**
+ * O que o shell dispara de fora: o F3 é do canal cru e não chega ao `useInput` desta tela, então ele
+ * cai no **mesmo** `askRemove` do DEL (1110/1115) — uma confirmação só, sem lógica duplicada.
+ */
+export type SaleScreenHandle = { askRemove: () => void };
 
 /** Itens visíveis: o que sobra das 24 linhas depois de cabeçalho, totais, rodapé e status. */
 const MAX_ITEM_ROWS = 10;
@@ -91,7 +100,7 @@ type Feedback =
   | { kind: 'notice'; text: string }
   | { kind: 'failure'; text: string };
 
-export function SaleScreen({ state, now, api, dispatch, customer }: SaleScreenProps) {
+export function SaleScreen({ state, now, api, dispatch, customer, ref }: SaleScreenProps) {
   const { stdout } = useStdout();
   /** Buffer do leitor: um por tela, com o timing medido no wiring. */
   const scannerRef = useRef<Scanner | null>(null);
@@ -276,6 +285,9 @@ export function SaleScreen({ state, now, api, dispatch, customer }: SaleScreenPr
 
     setConfirmRemove(selectedItem);
   }
+
+  /** F3 (canal cru do shell) e DEL caem no mesmo `askRemove`: uma confirmação, um caminho (1115). */
+  useImperativeHandle(ref, () => ({ askRemove: () => askRemove() }));
 
   /**
    * ENTER da confirmação: o `DELETE` do item que a confirmação guardou (ESC não chega aqui — o

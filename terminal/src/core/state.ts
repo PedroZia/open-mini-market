@@ -75,6 +75,19 @@ export type ReceiptView = {
   changeAmount: number;
 };
 
+/**
+ * Conferência do fechamento como o servidor a devolveu no 200 do `close` (1115): o contado, o
+ * esperado e a **diferença dele** — a tela exibe os três, nunca recalcula (BR-12).
+ */
+export type CashClosingView = {
+  /** Valor contado que a TUI mandou, como o servidor o gravou. */
+  countedAmount: number;
+  /** Esperado na gaveta, recalculado pelo servidor (BR-12). */
+  expectedAmount: number;
+  /** `contado − esperado` do servidor: positivo é sobra, negativo é falta. */
+  differenceAmount: number;
+};
+
 /** Bipe do leitor aguardando a chamada da API; o código segue **bruto** (BR-14). */
 export type ScanIntent = {
   barcode: string;
@@ -127,8 +140,13 @@ export type PayingState = CashContext & {
 
 export type ClosingCashState = CashContext & {
   kind: 'closingCash';
-  /** venda em andamento preservada: ESC volta para ela. */
+  /** venda em andamento preservada: ESC volta para ela **enquanto a sessão não fechou**. */
   sale: SaleView | null;
+  /**
+   * Conferência do fechamento já gravado (1115): com ela à vista a sessão terminou — o ESC não
+   * volta mais para a venda (não há venda possível num caixa fechado) e o login é a saída.
+   */
+  closing: CashClosingView | null;
 };
 
 /** Estado de operação — um por tela. */

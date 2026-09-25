@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { reduce, type Action } from './reducer';
-import { initialState, type ReceiptView, type SaleView, type State } from './state';
+import { initialState, type CashClosingView, type ReceiptView, type SaleView, type State } from './state';
 
 const operator = { id: 'u-1', name: 'Ana' };
 const register = { id: 'r-1', name: 'Caixa 1' };
@@ -22,6 +22,9 @@ const sale: SaleView = {
 
 /** Resumo que o `complete` devolveu: a tela de sucesso mostra estes números, não uma conta (1113). */
 const receipt: ReceiptView = { number: 42, total: 5.5, changeAmount: 0.5 };
+
+/** Conferência que o `close` devolveu: contado, esperado e a diferença — todas do servidor (1115). */
+const closingView: CashClosingView = { countedAmount: 6, expectedAmount: 5.5, differenceAmount: 0.5 };
 
 const problem = { status: 503, code: null, detail: 'Serviço indisponível.' };
 
@@ -239,6 +242,7 @@ describe('reducer da operação', () => {
       register,
       sessionId: 'session-1',
       sale,
+      closing: null,
     });
   });
 
@@ -256,10 +260,50 @@ describe('reducer da operação', () => {
     });
   });
 
+  test('fechamento gravado guarda a conferência do servidor na tela', () => {
+    const closing = reduce(selling(), { type: 'cashClosingStarted' });
+
+    expect(reduce(closing, { type: 'cashCloseSucceeded', closing: closingView })).toEqual({
+      kind: 'closingCash',
+      operator,
+      register,
+      sessionId: 'session-1',
+      sale,
+      closing: closingView,
+    });
+  });
+
+  test('caixa já fechado: o ESC não volta para a venda, porque não há venda num caixa fechado', () => {
+    const closed = reduce(reduce(selling(), { type: 'cashClosingStarted' }), {
+      type: 'cashCloseSucceeded',
+      closing: closingView,
+    });
+
+    expect(reduce(closed, { type: 'cancel' })).toBe(closed);
+  });
+
   test('caixa fechado volta ao login', () => {
     const closing = reduce(selling(), { type: 'cashClosingStarted' });
 
     expect(reduce(closing, { type: 'cashClosed' })).toEqual({ kind: 'login', failure: null });
+  });
+
+  test('F4 cancela a venda: volta à venda vazia, sem venda e sem bipe pendente', () => {
+    expect(reduce(selling(), { type: 'saleCancelled' })).toEqual({
+      kind: 'saleOpen',
+      operator,
+      register,
+      sessionId: 'session-1',
+      sale: null,
+      pendingScan: null,
+      receipt: null,
+    });
+  });
+
+  test('cancelar sem venda criada é ignorado e devolve o mesmo estado', () => {
+    const state = cashOpened();
+
+    expect(reduce(state, { type: 'saleCancelled' })).toBe(state);
   });
 
   test('falha da API guarda o estado de origem para voltar', () => {
@@ -313,12 +357,16 @@ describe('reducer da operação', () => {
       [initialState, { type: 'barcodeScanned', barcode: '7891000100103', quantity: 1 }],
       [initialState, { type: 'cashClosed' }],
       [initialState, { type: 'saleCompleted', receipt }],
+      [initialState, { type: 'saleCancelled' }],
+      [initialState, { type: 'cashCloseSucceeded', closing: closingView }],
       [loggedIn(), { type: 'paymentStarted' }],
       [loggedIn(), { type: 'cancel' }],
       [cashOpened(), { type: 'cashOpened', sessionId: 'session-2' }],
       [cashOpened(), { type: 'saleCompleted', receipt }],
+      [cashOpened(), { type: 'cashCloseSucceeded', closing: closingView }],
       [selling(), { type: 'cancel' }],
       [selling(), { type: 'cashClosed' }],
+      [selling(), { type: 'cashCloseSucceeded', closing: closingView }],
     ];
 
     for (const [state, action] of cases) {
@@ -353,6 +401,8 @@ describe('reducer da operação', () => {
 
     state = reduce(state, { type: 'receiptDismissed' });
     state = reduce(state, { type: 'cashClosingStarted' });
+    state = reduce(state, { type: 'cashCloseSucceeded', closing: closingView });
+    state = reduce(state, { type: 'cancel' }); // caixa fechado: o ESC não volta para a venda
     state = reduce(state, { type: 'cashClosed' });
 
     expect(state).toEqual({ kind: 'login', failure: null });

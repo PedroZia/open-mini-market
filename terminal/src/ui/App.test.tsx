@@ -6,10 +6,14 @@ import type {
   AddSaleItemOutcome,
   ApplyDiscountOutcome,
   BarcodeLookupOutcome,
+  CancelSaleOutcome,
   CashMovementOutcome,
   CashMovementView,
   CashRegisterOption,
   CashRegistersOutcome,
+  CashSessionSummaryOutcome,
+  CashSessionSummaryView,
+  CloseCashSessionOutcome,
   CompleteSaleOutcome,
   CreateSaleOutcome,
   CurrentCashSessionOutcome,
@@ -178,6 +182,27 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
         ok: false,
         kind: 'retryable',
         problem: { status: 0, code: null, detail: 'suprimento não usado neste teste' },
+      }),
+    ),
+    // o fechamento (1115) tem o seu próprio describe; aqui só fecha o contrato
+    cashSessionSummary: vi.fn(
+      async (): Promise<CashSessionSummaryOutcome> => ({
+        ok: false,
+        problem: { status: 0, code: null, detail: 'resumo não usado neste teste' },
+      }),
+    ),
+    closeCashSession: vi.fn(
+      async (): Promise<CloseCashSessionOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'fechamento não usado neste teste' },
+      }),
+    ),
+    cancelSale: vi.fn(
+      async (): Promise<CancelSaleOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'cancelamento não usado neste teste' },
       }),
     ),
     ...overrides,
@@ -1437,5 +1462,313 @@ describe('App: sangria e suprimento (1114)', () => {
 
     await expectFrame(ui.lastFrame, 'Sangria (F7)');
     expect(ui.lastFrame()).not.toContain('Desconto na venda (F5)');
+  });
+});
+
+describe('App: fechamento de caixa e cancelamentos (1115)', () => {
+  /** F3/F4/F10 no canal cru: o `useInput` do Ink não entrega as teclas F (1105). */
+  const F3 = '\u001b[13~';
+  const F4 = '\u001b[14~';
+  const F10 = '\u001b[21~';
+
+  /** Cliente da busca (502): o CPF chega só com dígitos e a máscara é da apresentação. */
+  const MARIA: CustomerOption = { id: 'c1', name: 'Maria Silva', taxId: '12345678900' };
+
+  /** Resumo que o servidor devolve no `summary`: esperado e quebras são dele (BR-12). */
+  function summary(overrides: Partial<CashSessionSummaryView> = {}): CashSessionSummaryView {
+    return {
+      sessionId: 'session-1',
+      status: 'OPEN',
+      openingAmount: 10,
+      expectedAmount: 44.9,
+      countedAmount: null,
+      differenceAmount: null,
+      totalsByType: { OPENING: 10, SALE: 34.9, WITHDRAWAL: 3, SUPPLY: 3 },
+      paymentsByMethod: { CASH: 34.9, PIX: 0, DEBIT: 0, CREDIT: 0, VOUCHER: 0 },
+      ...overrides,
+    };
+  }
+
+  /** Venda que o servidor devolve no vínculo do F6: o item vem junto e o `customerId` é o dele. */
+  function saleWithCustomer(customerId: string | null): SaleView {
+    return {
+      id: 'sale-1',
+      items: [
+        { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+      ],
+      subtotal: 24.9,
+      discountAmount: 0,
+      total: 24.9,
+      paidAmount: 0,
+      changeAmount: 0,
+      payments: [],
+      customerId,
+    };
+  }
+
+  /** Venda com um item: o F6, o F4 e o F3 só atuam quando a venda já existe (1109). */
+  async function reachSaleWithItem(api: TerminalApi) {
+    const ui = render(<App api={api} />);
+    await reachSale(ui);
+    ui.stdin.write('7891000100103\r');
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+
+    return ui;
+  }
+
+  /** Digita o valor contado e o ENTER do formulário: a confirmação fica à vista, API ainda não. */
+  async function confirmClose(
+    ui: { stdin: { write: (data: string) => void }; lastFrame: () => string | undefined },
+  ): Promise<void> {
+    ui.stdin.write('3000');
+    await expectFrame(ui.lastFrame, 'Valor contado: R$ 30,00');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'fechar o caixa com R$ 30,00?');
+  }
+
+  test('F10 abre o fechamento e busca o resumo da sessão no servidor', async () => {
+    const cashSessionSummary = vi.fn(
+      async (): Promise<CashSessionSummaryOutcome> => ({ ok: true, summary: summary() }),
+    );
+    const ui = render(<App api={apiStub({ cashSessionSummary })} />);
+    await reachSale(ui);
+
+    ui.stdin.write(F10);
+
+    await expectFrame(ui.lastFrame, 'Fechamento de caixa (F10)');
+    expect(cashSessionSummary).toHaveBeenCalledWith('session-1');
+    expect(ui.lastFrame()).toContain('Aberto: R$ 10,00');
+    expect(ui.lastFrame()).toContain('Esperado: R$ 44,90');
+    expect(ui.lastFrame()).toContain('DINHEIRO: R$ 34,90');
+    expect(ui.lastFrame()).toContain('Sangrias: R$ 3,00 · Suprimentos: R$ 3,00');
+    expect(ui.lastFrame()).toContain('Valor contado: R$ 0,00');
+  });
+
+  test('fechar mostra a diferença do servidor e o ENTER faz logout e volta ao login', async () => {
+    const cashSessionSummary = vi.fn(
+      async (): Promise<CashSessionSummaryOutcome> => ({ ok: true, summary: summary() }),
+    );
+    const closeCashSession = vi.fn(
+      async (): Promise<CloseCashSessionOutcome> => ({
+        ok: true,
+        closing: { countedAmount: 30, expectedAmount: 44.9, differenceAmount: -14.9 },
+      }),
+    );
+    const logout = vi.fn(async () => undefined);
+    const ui = render(<App api={apiStub({ cashSessionSummary, closeCashSession, logout })} />);
+    await reachSale(ui);
+    ui.stdin.write(F10);
+    await expectFrame(ui.lastFrame, 'Esperado: R$ 44,90');
+
+    await confirmClose(ui);
+
+    expect(closeCashSession).not.toHaveBeenCalled(); // o ENTER do formulário só confirmou
+
+    ui.stdin.write('\r'); // confirmação: esta chama a API
+
+    await expectFrame(ui.lastFrame, 'Diferença (servidor): R$ -14,90');
+    expect(ui.lastFrame()).toContain('falta dinheiro na gaveta');
+    expect(closeCashSession).toHaveBeenCalledWith('r1', { countedAmount: 30 }, expect.any(String));
+
+    // o login em dois passos (1107) já revogou a sessão provisória: daqui em diante só o fechamento conta
+    logout.mockClear();
+    ui.stdin.write('\r'); // ENTER com o caixa fechado: revoga a sessão
+
+    await expectFrame(ui.lastFrame, 'Usuário:');
+    expect(logout).toHaveBeenCalledTimes(1);
+  });
+
+  test('com o caixa fechado, outra tecla volta ao login sem revogar a sessão', async () => {
+    const cashSessionSummary = vi.fn(
+      async (): Promise<CashSessionSummaryOutcome> => ({ ok: true, summary: summary() }),
+    );
+    const closeCashSession = vi.fn(
+      async (): Promise<CloseCashSessionOutcome> => ({
+        ok: true,
+        closing: { countedAmount: 30, expectedAmount: 44.9, differenceAmount: -14.9 },
+      }),
+    );
+    const logout = vi.fn(async () => undefined);
+    const ui = render(<App api={apiStub({ cashSessionSummary, closeCashSession, logout })} />);
+    await reachSale(ui);
+    ui.stdin.write(F10);
+    await expectFrame(ui.lastFrame, 'Esperado: R$ 44,90');
+    await confirmClose(ui);
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'Diferença (servidor): R$ -14,90');
+
+    logout.mockClear();
+    ui.stdin.write('x'); // outra tecla: volta sem logout
+
+    await expectFrame(ui.lastFrame, 'Usuário:');
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  test('409 SESSION_HAS_OPEN_SALES mostra a mensagem, não fecha e o ESC volta para a venda', async () => {
+    const cashSessionSummary = vi.fn(
+      async (): Promise<CashSessionSummaryOutcome> => ({ ok: true, summary: summary() }),
+    );
+    const closeCashSession = vi.fn(
+      async (): Promise<CloseCashSessionOutcome> => ({
+        ok: false,
+        kind: 'rejected',
+        message: 'há venda em andamento — cancele a venda (F4) antes de fechar',
+      }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ cashSessionSummary, closeCashSession }));
+    ui.stdin.write(F10);
+    await expectFrame(ui.lastFrame, 'Esperado: R$ 44,90');
+    await confirmClose(ui);
+
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'há venda em andamento — cancele a venda (F4) antes de fechar');
+    expect(ui.lastFrame()).not.toContain('Diferença (servidor)'); // o caixa não fechou
+    expect(ui.lastFrame()).toContain('Valor contado: R$ 30,00'); // segue na tela, com o valor
+
+    ui.stdin.write('\u001b'); // ESC volta para a venda preservada (reducer)
+
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).not.toContain('Fechamento de caixa (F10)');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90'); // a venda intacta
+  });
+
+  test('ESC no fechamento volta para a venda sem fechar nada', async () => {
+    const cashSessionSummary = vi.fn(
+      async (): Promise<CashSessionSummaryOutcome> => ({ ok: true, summary: summary() }),
+    );
+    const closeCashSession = vi.fn(
+      async (): Promise<CloseCashSessionOutcome> => ({
+        ok: true,
+        closing: { countedAmount: 30, expectedAmount: 44.9, differenceAmount: -14.9 },
+      }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ cashSessionSummary, closeCashSession }));
+    ui.stdin.write(F10);
+    await expectFrame(ui.lastFrame, 'Fechamento de caixa (F10)');
+
+    ui.stdin.write('\u001b');
+
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90');
+    expect(ui.lastFrame()).not.toContain('Fechamento de caixa (F10)');
+    expect(closeCashSession).not.toHaveBeenCalled();
+  });
+
+  test('F3 faz o mesmo que o DEL: abre a confirmação e o ENTER remove o item', async () => {
+    const removeSaleItem = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({
+        ok: true,
+        sale: { ...saleWithCustomer(null), items: [] },
+      }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ removeSaleItem }));
+
+    ui.stdin.write(F3);
+
+    await expectFrame(ui.lastFrame, 'remover Arroz 5kg? ENTER confirma · ESC cancela');
+    expect(removeSaleItem).not.toHaveBeenCalled(); // nada vai à API antes do ENTER
+
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'removido: Arroz 5kg');
+    expect(removeSaleItem).toHaveBeenCalledWith('sale-1', 'p1');
+    expect(ui.lastFrame()).toContain('bipar o primeiro item para iniciar a venda');
+  });
+
+  test('F3 sem item selecionado não abre nada (a venda vazia não tem o que cancelar)', async () => {
+    const removeSaleItem = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'notFound' }),
+    );
+    const ui = render(<App api={apiStub({ removeSaleItem })} />);
+    await reachSale(ui);
+
+    ui.stdin.write(F3);
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(ui.lastFrame()).not.toContain('ENTER confirma · ESC cancela');
+    expect(removeSaleItem).not.toHaveBeenCalled();
+  });
+
+  test('F4 sem venda criada não abre: não há o que cancelar', async () => {
+    const cancelSale = vi.fn(async (): Promise<CancelSaleOutcome> => ({ ok: true }));
+    const ui = render(<App api={apiStub({ cancelSale })} />);
+    await reachSale(ui);
+
+    ui.stdin.write(F4);
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(ui.lastFrame()).not.toContain('Cancelar a venda (F4)');
+    expect(cancelSale).not.toHaveBeenCalled();
+  });
+
+  test('F4 exige motivo: sem texto o modal avisa e nada vai à API', async () => {
+    const cancelSale = vi.fn(async (): Promise<CancelSaleOutcome> => ({ ok: true }));
+    const ui = await reachSaleWithItem(apiStub({ cancelSale }));
+
+    ui.stdin.write(F4);
+
+    await expectFrame(ui.lastFrame, 'Cancelar a venda (F4)');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'informe o motivo do cancelamento');
+    expect(ui.lastFrame()).toContain('Cancelar a venda (F4)'); // o modal segue aberto
+    expect(cancelSale).not.toHaveBeenCalled();
+  });
+
+  test('F4 cancela a venda: volta à venda vazia e limpa o cliente do cabeçalho', async () => {
+    const searchCustomers = vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [MARIA] }),
+    );
+    const linkCustomer = vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: saleWithCustomer(MARIA.id) }),
+    );
+    const cancelSale = vi.fn(async (): Promise<CancelSaleOutcome> => ({ ok: true }));
+    const ui = await reachSaleWithItem(apiStub({ searchCustomers, linkCustomer, cancelSale }));
+
+    // primeiro o vínculo do cliente, para o cabeçalho ter o nome a limpar
+    ui.stdin.write('\u001b[17~'); // F6
+    await expectFrame(ui.lastFrame, 'Cliente na venda (F6)');
+    ui.stdin.write('maria');
+    await expectFrame(ui.lastFrame, 'Busca: maria');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, '› Maria Silva — 123.456.789-00');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'Cliente: Maria Silva');
+
+    ui.stdin.write(F4);
+    await expectFrame(ui.lastFrame, 'Cancelar a venda (F4)');
+    ui.stdin.write('cliente desistiu');
+    await expectFrame(ui.lastFrame, '› Motivo: cliente desistiu');
+    ui.stdin.write('\r'); // formulário: só confirma
+    await expectFrame(ui.lastFrame, 'cancelar a venda em andamento?');
+    expect(cancelSale).not.toHaveBeenCalled(); // nada vai à API antes do ENTER da confirmação
+
+    ui.stdin.write('\r'); // confirmação: esta cancela a venda
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(cancelSale).toHaveBeenCalledWith('sale-1', 'cliente desistiu', expect.any(String));
+    expect(ui.lastFrame()).not.toContain('Cliente: Maria Silva');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 0,00');
+    expect(ui.lastFrame()).not.toContain('Cancelar a venda (F4)');
+  });
+
+  test('ESC no modal do F4 fecha sem cancelar a venda', async () => {
+    const cancelSale = vi.fn(async (): Promise<CancelSaleOutcome> => ({ ok: true }));
+    const ui = await reachSaleWithItem(apiStub({ cancelSale }));
+
+    ui.stdin.write(F4);
+    await expectFrame(ui.lastFrame, 'Cancelar a venda (F4)');
+    ui.stdin.write('cliente desistiu');
+    await expectFrame(ui.lastFrame, '› Motivo: cliente desistiu');
+
+    ui.stdin.write('\u001b');
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Cancelar a venda (F4)');
+    });
+    expect(cancelSale).not.toHaveBeenCalled();
+    expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90'); // a venda intacta
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90');
   });
 });

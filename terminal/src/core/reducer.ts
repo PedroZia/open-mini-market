@@ -1,5 +1,6 @@
 import type {
   ApiProblem,
+  CashClosingView,
   CashContext,
   CashRegister,
   ClosingCashState,
@@ -37,7 +38,11 @@ export type Action =
   | { type: 'saleCompleted'; receipt: ReceiptView }
   /** ENTER na tela de sucesso: a próxima venda começa limpa, pronta para o primeiro bipe (1113). */
   | { type: 'receiptDismissed' }
+  /** Venda cancelada no servidor (F4, 1115): a tela volta à venda vazia do primeiro bipe. */
+  | { type: 'saleCancelled' }
   | { type: 'cashClosingStarted' }
+  /** Fechamento gravado pelo servidor (1115): leva a conferência dele para a tela do fechamento. */
+  | { type: 'cashCloseSucceeded'; closing: CashClosingView }
   | { type: 'cashClosed' }
   | { type: 'apiFailed'; problem: ApiProblem };
 
@@ -114,13 +119,18 @@ function reduceSaleOpen(state: SaleOpenState, action: Action): State {
     case 'receiptDismissed':
       // ENTER na tela de sucesso: sem resumo não há o que dispensar
       return state.receipt === null ? state : { ...state, receipt: null };
+    case 'saleCancelled':
+      // F4: a venda do servidor foi cancelada — sem venda criada, o próximo bipe abre uma nova
+      return state.sale === null
+        ? state
+        : { ...state, sale: null, pendingScan: null, receipt: null };
     case 'paymentStarted':
       // sem venda criada nem itens não há o que pagar (BR-05: venda vazia não conclui)
       return state.sale === null || state.sale.items.length === 0
         ? state
         : { kind: 'paying', ...cashContext(state), sale: state.sale };
     case 'cashClosingStarted':
-      return { kind: 'closingCash', ...cashContext(state), sale: state.sale };
+      return { kind: 'closingCash', ...cashContext(state), sale: state.sale, closing: null };
     case 'apiFailed':
       return blocked(state, action.problem);
     default:
@@ -159,17 +169,23 @@ function reducePaying(state: PayingState, action: Action): State {
 
 function reduceClosingCash(state: ClosingCashState, action: Action): State {
   switch (action.type) {
+    case 'cashCloseSucceeded':
+      // o servidor gravou a conferência: a tela mostra a diferença dele e o login é a saída (1115)
+      return { ...state, closing: action.closing };
     case 'cashClosed':
       // a sessão terminou: o próximo operador entra pelo login
       return { kind: 'login', failure: null };
     case 'cancel':
-      return {
-        kind: 'saleOpen',
-        ...cashContext(state),
-        sale: state.sale,
-        pendingScan: null,
-        receipt: null,
-      };
+      // com o caixa já fechado não há venda possível: o ESC só volta enquanto a sessão está aberta
+      return state.closing === null
+        ? {
+            kind: 'saleOpen',
+            ...cashContext(state),
+            sale: state.sale,
+            pendingScan: null,
+            receipt: null,
+          }
+        : state;
     case 'apiFailed':
       return blocked(state, action.problem);
     default:

@@ -2,6 +2,7 @@ import { ApiError, type ApiClient, type components } from '@minimarket/api-clien
 
 import type {
   ApiProblem,
+  CashClosingView,
   Operator,
   PaymentMethod,
   ReceiptView,
@@ -257,6 +258,74 @@ export type CashMovementOutcome =
   | { ok: false; kind: 'rejected'; message: string }
   | SendFailure;
 
+/**
+ * Resumo do fechamento como o servidor o devolve (`CashSessionSummaryResponse`, passos 612/909): é o
+ * que a tela do F10 mostra antes de o operador digitar o contado — o esperado e as quebras são dele
+ * (BR-12), a TUI só exibe. `countedAmount`/`differenceAmount` são nulos enquanto a sessão está
+ * aberta (o contado só existe no fechamento).
+ */
+export type CashSessionSummaryView = {
+  sessionId: string;
+  /** `OPEN`/`CLOSED` do contrato. */
+  status: string;
+  /** Fundo de troco da abertura. */
+  openingAmount: number;
+  /** Esperado na gaveta, recalculado pelo servidor (BR-12). */
+  expectedAmount: number;
+  countedAmount: number | null;
+  differenceAmount: number | null;
+  /** Totais por tipo de movimento (`OPENING`/`SALE`/`WITHDRAWAL`/`SUPPLY`), zero-preenchidos. */
+  totalsByType: Record<string, number>;
+  /** Vendas da sessão por forma de pagamento: as cinco formas, zero-preenchidas (passo 909). */
+  paymentsByMethod: Record<string, number>;
+};
+
+/**
+ * Resultado do resumo: leitura cuja falha bloqueia como a da sessão corrente (1107) — sem o resumo
+ * não há conferência para mostrar, e a tela de erro volta para o fechamento, que o busca de novo.
+ */
+export type CashSessionSummaryOutcome =
+  | { ok: true; summary: CashSessionSummaryView }
+  | { ok: false; problem: ApiProblem };
+
+/**
+ * O que o fechamento manda (`CloseCashSessionRequest`, passo 611): o valor contado pelo operador e a
+ * observação opcional. Quem calcula o esperado e a diferença é o servidor (BR-12).
+ */
+export type CloseCashSessionIntent = {
+  /** Em reais (`10` = R$ 10,00). */
+  countedAmount: number;
+  notes?: string;
+};
+
+/**
+ * Resultado do fechamento (`POST /cash-registers/{id}/close`, 200 com o `CashSessionDetailResponse`,
+ * passo 611):
+ * - `ok`: a conferência do servidor — contado, esperado e a **diferença dele** (BR-12);
+ * - `rejected`: a recusa que **a própria tela** mostra — 403 sem `cash.close`, 400 do valor e 409
+ *   `SESSION_HAS_OPEN_SALES`/`CASH_SESSION_ALREADY_CLOSED` —, sem sair do fechamento;
+ * - `SendFailure`: retry manual com a **mesma** `Idempotency-Key` (rede/5xx) ou tela de erro
+ *   (contrato), como nos demais envios de dinheiro.
+ */
+export type CloseCashSessionOutcome =
+  | { ok: true; closing: CashClosingView }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
+/**
+ * Resultado do cancelamento da venda aberta (F4, `POST /sales/{id}/cancel`, 200, passo 813):
+ * - `ok`: a venda foi cancelada; a tela volta à venda vazia (o corpo traz a venda cancelada, que a
+ *   TUI não exibe — ela não tem mais venda);
+ * - `rejected`: a recusa que **o próprio modal** mostra — 403 sem `sale.cancel` (BR-04: quem opera
+ *   não cancela) e 400 do motivo;
+ * - `SendFailure`: retry manual com a **mesma** chave (idempotente: repetir devolve replay) ou tela
+ *   de erro (404 `SALE_NOT_FOUND`/409 `SALE_NOT_OPEN`, contrato), como nas demais operações da venda.
+ */
+export type CancelSaleOutcome =
+  | { ok: true }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -381,6 +450,35 @@ export type TerminalApi = {
     supply: CashMovementIntent,
     idempotencyKey: string,
   ): Promise<CashMovementOutcome>;
+  /**
+   * Resumo do fechamento da sessão (`GET /cash-sessions/{id}/summary`, passo 612): o esperado, a
+   * quebra das vendas por forma de pagamento (passo 909) e os totais por tipo de movimento
+   * (sangrias e suprimentos), tudo do servidor (BR-12). Exige `cash.read`.
+   */
+  cashSessionSummary(sessionId: string): Promise<CashSessionSummaryOutcome>;
+  /**
+   * Fecha o caixa com o valor contado (`POST /cash-registers/{id}/close`, 200, passo 611) — o
+   * `{id}` é o **caixa**, não a sessão — e devolve a conferência do servidor: contado, esperado e a
+   * diferença dele (BR-12). Quem exige `cash.close` e recusa venda em andamento com 409
+   * `SESSION_HAS_OPEN_SALES` é o servidor.
+   *
+   * A `Idempotency-Key` é do chamador (1115), como na gaveta: repetir a mesma tentativa com a mesma
+   * chave devolve o replay, sem fechar duas vezes.
+   */
+  closeCashSession(
+    registerId: string,
+    closing: CloseCashSessionIntent,
+    idempotencyKey: string,
+  ): Promise<CloseCashSessionOutcome>;
+  /**
+   * Cancela a venda aberta (F4, `POST /sales/{id}/cancel`, 200, passo 813) com o motivo obrigatório
+   * (`SaleCancelRequest`, BR-04): a venda vira `CANCELLED` no servidor e quem decide voltar à venda
+   * vazia é a tela. Exige `sale.cancel` — o OPERADOR opera a venda, mas não a cancela.
+   *
+   * A `Idempotency-Key` é do chamador (1115): repetir a mesma tentativa devolve replay (a já
+   * cancelada é no-op no servidor), sem cancelar duas vezes.
+   */
+  cancelSale(saleId: string, reason: string, idempotencyKey: string): Promise<CancelSaleOutcome>;
 };
 
 /** Monta a camada de API sobre um client já configurado (base URL + token da sessão). */
@@ -748,6 +846,79 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         ),
       );
     },
+
+    async cashSessionSummary(sessionId) {
+      try {
+        const response = await client.get<components['schemas']['CashSessionSummaryResponse']>(
+          `/api/v1/cash-sessions/${sessionId}/summary`,
+        );
+
+        return { ok: true, summary: toSummaryView(response) };
+      } catch (error) {
+        // leitura: qualquer falha bloqueia na tela de erro, como a sessão corrente (1107)
+        return { ok: false, problem: problemOf(error) };
+      }
+    },
+
+    async closeCashSession(registerId, closing, idempotencyKey) {
+      const body: components['schemas']['CloseCashSessionRequest'] = {
+        countedAmount: closing.countedAmount,
+      };
+      // a observação é opcional no contrato: só vai no corpo quando o operador a informou
+      if (closing.notes !== undefined) {
+        body.notes = closing.notes;
+      }
+
+      try {
+        const response = await client.post<components['schemas']['CashSessionDetailResponse']>(
+          `/api/v1/cash-registers/${registerId}/close`,
+          body,
+          { idempotencyKey },
+        );
+        const view = toClosingView(response);
+
+        if (view === null) {
+          return failed({ status: 0, code: null, detail: 'fechamento sem conferência na resposta' });
+        }
+
+        return { ok: true, closing: view };
+      } catch (error) {
+        if (error instanceof ApiError && error.status < 500) {
+          // a recusa fica na própria tela do fechamento: o operador lê o que fazer ali mesmo (1115)
+          return { ok: false, kind: 'rejected', message: closeRejectionMessage(error) };
+        }
+
+        return sendFailure(error);
+      }
+    },
+
+    async cancelSale(saleId, reason, idempotencyKey) {
+      try {
+        const response = await client.post<components['schemas']['SaleDetailResponse']>(
+          `/api/v1/sales/${saleId}/cancel`,
+          { reason },
+          { idempotencyKey },
+        );
+
+        if (response.id === undefined) {
+          return failed({ status: 0, code: null, detail: 'cancelamento sem venda na resposta' });
+        }
+
+        return { ok: true };
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          error.status < 500 &&
+          error.status !== 404 &&
+          error.status !== 409
+        ) {
+          // a recusa fica no modal do F4: 403 sem `sale.cancel` e 400 do motivo (1115)
+          return { ok: false, kind: 'rejected', message: cancelSaleRejectionMessage(error) };
+        }
+
+        return sendFailure(error);
+      }
+    },
   };
 }
 
@@ -981,6 +1152,68 @@ function cashMovementRejectionMessage(error: ApiError, kind: CashMovementKind): 
   }
 
   return error.detail;
+}
+
+/**
+ * `CashSessionSummaryResponse` → resumo da tela (1115): os mapas do servidor copiados como estão —
+ * as quebras chegam zero-preenchidas e a TUI só exibe (BR-12).
+ */
+function toSummaryView(
+  response: components['schemas']['CashSessionSummaryResponse'],
+): CashSessionSummaryView {
+  return {
+    sessionId: response.sessionId ?? '',
+    status: response.status ?? '',
+    openingAmount: response.openingAmount ?? 0,
+    expectedAmount: response.expectedAmount ?? 0,
+    // nulos enquanto a sessão está aberta: o resumo do fechamento é lido antes do contado
+    countedAmount: response.countedAmount ?? null,
+    differenceAmount: response.differenceAmount ?? null,
+    totalsByType: response.totalsByType ?? {},
+    paymentsByMethod: response.paymentsByMethod ?? {},
+  };
+}
+
+/** `CashSessionDetailResponse` → conferência da tela; `null` quando o servidor não mandou a conta. */
+function toClosingView(
+  response: components['schemas']['CashSessionDetailResponse'],
+): CashClosingView | null {
+  if (
+    response.countedAmount === undefined ||
+    response.expectedAmount === undefined ||
+    response.differenceAmount === undefined
+  ) {
+    return null;
+  }
+
+  return {
+    countedAmount: response.countedAmount,
+    expectedAmount: response.expectedAmount,
+    differenceAmount: response.differenceAmount,
+  };
+}
+
+/**
+ * Mensagem da recusa que fica na tela do fechamento: o 403 ganha texto fixo (o OPERADOR não tem
+ * `cash.close`, BR-10) sem expor o código da permissão, e a venda em andamento — o único 409 que o
+ * operador resolve sozinho — diz o que fazer (cancelar com o F4). O resto mostra o `detail` do
+ * servidor, que já é pt-BR.
+ */
+function closeRejectionMessage(error: ApiError): string {
+  if (error.status === 403) {
+    return 'sem permissão para fechar o caixa';
+  }
+
+  if (error.code === 'SESSION_HAS_OPEN_SALES') {
+    return 'há venda em andamento — cancele a venda (F4) antes de fechar';
+  }
+
+  return error.detail;
+}
+
+/** Mensagem da recusa do cancelamento: o 403 ganha texto fixo; o 400 do motivo diz o que corrigir. */
+function cancelSaleRejectionMessage(error: ApiError): string {
+  return error.status === 403 ? 'sem permissão para cancelar a venda' : error.detail;
 }
 
 /** Normaliza a página de clientes para a lista do modal; registro sem `id` não é vinculável. */
