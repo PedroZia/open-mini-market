@@ -1155,7 +1155,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** tela renderiza última leitura/intervalo/histórico/diagnóstico; F11 abre e ESC fecha; testes de tela equivalentes aos da Ink; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta o autoteste do leitor para OpenTUI`
 
-- [ ] **1130a — E2E da UI nova**
+- [x] **1130a — E2E da UI nova**
   **Objetivo:** provar o fluxo completo na UI OpenTUI contra o backend real. **Depende:** 1129b
   **Implementar:** reescrever `terminal/e2e/pdv.e2e.test.tsx` para dirigir o `App` da UI nova (`testRender` + `mockInput`; o fixture `e2e/backend.ts` continua) com o mesmo cenário e as mesmas conferências por API; trocar `test:e2e` para `bun test e2e` e aposentar o `vitest.e2e.config.ts`. A Ink segue viva (rollback).
   **Testes/aceite:** E2E verde contra o backend de dev (`quarkus:dev` na 8081 + PostgreSQL do compose), com estoque/venda/auditoria/sessão conferidos; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

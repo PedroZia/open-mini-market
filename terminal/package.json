@@ -10,7 +10,7 @@
     "start": "tsx src/index.tsx",
     "dev": "tsx src/index.tsx",
     "test": "vitest run",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e": "bun test e2e",
     "start:opentui": "bun run src/opentui/index.tsx",
     "test:opentui": "bun test src/opentui",
     "typecheck": "tsc --noEmit",
