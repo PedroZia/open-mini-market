@@ -1155,10 +1155,16 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** tela renderiza última leitura/intervalo/histórico/diagnóstico; F11 abre e ESC fecha; testes de tela equivalentes aos da Ink; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta o autoteste do leitor para OpenTUI`
 
-- [ ] **1130 — Cut-over e limpeza**
-  **Objetivo:** aposentar a Ink e operar só a UI nova. **Depende:** 1121–1129
-  **Implementar:** `npm start`/`pdv.cmd` → Bun + entry OpenTUI; E2E reescrito para a UI nova; apagar `terminal/src/ui` (Ink), `ink`, `ink-testing-library` e `useRawShortcuts`; atualizar `docs/referencias.md`, `README` e `docs/leitores.md`; ajustar `engines`.
-  **Testes/aceite:** E2E completo verde contra backend real **na UI nova**; nenhum arquivo Ink restante; gate do 1121 verde.
+- [ ] **1130a — E2E da UI nova**
+  **Objetivo:** provar o fluxo completo na UI OpenTUI contra o backend real. **Depende:** 1129b
+  **Implementar:** reescrever `terminal/e2e/pdv.e2e.test.tsx` para dirigir o `App` da UI nova (`testRender` + `mockInput`; o fixture `e2e/backend.ts` continua) com o mesmo cenário e as mesmas conferências por API; trocar `test:e2e` para `bun test e2e` e aposentar o `vitest.e2e.config.ts`. A Ink segue viva (rollback).
+  **Testes/aceite:** E2E verde contra o backend de dev (`quarkus:dev` na 8081 + PostgreSQL do compose), com estoque/venda/auditoria/sessão conferidos; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `test(tui): reescreve o E2E para a UI em OpenTUI`
+
+- [ ] **1130b — Cut-over e limpeza**
+  **Objetivo:** aposentar a Ink e operar só a UI nova. **Depende:** 1130a
+  **Implementar:** `npm start`/`pdv.cmd` → Bun + entry OpenTUI; apagar `terminal/src/ui` (Ink), `ink`, `ink-testing-library`, `useRawShortcuts` e o que virar código morto no `core/keys`; `npm test` passa a rodar vitest (core/api) + `bun test src/opentui`; atualizar `docs/referencias.md`, `README` do terminal, `docs/leitores.md` e `engines`; CI ganha o Bun para o gate novo.
+  **Testes/aceite:** nenhum arquivo Ink restante; E2E da UI nova verde; `npm test` + `tsc --noEmit` verdes; README/docs sem referência à Ink.
   **Commit:** `chore(tui): aposenta a Ink e ativa a UI em OpenTUI`
 
 ---
