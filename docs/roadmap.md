@@ -1125,7 +1125,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** cancelamento com motivo e falha sem perder a venda; sangria/suprimento com valor e motivo, recusa e retry; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta cancelamento e gaveta`
 
-- [ ] **1127a — Pagamento e sucesso**
+- [x] **1127a — Pagamento e sucesso**
   **Objetivo:** fechar a venda na UI nova. **Depende:** 1126d
   **Implementar:** `PaymentScreen` (F9) com pagamento parcial/múltiplo, métodos e troco calculado pelo servidor (BR-12), `SaleSuccessScreen` com o troco em destaque e o ENTER da próxima venda, e a rota `paying` no shell. Passo dividido do 1127 original; o fechamento é o 1127b.
   **Testes/aceite:** pagamento parcial/múltiplo, troco, ENTER da próxima venda, recusa e retry; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

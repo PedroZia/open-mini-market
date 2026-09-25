@@ -67,7 +67,8 @@ import { theme } from "./theme"
  * venda — o leitor fica desligado (`barcodeEnabled: modal === null`, §11.3) e o `handleKey` daqui
  * devolve `false`: quem trata a tecla é o handler do próprio modal, que o hook global chama
  * **antes** deste listener (o `prependListener` põe o mais novo na frente) e que consome o que é
- * dele. Sem modal, a tela age como sempre.
+ * dele. Sem modal, a tela age como sempre. O F9 (1127a) não é modal: o reducer troca a tela
+ * (`paymentStarted`) e o shell monta o `PaymentScreen` no lugar desta.
  *
  * O F6 (cliente) e o F12 (troca de operador) são anotações do **shell**: os dois modais devolvem o
  * fato por `onCustomerChanged` (o nome do cabeçalho é a seleção local da busca, não a resposta do
@@ -339,9 +340,9 @@ export function SaleScreen({
    * cliente (também só com venda criada), o F12 a troca de operador (sempre: sem venda é confirmação
    * direta), o F4 o cancelamento da venda (só com venda criada, como o desconto) e o F7/F8 a gaveta
    * (sempre: sangrar e suprir são do caixa aberto, BR-10) — tudo consumido, não chega ao campo de
-   * leitura —, e o ENTER refaz o bipe que ficou na fila depois de uma falha transitória. As
-   * intenções dos passos seguintes (F9/F10/F11, do 1127/1129) não agem aqui: a tecla devolve
-   * `false` e o hook global a engole pelo mapa.
+   * leitura —, e o ENTER refaz o bipe que ficou na fila depois de uma falha transitória. O F9 (1127a)
+   * abre o pagamento, que substitui esta tela no shell; as intenções dos passos seguintes (F10/F11,
+   * do 1127b/1129) não agem aqui: a tecla devolve `false` e o hook global a engole pelo mapa.
    *
    * Com um modal à vista (1126a–1126d) a tela **não** age: o handler devolve `false` e quem
    * trata a tecla é o handler do próprio modal, que roda antes deste (o `prependListener` do hook
@@ -432,8 +433,17 @@ export function SaleScreen({
           })
           return true
 
+        case "checkout":
+          // F9 abre o pagamento (1127a): sem venda criada não há o que pagar e com o resumo da venda
+          // concluída à vista quem decide é o ENTER dele; o reducer ignora a venda vazia (BR-05)
+          if (sale !== null && state.receipt === null) {
+            dispatch({ type: "paymentStarted" })
+          }
+
+          return true
+
         default:
-          return false // F9/F10/F11 são do 1127/1129
+          return false // F10/F11 são do 1127b/1129
       }
     }
 

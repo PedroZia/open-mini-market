@@ -9,7 +9,9 @@ import { useClock } from "./clock"
 import { ErrorScreen } from "./ErrorScreen"
 import { LoginScreen } from "./LoginScreen"
 import { OpeningCashScreen } from "./OpeningCashScreen"
+import { PaymentScreen } from "./PaymentScreen"
 import { SaleScreen } from "./SaleScreen"
+import { SaleSuccessScreen } from "./SaleSuccessScreen"
 import { theme } from "./theme"
 
 /**
@@ -18,8 +20,9 @@ import { theme } from "./theme"
  * diferença é o teclado: cada tela registra o próprio handler no hook global (`useGlobalKeyboard`),
  * então aqui não há canal cru.
  *
- * A entrada e a venda estão de pé: `login`, `openingCash`, `error` e `saleOpen` roteiam para as telas
- * de verdade; o pagamento e o fechamento ainda não têm rota (1127).
+ * A entrada e a venda estão de pé: `login`, `openingCash`, `error`, `saleOpen` (com a tela de
+ * sucesso por cima quando há `receipt`) e `paying` roteiam para as telas de verdade; só o
+ * fechamento ainda não tem rota (1127b).
  *
  * A API que as telas recebem é a embrulhada pela guarda (1117), como no App da Ink: sessão caída
  * (401) volta ao login com aviso, sem descartar a venda preservada, e o 409 de
@@ -98,7 +101,7 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
 
   /**
    * A venda que sai de cena leva o nome do cliente junto (F6, 1126c): cancelada (F4, 1126d) ou
-   * concluída (1127), a anotação local era daquela venda e não vale para a próxima.
+   * concluída (1127a), a anotação local era daquela venda e não vale para a próxima.
    */
   useEffect(() => {
     if (state.kind === "saleOpen" && state.sale === null) {
@@ -167,6 +170,11 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
   }
 
   if (state.kind === "saleOpen") {
+    // venda concluída (1127a): a tela de sucesso fica no lugar da venda até o ENTER
+    if (state.receipt !== null) {
+      return <SaleSuccessScreen receipt={state.receipt} dispatch={dispatch} />
+    }
+
     return (
       <SaleScreen
         state={state}
@@ -182,11 +190,22 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
     )
   }
 
+  if (state.kind === "paying") {
+    return (
+      <PaymentScreen
+        state={state}
+        api={api}
+        dispatch={dispatch}
+        onCompleted={() => setCustomer(null)}
+      />
+    )
+  }
+
   if (state.kind === "error") {
     return <ErrorScreen problem={state.problem} dispatch={dispatch} />
   }
 
-  // o pagamento e o fechamento ainda não têm rota (1127)
+  // o fechamento ainda não tem rota (1127b)
   return (
     <box width="100%" height="100%">
       <text fg={theme.muted}>Tela ainda não migrada</text>

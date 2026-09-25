@@ -5,10 +5,12 @@ import { testRender } from "@opentui/react/test-utils"
 import { act } from "react"
 
 import type {
+  AddPaymentOutcome,
   AddSaleItemOutcome,
   CancelSaleOutcome,
   CashRegisterOption,
   CashRegistersOutcome,
+  CompleteSaleOutcome,
   CreateSaleOutcome,
   CustomerOption,
   CustomerSaleOutcome,
@@ -17,7 +19,7 @@ import type {
   SearchCustomersOutcome,
   TerminalApi,
 } from "../api/terminalApi"
-import type { ApiProblem, SaleItemView, SaleView } from "../core/state"
+import type { ApiProblem, ReceiptView, SaleItemView, SaleView } from "../core/state"
 import { App } from "./App"
 
 /**
@@ -170,6 +172,13 @@ async function pressEnter(setup: Setup): Promise<void> {
 async function pressNamed(setup: Setup, key: string): Promise<void> {
   await act(async () => {
     setup.mockInput.pressKey(key)
+  })
+}
+
+/** TAB dos formulários (o campo do recebido no pagamento). */
+async function pressTab(setup: Setup): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressTab()
   })
 }
 
@@ -557,6 +566,190 @@ describe("App: cliente e troca de operador (1126c)", () => {
       expect(order.slice(-2)).toEqual(["cancelSale", "logout"])
       expect(cancelSale).toHaveBeenCalledWith("sale-1", "troca de operador", expect.any(String))
       expect(login).not.toContain("TOTAL:")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+})
+
+describe("App: pagamento e sucesso (1127a)", () => {
+  /** Resumo que o servidor devolveu no `complete`: o que a tela de sucesso exibe (BR-12). */
+  const RECEIPT: ReceiptView = { number: 42, total: 24.9, changeAmount: 5.1 }
+
+  /**
+   * Venda com o dinheiro que o servidor aprovou: pago e troco são dele (BR-05/B) — o `24,90` da
+   * linha do Arroz e os `5,10` de troco de um recebido de R$ 30,00.
+   */
+  function paidSale(): SaleView {
+    return {
+      ...saleWith([ARROZ]),
+      paidAmount: 24.9,
+      changeAmount: 5.1,
+      payments: [
+        { id: "pay-1", method: "CASH", amount: 24.9, changeAmount: 5.1, status: "APPROVED" },
+      ],
+    }
+  }
+
+  /** Operação de pé com a venda e a API do pagamento por conta do teste. */
+  function paymentStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
+    return apiStub({
+      openCashRegister: mock(async () => ({ ok: true as const, sessionId: "s1" })),
+      createSale: mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleWith([]) })),
+      addSaleItem: mock(
+        async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleWith([ARROZ]) }),
+      ),
+      ...overrides,
+    })
+  }
+
+  /** Digitação humana (60 ms por tecla): a tela de pagamento descarta a rajada do leitor. */
+  async function typeHuman(setup: Setup, text: string): Promise<void> {
+    await act(async () => {
+      await setup.mockInput.typeText(text, 60)
+    })
+  }
+
+  test("F9 abre o pagamento, o ENTER registra o dinheiro e o F9 conclui com o troco no sucesso", async () => {
+    const addPayment = mock(async (): Promise<AddPaymentOutcome> => ({ ok: true, sale: paidSale() }))
+    const completeSale = mock(
+      async (): Promise<CompleteSaleOutcome> => ({ ok: true, receipt: RECEIPT }),
+    )
+    const setup = await renderApp(paymentStub({ addPayment, completeSale }))
+
+    try {
+      await enterSale(setup)
+      await bip(setup, "7891000100103")
+      await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      await pressNamed(setup, KeyCodes.F9)
+
+      const paying = await expectFrame(setup, "Pagamento (F9)")
+
+      expect(paying).not.toContain("Código: ") // o corpo da venda saiu de cena
+      expect(paying).toContain("Método: [DINHEIRO]")
+      expect(paying).toContain("Pago: R$ 0,00 de R$ 24,90")
+
+      await typeHuman(setup, "2490")
+      await expectFrame(setup, "› Valor: R$ 24,90")
+
+      // o recebido é do dinheiro: TAB alcança o campo e o corpo leva o `tenderedAmount` (BR-05)
+      await pressTab(setup)
+      await expectFrame(setup, "› Recebido: R$ 0,00")
+      await typeHuman(setup, "3000")
+      await expectFrame(setup, "› Recebido: R$ 30,00")
+      await pressEnter(setup)
+
+      await expectFrame(setup, "Pago: R$ 24,90 de R$ 24,90")
+
+      expect(addPayment).toHaveBeenCalledWith(
+        "sale-1",
+        { method: "CASH", amount: 24.9, tenderedAmount: 30 },
+        expect.any(String),
+      )
+
+      await pressNamed(setup, KeyCodes.F9)
+
+      const success = await expectFrame(setup, "Venda 42 concluída")
+
+      expect(completeSale).toHaveBeenCalledWith("sale-1", expect.any(String))
+      expect(success).toContain("TOTAL: R$ 24,90")
+      expect(success).toContain("TROCO: R$ 5,10") // o troco do servidor em destaque (BR-05)
+
+      await pressEnter(setup)
+
+      const next = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(next).not.toContain("Venda 42 concluída") // a próxima venda começou vazia
+      expect(next).toContain("TOTAL: R$ 0,00")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("o ENTER do sucesso começa a próxima venda e esquece o cliente da venda que fechou", async () => {
+    const searchCustomers = mock(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [ANA] }),
+    )
+    const linkCustomer = mock(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: saleWith([ARROZ], ANA.id) }),
+    )
+    const completeSale = mock(
+      async (): Promise<CompleteSaleOutcome> => ({ ok: true, receipt: RECEIPT }),
+    )
+    const setup = await renderApp(paymentStub({ searchCustomers, linkCustomer, completeSale }))
+
+    try {
+      await enterSale(setup)
+      await bip(setup, "7891000100103")
+      await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      await pressNamed(setup, KeyCodes.F6)
+      await expectFrame(setup, "Cliente na venda (F6)")
+      await act(async () => {
+        await setup.mockInput.typeText("ana", 60) // digitação humana: a rajada seria descartada
+      })
+      await expectFrame(setup, "Busca: ana")
+      await pressEnter(setup)
+      await expectFrame(setup, "› Ana Souza — 123.456.789-00")
+      await pressEnter(setup)
+
+      const linked = await expectFrame(setup, "Cliente: Ana Souza")
+
+      expect(linked).toContain("› 1 x Arroz 5kg — R$ 24,90")
+
+      await pressNamed(setup, KeyCodes.F9)
+      await expectFrame(setup, "Pagamento (F9)")
+      await pressNamed(setup, KeyCodes.F9)
+      await expectFrame(setup, "Venda 42 concluída")
+      await pressEnter(setup)
+
+      const next = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(next).not.toContain("Cliente: Ana Souza") // a anotação era da venda que fechou
+      expect(next).not.toContain("› 1 x Arroz 5kg — R$ 24,90")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("com o pagamento aberto a rajada do leitor não vira item nem pagamento", async () => {
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleWith([ARROZ]) }),
+    )
+    const addPayment = mock(
+      async (): Promise<AddPaymentOutcome> => ({
+        ok: false,
+        kind: "rejected",
+        message: "valor acima do que falta na venda — ajuste o valor",
+      }),
+    )
+    const setup = await renderApp(paymentStub({ addSaleItem, addPayment }))
+
+    try {
+      await enterSale(setup)
+      await bip(setup, "7891000100103")
+      await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(addSaleItem).toHaveBeenCalledTimes(1)
+
+      await pressNamed(setup, KeyCodes.F9)
+      await expectFrame(setup, "Pagamento (F9)")
+
+      // o leitor continua bipando: a rajada fecha no terminador colado nela, como no spike (1121)
+      await act(async () => {
+        await setup.mockInput.typeText("7891000100103")
+        setup.mockInput.pressEnter()
+      })
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60))
+      })
+
+      const frame = await expectFrame(setup, "Pagamento (F9)")
+
+      expect(addSaleItem).toHaveBeenCalledTimes(1) // nenhum item novo na venda
+      expect(addPayment).not.toHaveBeenCalled() // e nenhum pagamento registrado
+      expect(frame).toContain("Pago: R$ 0,00 de R$ 24,90")
     } finally {
       setup.renderer.destroy()
     }
