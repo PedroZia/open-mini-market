@@ -10,6 +10,9 @@ import type {
   CancelSaleOutcome,
   CashRegisterOption,
   CashRegistersOutcome,
+  CashSessionSummaryOutcome,
+  CashSessionSummaryView,
+  CloseCashSessionOutcome,
   CompleteSaleOutcome,
   CreateSaleOutcome,
   CustomerOption,
@@ -179,6 +182,23 @@ async function pressNamed(setup: Setup, key: string): Promise<void> {
 async function pressTab(setup: Setup): Promise<void> {
   await act(async () => {
     setup.mockInput.pressTab()
+  })
+}
+
+/** Digitação humana (60 ms por tecla): o campo do contado descarta a rajada do leitor. */
+async function typeHuman(setup: Setup, text: string): Promise<void> {
+  await act(async () => {
+    await setup.mockInput.typeText(text, 60)
+  })
+}
+
+/** ESC: o parser segura a tecla sozinha por ~20 ms (ambiguidade com sequências), achado do spike. */
+async function pressEscape(setup: Setup): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressEscape()
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 }
 
@@ -750,6 +770,150 @@ describe("App: pagamento e sucesso (1127a)", () => {
       expect(addSaleItem).toHaveBeenCalledTimes(1) // nenhum item novo na venda
       expect(addPayment).not.toHaveBeenCalled() // e nenhum pagamento registrado
       expect(frame).toContain("Pago: R$ 0,00 de R$ 24,90")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+})
+
+describe("App: fechamento de caixa (1127b)", () => {
+  /** Resumo que o servidor devolveu para a sessão aberta: é o que a tela do F10 exibe (BR-12). */
+  const SUMMARY: CashSessionSummaryView = {
+    sessionId: "s1",
+    status: "OPEN",
+    openingAmount: 50,
+    expectedAmount: 74.9,
+    countedAmount: null,
+    differenceAmount: null,
+    totalsByType: { OPENING: 50, SALE: 24.9 },
+    paymentsByMethod: { CASH: 24.9, PIX: 0, DEBIT: 0, CREDIT: 0, VOUCHER: 0 },
+  }
+
+  /** Operação de pé com a venda do bipe e o fechamento por conta do teste. */
+  function closingStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
+    return apiStub({
+      openCashRegister: mock(async () => ({ ok: true as const, sessionId: "s1" })),
+      createSale: mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleWith([]) })),
+      addSaleItem: mock(
+        async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleWith([ARROZ]) }),
+      ),
+      cashSessionSummary: mock(
+        async (): Promise<CashSessionSummaryOutcome> => ({ ok: true, summary: SUMMARY }),
+      ),
+      closeCashSession: mock(
+        async (): Promise<CloseCashSessionOutcome> => ({
+          ok: true,
+          closing: { countedAmount: 70, expectedAmount: 74.9, differenceAmount: -4.9 },
+        }),
+      ),
+      ...overrides,
+    })
+  }
+
+  test("F10 abre o fechamento com o resumo do servidor e o ESC volta para a venda", async () => {
+    const cashSessionSummary = mock(
+      async (): Promise<CashSessionSummaryOutcome> => ({ ok: true, summary: SUMMARY }),
+    )
+    const setup = await renderApp(closingStub({ cashSessionSummary }))
+
+    try {
+      await enterSale(setup)
+      await bip(setup, "7891000100103")
+      await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      await pressNamed(setup, KeyCodes.F10)
+
+      const opened = await expectFrame(setup, "Fechamento de caixa (F10)")
+
+      expect(cashSessionSummary).toHaveBeenCalledWith("s1")
+      expect(opened).toContain("Esperado: R$ 74,90") // o esperado é do servidor (BR-12)
+      expect(opened).toContain("Valor contado: R$ 0,00")
+      expect(opened).not.toContain("bipar o primeiro item para iniciar a venda") // a venda saiu de cena
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).toContain("TOTAL: R$ 24,90") // a venda preservada voltou intacta
+      expect(back).not.toContain("Fechamento de caixa (F10)")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("o ENTER grava a conferência do servidor e o ENTER do caixa fechado volta ao login", async () => {
+    const logout = mock(async () => undefined)
+    const setup = await renderApp(closingStub({ logout }))
+
+    try {
+      await enterSale(setup)
+
+      // a escolha do caixa já revogou a sessão provisória (1107): o fechamento revoga a de verdade
+      const provisional = logout.mock.calls.length
+
+      await pressNamed(setup, KeyCodes.F10)
+      await expectFrame(setup, "Esperado: R$ 74,90")
+
+      await typeHuman(setup, "7000")
+      await expectFrame(setup, "Valor contado: R$ 70,00")
+
+      await pressEnter(setup)
+
+      const closed = await expectFrame(setup, "Diferença (servidor): R$ -4,90")
+
+      expect(closed).toContain("caixa fechado")
+      expect(closed).toContain("falta dinheiro na gaveta")
+
+      await pressEnter(setup)
+
+      const login = await expectFrame(setup, "PDV minimercado — entrada do operador")
+
+      expect(logout.mock.calls.length).toBe(provisional + 1)
+      expect(login).not.toContain("caixa fechado")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("com venda aberta a recusa do servidor fica na tela e o caixa não encerra", async () => {
+    const closeCashSession = mock(
+      async (): Promise<CloseCashSessionOutcome> => ({
+        ok: false,
+        kind: "rejected",
+        message: "há venda em andamento — cancele a venda (F4) antes de fechar",
+      }),
+    )
+    const setup = await renderApp(closingStub({ closeCashSession }))
+
+    try {
+      await enterSale(setup)
+      await bip(setup, "7891000100103")
+      await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      await pressNamed(setup, KeyCodes.F10)
+      await expectFrame(setup, "Esperado: R$ 74,90")
+
+      await typeHuman(setup, "7000")
+      await expectFrame(setup, "Valor contado: R$ 70,00")
+
+      await pressEnter(setup)
+
+      const refused = await expectFrame(
+        setup,
+        "há venda em andamento — cancele a venda (F4) antes de fechar",
+      )
+
+      expect(refused).toContain("Valor contado: R$ 70,00") // o contado não se perdeu
+      expect(refused).not.toContain("caixa fechado")
+      expect(closeCashSession).toHaveBeenCalledTimes(1)
+
+      // o ESC volta para a venda: é ela que o operador cancela (F4) antes de fechar o caixa
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).toContain("TOTAL: R$ 24,90")
+      expect(back).not.toContain("Fechamento de caixa (F10)")
     } finally {
       setup.renderer.destroy()
     }

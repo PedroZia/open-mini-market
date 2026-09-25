@@ -6,13 +6,13 @@ import type { CustomerOption, TerminalApi } from "../api/terminalApi"
 import { reduce } from "../core/reducer"
 import { initialState, type State } from "../core/state"
 import { useClock } from "./clock"
+import { ClosingCashScreen } from "./ClosingCashScreen"
 import { ErrorScreen } from "./ErrorScreen"
 import { LoginScreen } from "./LoginScreen"
 import { OpeningCashScreen } from "./OpeningCashScreen"
 import { PaymentScreen } from "./PaymentScreen"
 import { SaleScreen } from "./SaleScreen"
 import { SaleSuccessScreen } from "./SaleSuccessScreen"
-import { theme } from "./theme"
 
 /**
  * Shell roteador da UI nova (1124a/1124b/1125a): guarda a operação no reducer puro (1103) e desenha
@@ -21,8 +21,9 @@ import { theme } from "./theme"
  * então aqui não há canal cru.
  *
  * A entrada e a venda estão de pé: `login`, `openingCash`, `error`, `saleOpen` (com a tela de
- * sucesso por cima quando há `receipt`) e `paying` roteiam para as telas de verdade; só o
- * fechamento ainda não tem rota (1127b).
+ * sucesso por cima quando há `receipt`) e `paying` roteiam para as telas de verdade. O fechamento
+ * (1127b) fecha a união: o F10 da venda registra `cashClosingStarted` e o `closingCash` roteia para
+ * o `ClosingCashScreen` — a última tela sem rota.
  *
  * A API que as telas recebem é a embrulhada pela guarda (1117), como no App da Ink: sessão caída
  * (401) volta ao login com aviso, sem descartar a venda preservada, e o 409 de
@@ -201,16 +202,16 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
     )
   }
 
+  if (state.kind === "closingCash") {
+    return <ClosingCashScreen state={state} api={api} dispatch={dispatch} />
+  }
+
   if (state.kind === "error") {
     return <ErrorScreen problem={state.problem} dispatch={dispatch} />
   }
 
-  // o fechamento ainda não tem rota (1127b)
-  return (
-    <box width="100%" height="100%">
-      <text fg={theme.muted}>Tela ainda não migrada</text>
-    </box>
-  )
+  // todos os estados da operação têm tela: o `closingCash` era o último sem rota (1127b)
+  return null
 }
 
 /** A venda em cima da mesa agora — venda, pagamento ou fechamento —: o alvo da releitura (1117). */

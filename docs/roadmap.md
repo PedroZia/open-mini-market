@@ -1131,7 +1131,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** pagamento parcial/múltiplo, troco, ENTER da próxima venda, recusa e retry; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta pagamento e sucesso`
 
-- [ ] **1127b — Fechamento de caixa**
+- [x] **1127b — Fechamento de caixa**
   **Objetivo:** fechar o turno na UI nova. **Depende:** 1127a
   **Implementar:** `ClosingCashScreen` (F10) com o valor contado mascarado, a diferença do servidor e o bloqueio enquanto houver venda aberta.
   **Testes/aceite:** contado/diferença, bloqueio por venda aberta, falha sem perder o caixa; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

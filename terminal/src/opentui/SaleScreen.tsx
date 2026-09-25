@@ -67,8 +67,9 @@ import { theme } from "./theme"
  * venda — o leitor fica desligado (`barcodeEnabled: modal === null`, §11.3) e o `handleKey` daqui
  * devolve `false`: quem trata a tecla é o handler do próprio modal, que o hook global chama
  * **antes** deste listener (o `prependListener` põe o mais novo na frente) e que consome o que é
- * dele. Sem modal, a tela age como sempre. O F9 (1127a) não é modal: o reducer troca a tela
- * (`paymentStarted`) e o shell monta o `PaymentScreen` no lugar desta.
+ * dele. Sem modal, a tela age como sempre. O F9 (1127a) e o F10 (1127b) não são modais: o reducer
+ * troca a tela (`paymentStarted`/`cashClosingStarted`) e o shell monta o
+ * `PaymentScreen`/`ClosingCashScreen` no lugar desta.
  *
  * O F6 (cliente) e o F12 (troca de operador) são anotações do **shell**: os dois modais devolvem o
  * fato por `onCustomerChanged` (o nome do cabeçalho é a seleção local da busca, não a resposta do
@@ -341,8 +342,10 @@ export function SaleScreen({
    * direta), o F4 o cancelamento da venda (só com venda criada, como o desconto) e o F7/F8 a gaveta
    * (sempre: sangrar e suprir são do caixa aberto, BR-10) — tudo consumido, não chega ao campo de
    * leitura —, e o ENTER refaz o bipe que ficou na fila depois de uma falha transitória. O F9 (1127a)
-   * abre o pagamento, que substitui esta tela no shell; as intenções dos passos seguintes (F10/F11,
-   * do 1127b/1129) não agem aqui: a tecla devolve `false` e o hook global a engole pelo mapa.
+   * abre o pagamento e o F10 (1127b) o fechamento de caixa — os dois substituem esta tela no shell
+   * (a venda vai preservada para o ESC do fechamento e quem recusa fechar com venda aberta é o
+   * servidor, 409 `SESSION_HAS_OPEN_SALES`); o F11 (1129) não age aqui: a tecla devolve `false` e o
+   * hook global a engole pelo mapa.
    *
    * Com um modal à vista (1126a–1126d) a tela **não** age: o handler devolve `false` e quem
    * trata a tecla é o handler do próprio modal, que roda antes deste (o `prependListener` do hook
@@ -442,8 +445,18 @@ export function SaleScreen({
 
           return true
 
+        case "closeCash":
+          // F10 abre o fechamento (1127b): a venda em andamento vai preservada para o ESC da tela de
+          // fechamento e quem recusa fechar com venda aberta é o servidor (409 SESSION_HAS_OPEN_SALES);
+          // com o resumo da venda concluída à vista o ENTER é dele (1127a)
+          if (state.receipt === null) {
+            dispatch({ type: "cashClosingStarted" })
+          }
+
+          return true
+
         default:
-          return false // F10/F11 são do 1127b/1129
+          return false // F11 é do 1129
       }
     }
 
