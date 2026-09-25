@@ -1,15 +1,18 @@
 /** @jsxImportSource @opentui/react */
 import { expect, test } from "bun:test"
+import { KeyCodes } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
+import { act } from "react"
 
 import { Shell } from "./shell"
 
 /**
- * Aceite do 1123a: teste de fumaça do shell em 80×24, com as três regiões visíveis e dentro das
- * colunas/linhas do alvo.
+ * Aceite do 1123a/1123b: teste de fumaça do shell em 80×24, com as três regiões visíveis e dentro
+ * das colunas/linhas do alvo, e a barra de status exercitando os adaptadores de teclado/leitor.
  */
 
 const FUNDACAO = "UI OpenTUI — fundação"
+const BARCODE = "7891000000001"
 
 function frameLines(frame: string): string[] {
   const lines = frame.split("\n")
@@ -17,6 +20,11 @@ function frameLines(frame: string): string[] {
     lines.pop()
   }
   return lines
+}
+
+/** Linha do `<input>` focado (o que sobrou nele depois da rajada). */
+function inputLine(frame: string): string {
+  return frameLines(frame).find((line) => line.includes("Código:")) ?? ""
 }
 
 test("shell em 80x24 mostra cabeçalho, corpo e barra de status", async () => {
@@ -57,6 +65,32 @@ test("shell acompanha o resize para 120x40", async () => {
     expect(frameLines(frame).length).toBe(40)
     expect(frame).toContain(FUNDACAO)
     expect(frame).toContain("ESC sai")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("barra de status mostra a última tecla resolvida e o último código lido", async () => {
+  const setup = await testRender(<Shell />, { width: 80, height: 24 })
+  try {
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("ESC sai · tecla: - · leitura: -")
+
+    await act(async () => {
+      setup.mockInput.pressKey(KeyCodes.F5)
+    })
+    await act(async () => {
+      await setup.mockInput.typeText(BARCODE)
+    })
+    await act(async () => {
+      setup.mockInput.pressEnter()
+    })
+
+    const frame = await setup.waitForFrame((value) => value.includes(BARCODE))
+    expect(frame).toContain("tecla: ENTER")
+    expect(frame).toContain(`leitura: ${BARCODE}`)
+    // a rajada é interceptada antes do campo: o código inteiro nunca vira texto no input
+    expect(inputLine(frame)).not.toContain(BARCODE)
   } finally {
     setup.renderer.destroy()
   }

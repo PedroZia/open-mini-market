@@ -1065,7 +1065,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste de fumaça renderiza o shell em 80×24; `bun test src/opentui`, `tsc --noEmit` e `npm test` (vitest) verdes.
   **Commit:** `feat(tui): cria fundacao da UI em OpenTUI`
 
-- [ ] **1123b — Adaptadores de teclado e leitor da UI nova**
+- [x] **1123b — Adaptadores de teclado e leitor da UI nova**
   **Objetivo:** ligar o `KeyEvent` da OpenTUI ao `core/` sem canal cru. **Depende:** 1123a
   **Implementar:** adaptadores puros `KeyEvent`→`core/keys` (`KeyName`) e `KeyEvent`→scanner (`\r`/`\t`/caractere, ignorando release e ctrl/meta) e o hook global que alimenta `core/scanner` com listener **antes** do input focado (`preventDefault`/`stopPropagation`); foco do shell; `useRawShortcuts`/`resolveRawKeys` da Ink intocados (saem no 1130).
   **Testes/aceite:** adaptadores puros testados (F1–F12, setas, ENTER/TAB/BACKSPACE/DEL, release/ctrl ignorados) e rajada interceptada antes do `<input>` focado no `testRender`; `bun test src/opentui` e `tsc --noEmit` verdes.
