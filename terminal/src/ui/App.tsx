@@ -5,12 +5,14 @@ import { reduce } from '../core/reducer';
 import { initialState } from '../core/state';
 import { ErrorScreen } from './ErrorScreen';
 import { LoginScreen } from './LoginScreen';
+import { OpeningCashScreen } from './OpeningCashScreen';
 import { PlaceholderScreen } from './PlaceholderScreen';
 
 /**
  * Shell da TUI (§11.2): guarda o estado da operação no reducer puro (1103) e desenha uma tela por
- * `kind`. O login é a tela implementada (1106); os estados seguintes aparecem como placeholder
- * explícito até o passo que os implementa — a troca de tela é sempre do reducer, nunca da tela.
+ * `kind`. Login (1106) e abertura de caixa (1107) são as telas implementadas; os estados seguintes
+ * aparecem como placeholder explícito até o passo que os implementa — a troca de tela é sempre do
+ * reducer, nunca da tela.
  */
 export function App({ api }: { api: TerminalApi }) {
   const [state, dispatch] = useReducer(reduce, initialState);
@@ -19,7 +21,7 @@ export function App({ api }: { api: TerminalApi }) {
     case 'login':
       return <LoginScreen state={state} api={api} dispatch={dispatch} />;
     case 'openingCash':
-      return <PlaceholderScreen title="Abertura de caixa" step="1107" />;
+      return <OpeningCashScreen state={state} api={api} dispatch={dispatch} />;
     case 'saleOpen':
       return <PlaceholderScreen title="Venda" step="1108" />;
     case 'paying':

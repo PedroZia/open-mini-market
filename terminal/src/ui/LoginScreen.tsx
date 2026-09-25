@@ -7,15 +7,20 @@ import type { LoginState, Operator } from '../core/state';
 
 /**
  * Entrada do operador (passo 1106, §11.2): usuário/senha com a senha mascarada e, aceito o login, a
- * escolha do caixa ativo (`GET /api/v1/cash-registers`). O login **não** manda `cashRegisterId` — a
- * vinculação da sessão ao caixa é da abertura (607/1107).
+ * escolha do caixa ativo (`GET /api/v1/cash-registers`).
+ *
+ * O primeiro login nasce **sem caixa**: a sessão provisória só serve para listar os caixas. Ao
+ * confirmar a escolha (ajuste do 1107), a tela revoga essa sessão (`POST /auth/logout`) e loga de
+ * novo com o `cashRegisterId` escolhido — é o que faz a sessão nascer vinculada ao caixa (passo
+ * 607). A senha fica na memória da tela até esse segundo login e só então é descartada; a falha da
+ * revogação é tolerada de propósito (`api.logout()` não rejeita e o token local sai de cena).
  *
  * A tela não decide o destino: relata os fatos ao reducer (1103) e ele troca de estado —
  * `loginSucceeded` leva para a abertura de caixa, `loginRejected` **fica aqui** com a mensagem do
  * servidor e `apiFailed` vai para a tela de erro com volta. Nada de conta, total ou parse (BR-12).
  *
  * O token fica só na sessão em memória (`src/api/session.ts`), nunca no estado da tela nem na
- * saída — a senha também é descartada assim que o login termina.
+ * saída — a senha também não é renderizada em momento algum.
  */
 
 export type LoginScreenProps = {
@@ -86,6 +91,11 @@ export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
   }
 
   function handleRegisters(key: Key): void {
+    // revogação da sessão provisória + login vinculado em andamento: ENTER repetido não dispara dois
+    if (busy) {
+      return;
+    }
+
     if (key.upArrow) {
       move(-1);
       return;
@@ -97,7 +107,7 @@ export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
     }
 
     if (key.return) {
-      confirm();
+      void confirm();
     }
   }
 
@@ -122,7 +132,7 @@ export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
     setBusy(false);
 
     if (outcome.ok) {
-      setPassword(''); // a senha sai da memória da tela assim que o login termina
+      // a senha fica na memória: o login vinculado ao caixa (1107) precisa dela de novo
       await loadRegisters(outcome.operator);
       return;
     }
@@ -167,7 +177,17 @@ export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
     });
   }
 
-  function confirm(): void {
+  /**
+   * Escolha do caixa: revoga a sessão provisória e loga de novo com o `cashRegisterId` para a
+   * sessão nascer vinculada ao caixa (passo 607).
+   *
+   * A falha do logout é tolerada de propósito (`api.logout()` não rejeita e limpa o token local):
+   * uma sessão prestes a ser substituída não pode travar o operador, e sem limpar o token o login
+   * seguinte iria com o token revogado — 401 antes de chegar ao recurso. A órfã expira no idle
+   * timeout do servidor. Recusa (400/401/423) volta às credenciais com a mensagem do servidor; o
+   * resto bloqueia na tela de erro.
+   */
+  async function confirm(): Promise<void> {
     if (stage.kind !== 'registers' || stage.registers === null) {
       return;
     }
@@ -177,11 +197,29 @@ export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
       return;
     }
 
-    dispatch({
-      type: 'loginSucceeded',
-      operator: stage.operator,
-      register: { id: chosen.id, name: chosen.name === '' ? chosen.code : chosen.name },
-    });
+    setBusy(true);
+    await api.logout();
+    const outcome = await api.login(username, password, chosen.id);
+    setBusy(false);
+
+    if (outcome.ok) {
+      setPassword(''); // a senha só sai da memória quando o login vinculado termina
+      dispatch({
+        type: 'loginSucceeded',
+        operator: outcome.operator,
+        register: { id: chosen.id, name: chosen.name === '' ? chosen.code : chosen.name },
+      });
+      return;
+    }
+
+    if (outcome.kind === 'rejected') {
+      setPassword(''); // a senha recusada não fica no campo: o operador digita de novo
+      setStage({ kind: 'credentials' });
+      dispatch({ type: 'loginRejected', message: outcome.message });
+      return;
+    }
+
+    dispatch({ type: 'apiFailed', problem: outcome.problem });
   }
 
   const message = state.failure ?? hint;
@@ -205,6 +243,7 @@ export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
           ))
         )}
         <Text> </Text>
+        {busy ? <Text dimColor>vinculando ao caixa...</Text> : null}
         <Text dimColor>↑↓ escolhe · ENTER confirma</Text>
       </Box>
     );

@@ -4,15 +4,18 @@ import { describe, expect, test, vi } from 'vitest';
 import type {
   CashRegisterOption,
   CashRegistersOutcome,
+  CurrentCashSessionOutcome,
   LoginOutcome,
+  OpenCashRegisterOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import { App } from './App';
 
 /**
- * Shell + entrada do operador (1106) pelo `ink-testing-library`, com a camada de API dublada: o que
- * se testa é o fluxo da tela — login, escolha do caixa, erro que fica na tela e erro que bloqueia
- * com volta —, nunca o HTTP (esse é do `@minimarket/api-client`).
+ * Shell + entrada do operador (1106) e abertura de caixa (1107) pelo `ink-testing-library`, com a
+ * camada de API dublada: o que se testa é o fluxo da tela — login, escolha do caixa, abertura,
+ * erro que fica na tela e erro que bloqueia com volta —, nunca o HTTP (esse é do
+ * `@minimarket/api-client`).
  */
 
 const OPERADOR = { id: 'u1', name: 'Ana Souza' };
@@ -35,8 +38,15 @@ const CAIXA_02: CashRegisterOption = {
 function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
   return {
     login: vi.fn(async (): Promise<LoginOutcome> => ({ ok: true, operator: OPERADOR })),
+    logout: vi.fn(async () => undefined),
     listCashRegisters: vi.fn(
       async (): Promise<CashRegistersOutcome> => ({ ok: true, registers: [CAIXA_01, CAIXA_02] }),
+    ),
+    openCashRegister: vi.fn(
+      async (): Promise<OpenCashRegisterOutcome> => ({ ok: true, sessionId: 'session-1' }),
+    ),
+    currentCashSession: vi.fn(
+      async (): Promise<CurrentCashSessionOutcome> => ({ ok: true, sessionId: 'session-1' }),
     ),
     ...overrides,
   };
@@ -96,8 +106,80 @@ describe('App', () => {
 
     stdin.write('\r');
 
-    await expectFrame(lastFrame, 'tela do passo 1107');
-    expect(lastFrame()).toContain('Abertura de caixa');
+    await expectFrame(lastFrame, 'Abertura de caixa');
+    expect(lastFrame()).toContain('Fundo de troco: R$ 0,00');
+  });
+
+  test('abertura confirmada navega para a venda', async () => {
+    const openCashRegister = vi.fn(
+      async (): Promise<OpenCashRegisterOutcome> => ({ ok: true, sessionId: 'session-1' }),
+    );
+    const { lastFrame, stdin } = render(<App api={apiStub({ openCashRegister })} />);
+
+    await signIn(lastFrame, stdin);
+    await expectFrame(lastFrame, 'Escolha o caixa');
+    stdin.write('\r');
+    await expectFrame(lastFrame, 'Abertura de caixa');
+
+    stdin.write('1000');
+    await expectFrame(lastFrame, 'Fundo de troco: R$ 10,00');
+    stdin.write('\r');
+
+    await expectFrame(lastFrame, 'tela do passo 1108');
+    expect(openCashRegister).toHaveBeenCalledWith('r1', 10);
+  });
+
+  test('caixa já aberto avisa e o ENTER segue para a venda com a sessão existente', async () => {
+    const openCashRegister = vi.fn(
+      async (): Promise<OpenCashRegisterOutcome> => ({ ok: false, kind: 'alreadyOpen' }),
+    );
+    const currentCashSession = vi.fn(
+      async (): Promise<CurrentCashSessionOutcome> => ({ ok: true, sessionId: 'session-9' }),
+    );
+    const { lastFrame, stdin } = render(<App api={apiStub({ openCashRegister, currentCashSession })} />);
+
+    await signIn(lastFrame, stdin);
+    await expectFrame(lastFrame, 'Escolha o caixa');
+    stdin.write('\r');
+    await expectFrame(lastFrame, 'Abertura de caixa');
+
+    stdin.write('500');
+    await expectFrame(lastFrame, 'Fundo de troco: R$ 5,00');
+    stdin.write('\r');
+
+    await expectFrame(lastFrame, 'caixa já está aberto — seguindo para a venda com a sessão existente');
+    expect(currentCashSession).toHaveBeenCalledWith('r1');
+
+    stdin.write('\r');
+
+    await expectFrame(lastFrame, 'tela do passo 1108');
+    expect(openCashRegister).toHaveBeenCalledTimes(1); // não reabre nada
+  });
+
+  test('falha na abertura vai para a tela de erro e o ENTER volta para a abertura', async () => {
+    const openCashRegister = vi.fn(
+      async (): Promise<OpenCashRegisterOutcome> => ({
+        ok: false,
+        kind: 'failed',
+        problem: { status: 503, code: 'UNAVAILABLE', detail: 'servidor fora do ar' },
+      }),
+    );
+    const { lastFrame, stdin } = render(<App api={apiStub({ openCashRegister })} />);
+
+    await signIn(lastFrame, stdin);
+    await expectFrame(lastFrame, 'Escolha o caixa');
+    stdin.write('\r');
+    await expectFrame(lastFrame, 'Abertura de caixa');
+
+    stdin.write('50');
+    await expectFrame(lastFrame, 'Fundo de troco: R$ 0,50');
+    stdin.write('\r');
+
+    await expectFrame(lastFrame, '503 — UNAVAILABLE — servidor fora do ar');
+    stdin.write('\r');
+
+    await expectFrame(lastFrame, 'Abertura de caixa');
+    expect(lastFrame()).toContain('Fundo de troco: R$ 0,00'); // o valor é digitado de novo
   });
 
   test('a senha digitada não aparece no frame (mascarada)', async () => {
@@ -107,6 +189,39 @@ describe('App', () => {
 
     expect(lastFrame()).toContain('Senha: •••••••');
     expect(lastFrame()).not.toContain('segredo');
+  });
+
+  test('a senha não aparece em nenhum frame depois das credenciais', async () => {
+    const { frames, lastFrame, stdin } = render(<App api={apiStub()} />);
+
+    await signIn(lastFrame, stdin);
+    await expectFrame(lastFrame, 'Escolha o caixa');
+    stdin.write('\r');
+    await expectFrame(lastFrame, 'Abertura de caixa');
+
+    // todos os frames desde o primeiro render: a senha nunca foi escrita, nem na troca de caixa
+    expect(frames.join('\n')).not.toContain('segredo');
+    expect(frames.join('\n')).toContain('Senha: •••••••');
+  });
+
+  test('recusa do login vinculado ao caixa volta às credenciais com a mensagem', async () => {
+    let first = true;
+    const login = vi.fn(async (): Promise<LoginOutcome> => {
+      if (first) {
+        first = false;
+        return { ok: true, operator: OPERADOR };
+      }
+      return { ok: false, kind: 'rejected', message: 'caixa não encontrado ou inativo' };
+    });
+    const { lastFrame, stdin } = render(<App api={apiStub({ login })} />);
+
+    await signIn(lastFrame, stdin);
+    await expectFrame(lastFrame, 'Escolha o caixa');
+    stdin.write('\r');
+
+    await expectFrame(lastFrame, 'caixa não encontrado ou inativo');
+    expect(lastFrame()).toContain('Usuário: ana');
+    expect(lastFrame()).not.toContain('••••');
   });
 
   test('credencial inválida mostra a mensagem e continua na tela de login', async () => {
@@ -214,6 +329,6 @@ describe('App', () => {
     await expectFrame(lastFrame, '› 03');
 
     stdin.write('\r');
-    await expectFrame(lastFrame, 'tela do passo 1107');
+    await expectFrame(lastFrame, 'Abertura de caixa');
   });
 });

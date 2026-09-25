@@ -4,7 +4,9 @@ import { describe, expect, test, vi } from 'vitest';
 import type {
   CashRegisterOption,
   CashRegistersOutcome,
+  CurrentCashSessionOutcome,
   LoginOutcome,
+  OpenCashRegisterOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import { LoginScreen } from './LoginScreen';
@@ -12,7 +14,7 @@ import { LoginScreen } from './LoginScreen';
 /**
  * Contrato da tela de login com o reducer (1103): a tela não troca de estado sozinha — ela relata o
  * fato e o shell decide. Aqui o `dispatch` é um espião, então dá para conferir exatamente o que sai
- * da tela (o `loginSucceeded` que o 1107 vai consumir) e os casos em que não sai nada.
+ * da tela (o `loginSucceeded` que leva à abertura de caixa) e os casos em que não sai nada.
  */
 
 const OPERADOR = { id: 'u1', name: 'Ana Souza' };
@@ -35,8 +37,15 @@ const CAIXA_02: CashRegisterOption = {
 function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
   return {
     login: vi.fn(async (): Promise<LoginOutcome> => ({ ok: true, operator: OPERADOR })),
+    logout: vi.fn(async () => undefined),
     listCashRegisters: vi.fn(
       async (): Promise<CashRegistersOutcome> => ({ ok: true, registers: [CAIXA_01, CAIXA_02] }),
+    ),
+    openCashRegister: vi.fn(
+      async (): Promise<OpenCashRegisterOutcome> => ({ ok: true, sessionId: 'session-1' }),
+    ),
+    currentCashSession: vi.fn(
+      async (): Promise<CurrentCashSessionOutcome> => ({ ok: true, sessionId: 'session-1' }),
     ),
     ...overrides,
   };
@@ -136,5 +145,70 @@ describe('LoginScreen', () => {
 
     await expectFrame(lastFrame, 'informe usuário e senha');
     expect(login).not.toHaveBeenCalled();
+  });
+
+  test('ao confirmar o caixa, revoga a sessão provisória e loga de novo com o caixa escolhido', async () => {
+    const calls: string[] = [];
+    const login = vi.fn(
+      async (
+        _username: string,
+        _password: string,
+        cashRegisterId?: string,
+      ): Promise<LoginOutcome> => {
+        calls.push(cashRegisterId === undefined ? 'login sem caixa' : `login ${cashRegisterId}`);
+        return { ok: true, operator: OPERADOR };
+      },
+    );
+    const logout = vi.fn(async () => {
+      calls.push('logout');
+    });
+    const dispatch = vi.fn();
+    const { lastFrame, stdin } = renderScreen(apiStub({ login, logout }), dispatch);
+
+    await signIn(lastFrame, stdin);
+    await expectFrame(lastFrame, 'Escolha o caixa');
+
+    stdin.write('\u001b[B'); // desce para o segundo caixa
+    await expectFrame(lastFrame, '› 02');
+    stdin.write('\r');
+
+    await vi.waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith({
+        type: 'loginSucceeded',
+        operator: OPERADOR,
+        register: { id: 'r2', name: 'Caixa do fundo' },
+      });
+    });
+
+    // a sessão provisória é revogada antes do login vinculado, e a senha segue com o operador
+    expect(calls).toEqual(['login sem caixa', 'logout', 'login r2']);
+    expect(login).toHaveBeenLastCalledWith('ana', 'segredo', 'r2');
+  });
+
+  test('recusa do login vinculado volta às credenciais com a senha fora do campo', async () => {
+    let first = true;
+    const login = vi.fn(async (): Promise<LoginOutcome> => {
+      if (first) {
+        first = false;
+        return { ok: true, operator: OPERADOR };
+      }
+      return { ok: false, kind: 'rejected', message: 'caixa não encontrado ou inativo' };
+    });
+    const dispatch = vi.fn();
+    const { lastFrame, stdin } = renderScreen(apiStub({ login }), dispatch);
+
+    await signIn(lastFrame, stdin);
+    await expectFrame(lastFrame, 'Escolha o caixa');
+    stdin.write('\r');
+
+    // a tela volta às credenciais e relata a recusa; a mensagem exibida é do reducer (`loginRejected`)
+    await vi.waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith({
+        type: 'loginRejected',
+        message: 'caixa não encontrado ou inativo',
+      });
+    });
+    await expectFrame(lastFrame, 'Usuário: ana');
+    expect(lastFrame()).not.toContain('••••'); // a senha recusada sai do campo
   });
 });

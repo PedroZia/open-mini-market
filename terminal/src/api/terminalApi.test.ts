@@ -56,6 +56,19 @@ describe('createTerminalApi', () => {
     expect(post).toHaveBeenCalledWith('/api/v1/auth/login', { username: 'ana', password: 'segredo' });
   });
 
+  test('login com o caixa escolhido leva o cashRegisterId no corpo', async () => {
+    const post = vi.fn(async () => LOGIN_RESPONSE);
+    const api = createTerminalApi(stubClient({ post }));
+
+    await api.login('ana', 'segredo', 'r2');
+
+    expect(post).toHaveBeenCalledWith('/api/v1/auth/login', {
+      username: 'ana',
+      password: 'segredo',
+      cashRegisterId: 'r2',
+    });
+  });
+
   test('sem displayName, o operador assume o username', async () => {
     const api = createTerminalApi(
       stubClient({ post: async () => ({ token: 'tok', user: { id: 'u1', username: 'ana' } }) }),
@@ -114,6 +127,51 @@ describe('createTerminalApi', () => {
       kind: 'rejected',
       message: 'conta bloqueada até 12:30',
     });
+  });
+
+  test('400 do cashRegisterId é recusa: o operador escolhe outro caixa, não é falha bloqueante', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(400, {
+            code: 'VALIDATION_ERROR',
+            detail: 'caixa não encontrado ou inativo',
+          });
+        },
+      }),
+    );
+
+    expect(await api.login('ana', 'segredo', 'r9')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'caixa não encontrado ou inativo',
+    });
+  });
+
+  test('logout revoga a sessão e esquece o token local', async () => {
+    const post = vi.fn(async (path: string) => (path === '/api/v1/auth/logout' ? undefined : LOGIN_RESPONSE));
+    const api = createTerminalApi(stubClient({ post }));
+
+    await api.login('ana', 'segredo');
+    await api.logout();
+
+    expect(post).toHaveBeenLastCalledWith('/api/v1/auth/logout', undefined);
+    expect(getToken()).toBeNull();
+  });
+
+  test('falha na revogação não rejeita e ainda limpa o token: o login seguinte sai anônimo', async () => {
+    const post = vi.fn(async (path: string) => {
+      if (path === '/api/v1/auth/logout') {
+        throw new ApiError(500, { code: 'INTERNAL_ERROR', detail: 'falha inesperada' });
+      }
+      return LOGIN_RESPONSE;
+    });
+    const api = createTerminalApi(stubClient({ post }));
+
+    await api.login('ana', 'segredo');
+    await expect(api.logout()).resolves.toBeUndefined();
+
+    expect(getToken()).toBeNull();
   });
 
   test('5xx é falha bloqueante com o problem+json do servidor', async () => {
@@ -180,6 +238,78 @@ describe('createTerminalApi', () => {
     expect(await api.listCashRegisters()).toEqual({
       ok: false,
       problem: { status: 403, code: 'ACCESS_DENIED', detail: 'permissão cash.read' },
+    });
+  });
+
+  test('abertura devolve a sessão criada e envia o fundo de troco no corpo', async () => {
+    const post = vi.fn(async () => ({ id: 's1', status: 'OPEN', openingAmount: 12.5 }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(await api.openCashRegister('r1', 12.5)).toEqual({ ok: true, sessionId: 's1' });
+    expect(post).toHaveBeenCalledWith('/api/v1/cash-registers/r1/open', { openingAmount: 12.5 });
+  });
+
+  test('201 sem id de sessão é falha: sem sessão a venda não tem onde acontecer', async () => {
+    const api = createTerminalApi(stubClient({ post: async () => ({ status: 'OPEN' }) }));
+
+    expect(await api.openCashRegister('r1', 0)).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'abertura sem sessão na resposta' },
+    });
+  });
+
+  test('409 CASH_REGISTER_ALREADY_OPEN é caixa já aberto, não falha bloqueante', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(409, {
+            code: 'CASH_REGISTER_ALREADY_OPEN',
+            detail: 'caixa já está aberto',
+          });
+        },
+      }),
+    );
+
+    expect(await api.openCashRegister('r1', 50)).toEqual({ ok: false, kind: 'alreadyOpen' });
+  });
+
+  test('outro 409 da abertura continua sendo falha bloqueante', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(409, { code: 'CONFLICT', detail: 'estado mudou' });
+        },
+      }),
+    );
+
+    expect(await api.openCashRegister('r1', 50)).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 409, code: 'CONFLICT', detail: 'estado mudou' },
+    });
+  });
+
+  test('sessão corrente devolve o id que a venda vai usar', async () => {
+    const get = vi.fn(async () => ({ sessionId: 's9', status: 'OPEN' }));
+    const api = createTerminalApi(stubClient({ get }));
+
+    expect(await api.currentCashSession('r1')).toEqual({ ok: true, sessionId: 's9' });
+    expect(get).toHaveBeenCalledWith('/api/v1/cash-registers/r1/current-session');
+  });
+
+  test('caixa sem sessão aberta (404) é falha bloqueante', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiError(404, { code: 'CASH_SESSION_NOT_OPEN', detail: 'caixa sem sessão aberta' });
+        },
+      }),
+    );
+
+    expect(await api.currentCashSession('r1')).toEqual({
+      ok: false,
+      problem: { status: 404, code: 'CASH_SESSION_NOT_OPEN', detail: 'caixa sem sessão aberta' },
     });
   });
 });

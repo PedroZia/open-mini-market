@@ -949,7 +949,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `ink-testing-library`: login OK navega para venda; credencial inválida mostra erro sem sair da tela.
   **Commit:** `feat(tui): adiciona tela de login e selecao de caixa`
 
-- [ ] **1107 — Abertura de caixa**
+- [x] **1107 — Abertura de caixa**
   **Objetivo:** informar valor inicial. **Depende:** 1106
   **Implementar:** tela de abertura quando o caixa não tem sessão; campo de valor com máscara; `409` já aberto → segue para a venda usando a sessão existente (com aviso).
   **Testes/aceite:** abre e navega; valor inválido não envia; caixa já aberto exibe aviso e permite continuar.

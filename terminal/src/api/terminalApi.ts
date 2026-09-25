@@ -1,14 +1,14 @@
 import { ApiError, type ApiClient, type components } from '@minimarket/api-client';
 
 import type { ApiProblem, Operator } from '../core/state';
-import { setToken } from './session';
+import { clearToken, setToken } from './session';
 
 /**
  * Camada de API da TUI: o contrato do backend (`components['schemas'][...]`, gerado no
- * `@minimarket/api-client`) traduzido para o que as telas precisam — operador autenticado e caixas
- * disponíveis — com as falhas já separadas em "recusa de credencial" (a tela de login fica e avisa)
- * e "falha" (tela de erro, §11.4). Nenhuma regra de negócio aqui (BR-12): a TUI não calcula nada,
- * só transporta o que o servidor respondeu.
+ * `@minimarket/api-client`) traduzido para o que as telas precisam — operador autenticado, caixas
+ * disponíveis e a sessão de caixa — com as falhas já separadas em "recusa" (a tela fica e avisa) e
+ * "falha" (tela de erro, §11.4). Nenhuma regra de negócio aqui (BR-12): a TUI não calcula nada, só
+ * transporta o que o servidor respondeu.
  *
  * A instância do client entra por parâmetro (`createTerminalApi(client)`): os testes injetam um
  * dublê e o app injeta a instância única de `src/api/index.ts`.
@@ -25,10 +25,10 @@ export type CashRegisterOption = {
   operatorName: string | null;
 };
 
-/** Resultado do login: sucesso com o operador, recusa de credencial ou falha bloqueante. */
+/** Resultado do login: sucesso com o operador, recusa (400/401/423) ou falha bloqueante. */
 export type LoginOutcome =
   | { ok: true; operator: Operator }
-  /** 401 `INVALID_CREDENTIALS` ou 423 `ACCOUNT_LOCKED`: a mensagem fica na tela, o formulário continua. */
+  /** 401 `INVALID_CREDENTIALS`, 423 `ACCOUNT_LOCKED` ou 400 do `cashRegisterId`: a mensagem fica na tela, o formulário continua. */
   | { ok: false; kind: 'rejected'; message: string }
   /** Rede, timeout, 5xx (e o resto dos 4xx): bloqueia e vai para a tela de erro. */
   | { ok: false; kind: 'failed'; problem: ApiProblem };
@@ -38,25 +38,54 @@ export type CashRegistersOutcome =
   | { ok: true; registers: CashRegisterOption[] }
   | { ok: false; problem: ApiProblem };
 
+/** Resultado da abertura do caixa: sessão criada, caixa já aberto (409) ou falha bloqueante. */
+export type OpenCashRegisterOutcome =
+  | { ok: true; sessionId: string }
+  /** 409 `CASH_REGISTER_ALREADY_OPEN`: a tela busca a sessão existente e segue com ela (1107). */
+  | { ok: false; kind: 'alreadyOpen' }
+  | { ok: false; kind: 'failed'; problem: ApiProblem };
+
+/** Resultado da sessão corrente do caixa: qualquer falha bloqueia. */
+export type CurrentCashSessionOutcome =
+  | { ok: true; sessionId: string }
+  | { ok: false; problem: ApiProblem };
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
-   * Autentica no servidor e **guarda o token em memória**. Sem `cashRegisterId`: a vinculação da
-   * sessão ao caixa acontece na abertura dele (passos 607/1107), não no login.
+   * Autentica no servidor e **guarda o token em memória**. Sem `cashRegisterId`, a sessão nasce
+   * provisória (só lista caixas); com ele, nasce vinculada ao caixa (passo 607) — é o login que a
+   * tela refaz depois de escolher o caixa (1107).
    */
-  login(username: string, password: string): Promise<LoginOutcome>;
+  login(username: string, password: string, cashRegisterId?: string): Promise<LoginOutcome>;
+  /**
+   * Revoga a sessão provisória (`POST /auth/logout`, 204) e **esquece o token local mesmo se a
+   * revogação falhar**: a sessão é descartável e o token revogado não pode sobrar para o próximo
+   * login (o mecanismo bearer responderia 401 antes do recurso).
+   */
+  logout(): Promise<void>;
   /** Caixas ativos da loja, com o status da sessão atual e o operador dela. */
   listCashRegisters(): Promise<CashRegistersOutcome>;
+  /** Abre a sessão do caixa com o fundo de troco informado (`POST .../open`, 201). */
+  openCashRegister(registerId: string, openingAmount: number): Promise<OpenCashRegisterOutcome>;
+  /** Sessão aberta agora no caixa (`GET .../current-session`); sem sessão, a falha é bloqueante. */
+  currentCashSession(registerId: string): Promise<CurrentCashSessionOutcome>;
 };
 
 /** Monta a camada de API sobre um client já configurado (base URL + token da sessão). */
 export function createTerminalApi(client: ApiClient): TerminalApi {
   return {
-    async login(username, password) {
+    async login(username, password, cashRegisterId) {
       try {
+        // o campo só entra no corpo quando há caixa escolhido: login anônimo é o que lista os caixas
+        const body: components['schemas']['LoginRequest'] = { username, password };
+        if (cashRegisterId !== undefined) {
+          body.cashRegisterId = cashRegisterId;
+        }
+
         const response = await client.post<components['schemas']['LoginResponse']>(
           '/api/v1/auth/login',
-          { username, password },
+          body,
         );
         const token = response.token;
         const user = response.user;
@@ -76,6 +105,19 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
       }
     },
 
+    async logout() {
+      try {
+        await client.post<void>('/api/v1/auth/logout');
+      } catch {
+        // A sessão provisória é descartável: a revogação falhou, mas travar o operador por causa de
+        // uma sessão que vai ser substituída seria pior. O token local sai no `finally` — sem isso
+        // o login seguinte iria com o token revogado e o mecanismo bearer responderia 401 antes de
+        // chegar ao recurso — e a sessão órfã expira sozinha pelo idle timeout (passo 206).
+      } finally {
+        clearToken();
+      }
+    },
+
     async listCashRegisters() {
       try {
         const response = await client.get<components['schemas']['CashRegisterResponse'][]>(
@@ -87,15 +129,70 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         return { ok: false, problem: problemOf(error) };
       }
     },
+
+    async openCashRegister(registerId, openingAmount) {
+      try {
+        const response = await client.post<components['schemas']['CashSessionResponse']>(
+          `/api/v1/cash-registers/${registerId}/open`,
+          { openingAmount },
+        );
+
+        if (response.id === undefined) {
+          // 201 fora do contrato: sem id de sessão a venda não tem onde acontecer
+          return {
+            ok: false,
+            kind: 'failed',
+            problem: { status: 0, code: null, detail: 'abertura sem sessão na resposta' },
+          };
+        }
+
+        return { ok: true, sessionId: response.id };
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          error.status === 409 &&
+          error.code === 'CASH_REGISTER_ALREADY_OPEN'
+        ) {
+          // caixa já aberto não é falha: quem decide seguir com a sessão existente é a tela (1107)
+          return { ok: false, kind: 'alreadyOpen' };
+        }
+
+        return { ok: false, kind: 'failed', problem: problemOf(error) };
+      }
+    },
+
+    async currentCashSession(registerId) {
+      try {
+        const response = await client.get<components['schemas']['CurrentCashSessionResponse']>(
+          `/api/v1/cash-registers/${registerId}/current-session`,
+        );
+
+        if (response.sessionId === undefined) {
+          return {
+            ok: false,
+            problem: { status: 0, code: null, detail: 'sessão corrente sem id na resposta' },
+          };
+        }
+
+        return { ok: true, sessionId: response.sessionId };
+      } catch (error) {
+        return { ok: false, problem: problemOf(error) };
+      }
+    },
   };
 }
 
 /**
- * Recusa de credencial fica na tela de login com o `detail` do `problem+json` (o servidor não diz
- * qual dos dois está errado, e não é papel da TUI adivinhar); o resto é falha bloqueante.
+ * Recusa fica na tela de login com o `detail` do `problem+json` (o servidor não diz qual dos dois
+ * está errado, e não é papel da TUI adivinhar); o resto é falha bloqueante. O 400 é a recusa do
+ * `cashRegisterId` (caixa inativo entre a lista e a escolha): o operador corrige escolhendo outro,
+ * não é falha de infraestrutura.
  */
 function loginFailure(error: unknown): LoginOutcome {
-  if (error instanceof ApiError && (error.status === 401 || error.status === 423)) {
+  if (
+    error instanceof ApiError &&
+    (error.status === 400 || error.status === 401 || error.status === 423)
+  ) {
     return { ok: false, kind: 'rejected', message: error.detail };
   }
 
