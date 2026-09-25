@@ -9,6 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "start": "npm run start --workspace=@minimarket/terminal",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"

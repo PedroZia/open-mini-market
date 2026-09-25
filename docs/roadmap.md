@@ -1021,7 +1021,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** troca funciona; venda aberta impede troca silenciosa.
   **Commit:** `feat(tui): permite troca de operador`
 
-- [ ] **1119 — Empacotamento e execução**
+- [x] **1119 — Empacotamento e execução**
   **Objetivo:** rodar no computador do caixa. **Depende:** 1118
   **Implementar:** script `npm start` com `tsx`/build; instruções de instalação (Node 22+), configuração da URL da API por variável de ambiente; atalho de inicialização documentado.
   **Testes/aceite:** execução limpa em máquina Windows; documento no README.
