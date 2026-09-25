@@ -1037,6 +1037,77 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ---
 
+## Fase 11b — OpenTUI React
+
+> Migração aprovada em [`../melhorias_terminal.md`](../melhorias_terminal.md) (revisão 2, commit `528c46a`).
+> `core/` e `api/` não mudam; a UI nova nasce em `terminal/src/opentui/` e roda com Bun. Durante a fase a
+> Ink continua atendendo o caixa — **sem recurso novo, só correção crítica** — e é apagada no cut-over
+> (1130). O polimento visual (D-01 a D-10, §6 do plano) é backlog pós-cut-over, não requisito da migração.
+> Gate de todo passo da UI nova: `tsc --noEmit` + o runner decidido no 1121 (`bun test` ou vitest) verdes,
+> com testes de tela pelo `testRender` do `@opentui/react/test-utils`.
+
+- [ ] **1121 — Spike OpenTUI (go/no-go)**
+  **Objetivo:** provar a engine OpenTUI na máquina do caixa antes de investir na migração — é o gate go/no-go da fase. **Depende:** 1120
+  **Implementar:** app mínimo **fora do fluxo do PDV** (branch/worktree próprio; nada do `terminal/` do main muda): Bun 1.3+ (recomendado) e, se der, Node 26.4 + `--experimental-ffi`; render em 80×24 e 120×40; F1–F12; rajada do leitor interceptada por listener global **antes** do `<input>` focado; `<scrollbox>` com venda de 50 itens; `testRender` no runner escolhido; plano de rollback. Relatório curto com os 6 itens de §5 de `melhorias_terminal.md`.
+  **Testes/aceite:** os 6 critérios com evidência: (a) instalação/start no Windows do caixa; (b) frames em 80×24 e 120×40; (c) F-keys e rajada do leitor; (d) `testRender` sob o runner escolhido; (e) venda de 50 itens fluida; (f) plano de rollback. Critério falho ou ambíguo = **no-go**: não entra no main, a fase para e o dono decide (Anexo A).
+  **Commit:** `chore(tui): avalia OpenTUI com spike no caixa` (branch/worktree; não entra no main sem go)
+
+- [ ] **1122 — Cadastro rápido — backend**
+  **Objetivo:** permitir que o PDV cadastre produto quando o código não existe (F-02). **Depende:** 406
+  **Implementar:** `POST /api/v1/products/quick` (`name`, `barcode`, `price`, `unit`); permissão nova `product.quick_create` para OPERADOR (migration `V22` + seed RBAC); auditoria `PRODUCT_QUICK_CREATED` na mesma transação; rota nova na lista do `RouteSecurityTest`; `packages/api-client/src/schema.d.ts` regenerado do OpenAPI.
+  **Testes/aceite:** RestAssured 201 (OPERADOR com a permissão), 403 (sem permissão), 409 `BARCODE_ALREADY_EXISTS`, 400 validações + auditoria registrada; `./mvnw verify` verde.
+  **Commit:** `feat(catalog): adiciona cadastro rapido de produto`
+
+- [ ] **1123 — Fundação da UI OpenTUI**
+  **Objetivo:** esqueleto executável da UI nova, sem portar telas. **Depende:** 1121
+  **Implementar:** `terminal/src/opentui/`: entry com `createCliRenderer` + `createRoot`, `theme.ts`, regiões de layout, adaptadores `KeyEvent`→`core/keys` e `KeyEvent`→scanner (puros), foco, error boundary e shutdown com `renderer.destroy` em toda saída; `jsxImportSource`; script `start:opentui` (Bun); fontes do OpenTUI em `docs/referencias.md`.
+  **Testes/aceite:** teste de fumaça renderiza o shell em 80×24; adaptadores puros testados; `tsc --noEmit` e runner do 1121 verdes.
+  **Commit:** `feat(tui): cria fundacao da UI em OpenTUI`
+
+- [ ] **1124 — Entrada: login, abertura de caixa e erro**
+  **Objetivo:** portar a entrada do PDV para a UI nova. **Depende:** 1123
+  **Implementar:** portar `LoginScreen` (senha mascarada própria — o `<input>` do OpenTUI não tem máscara), seleção de caixa, `OpeningCashScreen` (máscara de dinheiro) e `ErrorScreen`, reaproveitando os dublês de API dos testes da Ink.
+  **Testes/aceite:** testes de tela equivalentes aos da Ink (login OK/credencial inválida, valor inválido, retry); gate do 1121 verde.
+  **Commit:** `feat(tui): porta entrada do PDV para OpenTUI`
+
+- [ ] **1125 — Tela de venda**
+  **Objetivo:** venda operável na UI nova com leitura manual e janela rolante. **Depende:** 1124
+  **Implementar:** cabeçalho + relógio vivo, lista com `<scrollbox>` e janela que segue a seleção (F-04), **leitura manual** com `<input>` + rajada do leitor interceptada globalmente (F-01), totais, feedback/spinner e barra de status base.
+  **Testes/aceite:** testes de bipe, digitação manual, `3*`, scroll/seleção, 80×24 e 120×40; gate do 1121 verde.
+  **Commit:** `feat(tui): migra a tela de venda para OpenTUI`
+
+- [ ] **1126 — Modais**
+  **Objetivo:** paridade dos modais da venda. **Depende:** 1125
+  **Implementar:** F1 ajuda, F2 consulta de preço, F5 desconto, F6 cliente, F4 cancelar venda, F12 trocar operador, F7/F8 gaveta e confirmação do DEL, com um `ModalFrame` único; se estourar ~300 linhas, dividir e registrar antes (1126a/1126b).
+  **Testes/aceite:** testes de cada modal (recusa no modal, retry, ESC, lista com setas); gate do 1121 verde.
+  **Commit:** `feat(tui): migra os modais para OpenTUI`
+
+- [ ] **1127 — Pagamento, sucesso e fechamento**
+  **Objetivo:** portar o fim da venda e o fechamento de caixa. **Depende:** 1126
+  **Implementar:** `PaymentScreen`, `SaleSuccessScreen` (troco em destaque) e `ClosingCashScreen` (contado/diferença).
+  **Testes/aceite:** pagamento parcial/múltiplo, troco, bloqueio por venda aberta, ENTER da próxima venda; gate do 1121 verde.
+  **Commit:** `feat(tui): migra pagamento e fechamento para OpenTUI`
+
+- [ ] **1128 — Cadastro rápido — modal (F-02)**
+  **Objetivo:** cadastrar o produto desconhecido sem sair da venda. **Depende:** 1122, 1127
+  **Implementar:** no 404 do bipe/linha digitada, abrir o modal com o código travado usando o endpoint do 1122; no sucesso, reenviar o bipe; recusa no modal.
+  **Testes/aceite:** teste do fluxo "desconhecido → cadastra → item na venda"; E2E estendido; gate do 1121 verde.
+  **Commit:** `feat(tui): cadastra produto rapido pelo PDV`
+
+- [ ] **1129 — Autoteste do leitor 2.0 (opcional)**
+  **Objetivo:** diagnosticar o leitor com mais contexto. **Depende:** 1125
+  **Implementar:** histórico das 5 últimas leituras + diagnóstico do transporte (lento, sem terminador, layout, erro do servidor).
+  **Testes/aceite:** testes puros do diagnóstico + tela; gate do 1121 verde.
+  **Commit:** `feat(tui): diagnostica o leitor no autoteste`
+
+- [ ] **1130 — Cut-over e limpeza**
+  **Objetivo:** aposentar a Ink e operar só a UI nova. **Depende:** 1121–1129
+  **Implementar:** `npm start`/`pdv.cmd` → Bun + entry OpenTUI; E2E reescrito para a UI nova; apagar `terminal/src/ui` (Ink), `ink`, `ink-testing-library` e `useRawShortcuts`; atualizar `docs/referencias.md`, `README` e `docs/leitores.md`; ajustar `engines`.
+  **Testes/aceite:** E2E completo verde contra backend real **na UI nova**; nenhum arquivo Ink restante; gate do 1121 verde.
+  **Commit:** `chore(tui): aposenta a Ink e ativa a UI em OpenTUI`
+
+---
+
 ## Fase 12 — React Web (retaguarda) — *SHOULD HAVE*
 
 - [ ] **1201 — Projeto web**
