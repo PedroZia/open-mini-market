@@ -23,14 +23,22 @@ import { isPrintable, keyEventToScannerChar } from "./adapters/scanner"
  *   campo (o 1º caractere é ambíguo: o bipe só fecha no terminador; a **limpeza do campo é do 1125**);
  * - BACKSPACE fica com o campo (edição de texto, fora do mapa §11.3) e **ESC fica com o entry**
  *   (`installExitKey`, a última saída): consumir ESC com `stopPropagation` impediria o destroy, que
- *   é registrado antes deste hook.
+ *   é registrado antes deste hook;
+ * - modal bloqueante (1126a): o componente do modal registra o **próprio** hook (o padrão do
+ *   `LoginScreen`) e, como cada `prependListener` entra na frente, o modal recebe a tecla antes
+ *   deste listener — enquanto ele está à vista, o `onKey` da tela devolve `false` e o scanner dela
+ *   fica desligado por `barcodeEnabled`, então a tecla não vaza nem para a venda nem para o campo.
  *
  * O `core/scanner` continua sendo a única fonte de verdade do que é leitura (timing, terminador,
  * multiplicador `n*`); aqui só se decide o que o campo focado pode receber.
  */
 
-/** Mesmo limiar do `core/scanner` (`BURST_MAX_INTERVAL_MS`): rajada é o que não pode virar texto. */
-const BURST_MAX_INTERVAL_MS = 50
+/**
+ * Mesmo limiar do `core/scanner` (`BURST_MAX_INTERVAL_MS`): rajada é o que não pode virar texto.
+ * Exportado para os modais (1126a) reconhecerem o ENTER colado nos caracteres como o terminador do
+ * bipe — e não como o "sim" do operador.
+ */
+export const BURST_MAX_INTERVAL_MS = 50
 
 export type UseGlobalKeyboardOptions = {
   /**
@@ -46,6 +54,13 @@ export type UseGlobalKeyboardOptions = {
    * o caminho normal (mapa, rajada, campo). ESC não é consumível: é a última saída do entry.
    */
   onKey?: (event: KeyEvent) => boolean
+  /**
+   * Leitor ligado (padrão) ou desligado (§11.3): com um modal bloqueante à vista a tela passa
+   * `false` e o `core/scanner` descarta buffer e multiplicador e ignora a entrada — a rajada do
+   * leitor não vira item nem quando o modal fecha (o hook global fica atrás do handler do modal,
+   * 1126a).
+   */
+  barcodeEnabled?: boolean
 }
 
 export type GlobalKeyboard = {
@@ -53,7 +68,7 @@ export type GlobalKeyboard = {
   lastKey: KeyName | null
 }
 
-export function useGlobalKeyboard({ onBarcode, onKey }: UseGlobalKeyboardOptions): GlobalKeyboard {
+export function useGlobalKeyboard({ onBarcode, onKey, barcodeEnabled = true }: UseGlobalKeyboardOptions): GlobalKeyboard {
   const renderer = useRenderer()
   /** Um scanner por shell/tela, com o timing medido aqui (mesma regra da Ink). */
   const [scanner] = useState(createScanner)
@@ -68,6 +83,11 @@ export function useGlobalKeyboard({ onBarcode, onKey }: UseGlobalKeyboardOptions
     onBarcodeRef.current = onBarcode
     onKeyRef.current = onKey
   })
+
+  /** O leitor obedece ao contexto da tela (§11.3); desligar descarta buffer e multiplicador. */
+  useEffect(() => {
+    scanner.setEnabled(barcodeEnabled)
+  }, [scanner, barcodeEnabled])
 
   useEffect(() => {
     const handleKeyPress = (event: KeyEvent): void => {

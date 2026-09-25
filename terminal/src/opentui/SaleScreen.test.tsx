@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/react */
 import { describe, expect, mock, spyOn, test } from "bun:test"
+import { KeyCodes } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
 import { act, useReducer } from "react"
 
@@ -316,6 +317,47 @@ async function scanManual(setup: Setup, code: string): Promise<void> {
     setup.mockInput.pressEnter()
   })
 }
+
+/** Tecla nomeada (DEL, F1, F3...): o `mockInput` do `testRender` emite a sequência do terminal. */
+async function pressNamed(setup: Setup, key: string): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressKey(key)
+  })
+}
+
+/** ESC: o parser segura a tecla sozinha por ~20 ms (ambiguidade com sequências), achado do spike. */
+async function pressEscape(setup: Setup): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressEscape()
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+}
+
+/**
+ * O mapa do §11.3 como o operador o lê na ajuda (1126a): as mesmas linhas do `HelpModal` portado
+ * da Ink — tecla e descrição, na ordem da tela.
+ */
+const HELP_LINES: ReadonlyArray<readonly [string, string]> = [
+  ["F1", "esta ajuda"],
+  ["F2", "consulta de preço e estoque, sem vender"],
+  ["F3", "cancela o item selecionado"],
+  ["F4", "cancela a venda em andamento"],
+  ["F5", "desconto na venda (valor, percentual e motivo)"],
+  ["F6", "cliente na venda (busca por nome ou CPF)"],
+  ["F7", "sangria: retira dinheiro da gaveta"],
+  ["F8", "suprimento: coloca dinheiro na gaveta"],
+  ["F9", "pagamento e conclusão da venda"],
+  ["F10", "fechamento do caixa"],
+  ["F11", "autoteste do leitor de código de barras"],
+  ["F12", "troca o operador do caixa"],
+  ["ENTER", "confirma o bipe, a escolha na lista e a próxima venda"],
+  ["ESC", "fecha o modal e volta para a venda"],
+  ["↑ ↓", "navega nos itens da venda e nas listas"],
+  ["+ -", "altera a quantidade do item selecionado"],
+  ["DEL", "remove o item selecionado (com confirmação)"],
+]
 
 describe("SaleScreen: quadro e estado vazio (1125a)", () => {
   test("sem venda: zeros de exibição, convite ao primeiro bipe e o quadro em 80×24", async () => {
@@ -948,6 +990,264 @@ describe("SaleScreen: quantidade do item selecionado (1125c)", () => {
 
       expect(addSaleItem).toHaveBeenCalledWith(SALE_ID, { barcode: BARCODE, quantity: 1 })
       expect(frame).toContain("› 1 x Feijão 1kg — R$ 8,90")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+})
+
+describe("SaleScreen: modais — ajuda e remoção de item (1126a)", () => {
+  test("DEL abre a confirmação do item selecionado e o ENTER remove, com a confirmação no rodapé", async () => {
+    const removido = saleOf([ARROZ])
+    const removeSaleItem = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: removido }),
+    )
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ removeSaleItem }),
+      stateWith(saleOf([ARROZ, FEIJAO])),
+      (action) => actions.push(action),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.DELETE)
+
+      const frame = await expectFrame(setup, "remover Feijão 1kg?")
+
+      expect(frame).toContain("Remover item") // o título do `ModalFrame`
+      expect(frame).toContain("ENTER confirma · ESC cancela")
+      expect(removeSaleItem).not.toHaveBeenCalled() // nada vai à API antes do ENTER
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+
+      const after = await expectFrame(setup, "removido: Feijão 1kg")
+
+      expect(removeSaleItem).toHaveBeenCalledWith(SALE_ID, "p2")
+      expect(actions).toContainEqual({ type: "saleUpdated", sale: removido })
+      expect(after).toContain("TOTAL: R$ 24,90") // os totais são os da resposta do servidor (BR-12)
+      expect(after).not.toContain("remover Feijão")
+      expect(highlighted(after)).toHaveLength(1)
+      expectLayout(after, 80, 24)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("ESC fecha a confirmação sem chamar a API e sem mexer na venda", async () => {
+    const removeSaleItem = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
+    )
+    const setup = await renderHarness(
+      apiStub({ removeSaleItem }),
+      stateWith(saleOf([ARROZ, FEIJAO])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.DELETE)
+      await expectFrame(setup, "remover Feijão 1kg?")
+
+      await pressEscape(setup)
+
+      const frame = await expectFrame(setup, "› 1 x Feijão 1kg — R$ 8,90")
+
+      expect(frame).not.toContain("remover Feijão")
+      expect(frame).toContain("TOTAL: R$ 33,80") // a venda segue como estava
+      expect(removeSaleItem).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F3 faz o mesmo que o DEL: uma confirmação só e o ENTER remove", async () => {
+    const removeSaleItem = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
+    )
+    const setup = await renderHarness(
+      apiStub({ removeSaleItem }),
+      stateWith(saleOf([ARROZ, FEIJAO])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F3)
+
+      await expectFrame(setup, "remover Feijão 1kg?")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+
+      await expectFrame(setup, "removido: Feijão 1kg")
+      expect(removeSaleItem).toHaveBeenCalledTimes(1) // a confirmação não duplicou
+      expect(removeSaleItem).toHaveBeenCalledWith(SALE_ID, "p2")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("remover o último item volta ao estado vazio do 1125a", async () => {
+    const removeSaleItem = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleOf([]) }),
+    )
+    const setup = await renderHarness(apiStub({ removeSaleItem }), stateWith(saleOf([ARROZ])))
+
+    try {
+      await pressNamed(setup, KeyCodes.DELETE)
+      await expectFrame(setup, "remover Arroz 5kg?")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+
+      const frame = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(frame).toContain("TOTAL: R$ 0,00")
+      expect(highlighted(frame)).toEqual([])
+      expect(frame).not.toContain("remover Arroz")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("rajada do leitor com a confirmação à vista não vira item nem confirma a remoção", async () => {
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ, FEIJAO]) }),
+    )
+    const removeSaleItem = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
+    )
+    const setup = await renderHarness(
+      apiStub({ addSaleItem, removeSaleItem }),
+      stateWith(saleOf([ARROZ, FEIJAO])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.DELETE)
+      await expectFrame(setup, "remover Feijão 1kg?")
+
+      await scanReader(setup, BARCODE) // a rajada inteira, terminador incluso
+
+      const frame = await setup.waitForFrame((current) => current.includes("remover Feijão 1kg?"))
+
+      expect(addSaleItem).not.toHaveBeenCalled() // o leitor está desligado (§11.3)
+      expect(removeSaleItem).not.toHaveBeenCalled() // o terminador do bipe não é o ENTER humano
+      expect(frame).toContain("ENTER confirma · ESC cancela")
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Feijão 1kg — R$ 8,90")
+
+      expect(back).toContain("TOTAL: R$ 33,80") // a venda não foi mexida pela rajada
+      expect(addSaleItem).not.toHaveBeenCalled() // o bipe engolido não reaparece depois
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("falha transitória na remoção mantém a confirmação à vista e o ENTER refaz", async () => {
+    let attempts = 0
+    const removeSaleItem = mock(async (): Promise<SaleItemMutationOutcome> => {
+      attempts += 1
+
+      return attempts === 1 ? sendFailure() : { ok: true, sale: saleOf([ARROZ]) }
+    })
+    const setup = await renderHarness(
+      apiStub({ removeSaleItem }),
+      stateWith(saleOf([ARROZ, FEIJAO])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.DELETE)
+      await expectFrame(setup, "remover Feijão 1kg?")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+
+      const failed = await expectFrame(setup, "falha ao remover o item — ENTER tenta de novo")
+
+      expect(removeSaleItem).toHaveBeenCalledTimes(1) // sem retry automático: o ENTER é sob demanda
+      expect(failed).toContain("remover Feijão 1kg?") // a confirmação segue à vista
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+
+      const frame = await expectFrame(setup, "removido: Feijão 1kg")
+
+      expect(removeSaleItem).toHaveBeenCalledTimes(2)
+      expect(frame).toContain("› 1 x Arroz 5kg — R$ 24,90")
+      expect(frame).not.toContain("remover Feijão")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("404 na remoção avisa e fecha a confirmação sem mexer na venda", async () => {
+    const removeSaleItem = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: "notFound" }),
+    )
+    const setup = await renderHarness(
+      apiStub({ removeSaleItem }),
+      stateWith(saleOf([ARROZ, FEIJAO])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.DELETE)
+      await expectFrame(setup, "remover Feijão 1kg?")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+
+      const frame = await expectFrame(setup, "item já não está na venda: Feijão 1kg")
+
+      expect(frame).not.toContain("remover Feijão")
+      expect(frame).toContain("› 1 x Feijão 1kg — R$ 8,90") // a venda segue como estava
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F1 abre a ajuda com o mapa de teclas e o ESC fecha; com ela à vista a venda não age", async () => {
+    const changeSaleItemQuantity = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
+    )
+    const removeSaleItem = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleOf([]) }),
+    )
+    const setup = await renderHarness(
+      apiStub({ changeSaleItemQuantity, removeSaleItem }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F1)
+
+      const frame = await expectFrame(setup, "Ajuda — atalhos da venda (F1)")
+
+      for (const [keys, description] of HELP_LINES) {
+        expect(frame).toContain(`${keys} — ${description}`)
+      }
+
+      expect(frame).toContain("ESC fecha e volta para a venda")
+      expectLayout(frame, 80, 24)
+
+      // com a ajuda à vista a venda não age: a quantidade e a remoção da tela ficam inertes
+      await pressQuantity(setup, "+")
+      await pressNamed(setup, KeyCodes.DELETE)
+
+      expect(changeSaleItemQuantity).not.toHaveBeenCalled()
+      expect(removeSaleItem).not.toHaveBeenCalled()
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).toContain("TOTAL: R$ 24,90")
+      expect(back).not.toContain("Ajuda — atalhos")
+      expect(back).not.toContain("remover Arroz")
     } finally {
       setup.renderer.destroy()
     }

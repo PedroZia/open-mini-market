@@ -1101,7 +1101,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `+`/`-`, granularidade de KG, `-` no limite vira aviso, falha transitória refaz; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): altera a quantidade do item na UI nova`
 
-- [ ] **1126a — Modais: infraestrutura, ajuda e remoção de item**
+- [x] **1126a — Modais: infraestrutura, ajuda e remoção de item**
   **Objetivo:** criar o `ModalFrame` único e portar F1 ajuda e a confirmação do DEL/F3. **Depende:** 1125c
   **Implementar:** `ModalFrame` (borda/título/rodapé) e roteamento de teclado por contexto (`screen`/`modal`) com o leitor **desligado** em modal (`scanner.setEnabled(false)`, §11.3); confirmação do DEL/F3 no item selecionado (`DELETE` via `runMutation`, ESC fecha sem chamar nada); F1 ajuda com o mapa de teclas. Passo dividido do 1126 original (4 subpassos); os demais modais são 1126b/c/d.
   **Testes/aceite:** DEL/F3 abre a confirmação, ENTER remove e recalcula, ESC não chama a API, rajada não vira item com modal aberto, F1 abre/fecha; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

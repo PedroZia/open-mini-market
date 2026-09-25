@@ -3,7 +3,7 @@ import { expect, test } from "bun:test"
 import type { KeyEvent } from "@opentui/core"
 import { KeyCodes } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
-import { act } from "react"
+import { act, useState } from "react"
 
 import type { ScannerEvent } from "../core/scanner"
 import { createShutdown, installExitKey } from "./index"
@@ -116,6 +116,77 @@ test("tecla do mapa (F3) é consumida antes dos demais listeners; texto comum pa
     })
 
     expect(seen).toEqual(["a"])
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+/**
+ * Sonda que liga/desliga o leitor pelo `/` (fora do mapa, não vira leitura): o mesmo
+ * `scanner.setEnabled(false)` que a venda faz enquanto um modal está à vista (1126a).
+ */
+function ToggleProbe({ onBarcode }: { onBarcode: (event: ScannerEvent) => void }) {
+  const [enabled, setEnabled] = useState(true)
+
+  useGlobalKeyboard({
+    onBarcode,
+    barcodeEnabled: enabled,
+    onKey: (event) => {
+      if (event.sequence === "/") {
+        setEnabled((current) => !current)
+        return true
+      }
+
+      return false
+    },
+  })
+
+  return (
+    <box flexDirection="column" width="100%" height="100%">
+      <text>{`leitor: ${enabled ? "ligado" : "desligado"}`}</text>
+      <input focused width={40} />
+    </box>
+  )
+}
+
+test("leitor desligado (§11.3) ignora a rajada e o buffer velho não vale ao religar", async () => {
+  const reads: ScannerEvent[] = []
+  const setup = await testRender(<ToggleProbe onBarcode={(event) => reads.push(event)} />, {
+    width: 60,
+    height: 6,
+  })
+
+  try {
+    // `3*` com o leitor ligado deixa o multiplicador pendente para o próximo bipe
+    await act(async () => {
+      await setup.mockInput.pressKeys(["3", "*"], 80)
+    })
+
+    await act(async () => {
+      setup.mockInput.pressKey("/")
+    })
+
+    await act(async () => {
+      await setup.mockInput.typeText(BARCODE)
+    })
+    await act(async () => {
+      setup.mockInput.pressEnter()
+    })
+
+    expect(reads).toEqual([]) // desligado: a rajada não emite nada
+
+    // religar descarta buffer e multiplicador antigos: o próximo bipe vale 1, não 3
+    await act(async () => {
+      setup.mockInput.pressKey("/")
+    })
+    await act(async () => {
+      await setup.mockInput.typeText(BARCODE)
+    })
+    await act(async () => {
+      setup.mockInput.pressEnter()
+    })
+
+    expect(reads).toEqual([{ type: "barcodeScanned", barcode: BARCODE, quantity: 1 }])
   } finally {
     setup.renderer.destroy()
   }

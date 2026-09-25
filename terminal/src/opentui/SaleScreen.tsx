@@ -16,12 +16,15 @@ import type {
   TerminalApi,
 } from "../api/terminalApi"
 import { formatAmount } from "../core/money"
+import { resolveShortcut } from "../core/keys"
 import type { Action } from "../core/reducer"
 import { moveSelection, nextQuantity, selectionIndex, touchedItem } from "../core/sale"
 import { createScanner, type Scanner, type ScannerEvent } from "../core/scanner"
 import type { SaleItemView, SaleOpenState, SaleView, ScanIntent } from "../core/state"
 import { keyEventToKeyName } from "./adapters/keys"
+import { HelpModal } from "./HelpModal"
 import { useGlobalKeyboard } from "./keyboard"
+import { RemoveItemConfirmModal } from "./RemoveItemConfirmModal"
 import { theme } from "./theme"
 
 /**
@@ -41,12 +44,19 @@ import { theme } from "./theme"
  *
  * Teclado (§11.3): a rajada do leitor é interceptada pelo **hook global** (1123b) antes de qualquer
  * campo focado e chega pelo `onBarcode` com o código **bruto** e a quantidade do multiplicador
- * (BR-14); desta tela, o `onKey` consome as setas, o `+`/`-` da quantidade e o ENTER do retry, e o
- * resto segue o caminho normal do hook. O campo de leitura é a leitura **manual**: o ENTER entrega o
- * texto ao mesmo `core/scanner` como uma rajada sintética (caracteres + `\r` no mesmo instante, com o
+ * (BR-14); desta tela, o `onKey` resolve os atalhos da venda pelo **contexto** do `core/keys`
+ * (`resolveShortcut` com `{ screen: 'saleOpen', modal: null }`, como o `useRawShortcuts` da Ink):
+ * setas, `+`/`-`, DEL/F3 e o F1. O campo de leitura é a leitura **manual**: o ENTER entrega o texto
+ * ao mesmo `core/scanner` como uma rajada sintética (caracteres + `\r` no mesmo instante, com o
  * `n*` valendo como multiplicador), então digitar o código vale tanto quanto bipá-lo. O que a rajada
  * do leitor deixou no campo é limpo no bipe — o primeiro caractere chega antes de o `\r` fechar a
  * leitura.
+ *
+ * Modais (1126a): a ajuda do F1 e a confirmação do DEL/F3 são estado **desta** tela (`modal`) e
+ * saem no `ModalFrame` no lugar do corpo da venda — o leitor fica desligado (`barcodeEnabled:
+ * modal === null`, §11.3) e o `handleKey` daqui devolve `false`: quem trata a tecla é o handler do
+ * próprio modal, que o hook global chama **antes** deste listener (o `prependListener` põe o mais
+ * novo na frente) e que consome o que é dele. Sem modal, a tela age como sempre.
  *
  * O envio é uma fila local (`queueRef`) drenada pelo `pump`, um bipe por vez, na ordem em que
  * chegaram: sem venda criada, o primeiro bipe abre a venda (`POST /sales`) e o item entra em
@@ -59,8 +69,9 @@ import { theme } from "./theme"
  * resposta do servidor vira `saleUpdated`; `-` que zeraria não vai à API e avisa para usar o DEL
  * (a remoção é o 1126). Enquanto há mutação ou bipe em voo o rodapé mostra "enviando…" e a tecla não
  * empilha chamada; no `finally` a trava cai e o `pump` drena o bipe que chegou no meio — nenhum bipe
- * se perde e a venda não é mexida por duas chamadas ao mesmo tempo. O DEL com confirmação, os modais
- * e o cadastro rápido do 404 são dos passos seguintes (1126/1128).
+ * se perde e a venda não é mexida por duas chamadas ao mesmo tempo. A remoção do 1126a entra pela
+ * mesma `runMutation`, que devolve o desfecho para a confirmação decidir se sai de cena ou fica
+ * esperando o ENTER refazer. O cadastro rápido do 404 é do 1128.
  *
  * A lista é do `<scrollbox>` (F-04): em vez do `slice(-10)` da Ink — onde a seleção podia sair da
  * área visível e `+`/`-`/DEL agiam em item invisível —, a janela rola atrás do item selecionado e o
@@ -120,6 +131,9 @@ const SEND_FAILURE_NOTICE = "falha ao enviar o bipe — ENTER tenta de novo"
 /** Falha transitória da mutação: o item fica como está e a mesma tecla refaz — não há fila de mutação. */
 const QUANTITY_FAILURE_NOTICE = "falha ao falar com o servidor — +/- tenta de novo"
 
+/** Falha transitória da remoção (1126a): a confirmação fica à vista e o ENTER refaz o `DELETE`. */
+const REMOVE_FAILURE_NOTICE = "falha ao remover o item — ENTER tenta de novo"
+
 /** `-` que zeraria a quantidade não vai à API: quem remove o item é o DEL (com confirmação, 1126). */
 const REMOVE_HINT = "use DEL para remover o item"
 
@@ -144,6 +158,12 @@ type Feedback =
   | { kind: "success"; text: string }
   | { kind: "notice"; text: string }
   | { kind: "failure"; text: string }
+
+/**
+ * Modal bloqueante aberto sobre a venda (1126a): a ajuda do F1 e a confirmação do DEL/F3. O item
+ * guardado na confirmação é o alvo fixo do `DELETE` — com o modal à vista a seleção não se move.
+ */
+type SaleModal = { kind: "help" } | { kind: "removeItemConfirm"; item: SaleItemView }
 
 export function SaleScreen({ state, now, api, dispatch, customer, store, online }: SaleScreenProps) {
   const renderer = useRenderer()
@@ -170,13 +190,23 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   /** Espelho de `mutatingRef` para o rodapé: a trava em si é do ref (lida fora do render). */
   const [mutating, setMutating] = useState(false)
+  /** Modal bloqueante à vista (1126a): `null` é a venda; com modal o corpo sai de cena. */
+  const [modal, setModal] = useState<SaleModal | null>(null)
+  /** `DELETE` da confirmação em voo: trava o ENTER repetido e mostra "removendo…" no modal. */
+  const [removing, setRemoving] = useState(false)
+  /** Aviso transitório da remoção, dentro do modal: a confirmação fica à vista e o ENTER refaz. */
+  const [removalNotice, setRemovalNotice] = useState<string | null>(null)
 
   useEffect(() => {
     latest.current = state
   })
 
-  /** Teclado da tela no hook global: setas (seleção), `+`/`-` (quantidade) e ENTER do retry; o bipe chega no `onBarcode`. */
-  useGlobalKeyboard({ onBarcode: handleBarcode, onKey: handleKey })
+  /**
+   * Teclado da tela no hook global: atalhos da venda resolvidos por contexto (setas, `+`/`-`, DEL/F3
+   * e F1) e o ENTER do retry do bipe; o bipe chega no `onBarcode`. Com modal à vista o leitor fica
+   * **desligado** (§11.3) — o `handleKey` daqui devolve `false` e quem trata a tecla é o modal.
+   */
+  useGlobalKeyboard({ onBarcode: handleBarcode, onKey: handleKey, barcodeEnabled: modal === null })
 
   const sale = state.sale
   const items = sale?.items ?? []
@@ -210,27 +240,59 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
   }, [renderer, top])
 
   /**
-   * Teclado da venda (1125a–1125c): as setas movem a seleção com clamp nas pontas e o `+`/`-` mexem
-   * na quantidade do item selecionado — consumidos, não chegam ao campo de leitura —, e o ENTER
-   * refaz o bipe que ficou na fila depois de uma falha transitória. O resto devolve `false` e segue o
-   * caminho normal do hook global: o texto do campo (a leitura manual) e a rajada do leitor.
+   * Teclado da venda resolvido pelo contexto do `core/keys` (§11.3, como o `useRawShortcuts` da
+   * Ink): as setas movem a seleção com clamp nas pontas, `+`/`-` mexem na quantidade do item
+   * selecionado, DEL e F3 abrem a **mesma** confirmação de remoção e o F1 abre a ajuda — tudo
+   * consumido, não chega ao campo de leitura —, e o ENTER refaz o bipe que ficou na fila depois de
+   * uma falha transitória. As intenções dos passos seguintes (1126b/c/d, 1127) não agem aqui: a
+   * tecla devolve `false` e o hook global a engole pelo mapa.
+   *
+   * Com um modal à vista (1126a) a tela **não** age: o handler devolve `false` e quem trata a tecla
+   * é o handler do próprio modal, que roda antes deste (o `prependListener` do hook global põe o
+   * listener mais novo na frente) e consome o que é dele — nenhuma tecla vaza entre os dois.
    */
   function handleKey(event: KeyEvent): boolean {
-    const keyName = keyEventToKeyName(event)
-
-    if (keyName === "UP" || keyName === "DOWN") {
-      if (items.length === 0) {
-        return true // lista vazia: não há seleção a mover (o `moveSelection` do core devolveria -1)
-      }
-
-      setSelected((current) => moveSelection(current, keyName === "UP" ? -1 : 1, items.length))
-      return true
+    if (modal !== null) {
+      return false
     }
 
-    // quantidade do item selecionado (1125c): a tecla é do mapa, nunca vira leitura nem texto no campo
-    if (keyName === "PLUS" || keyName === "MINUS") {
-      void changeQuantity(keyName === "PLUS" ? 1 : -1)
-      return true
+    const keyName = keyEventToKeyName(event)
+    const shortcut =
+      keyName === null ? null : resolveShortcut(keyName, { screen: "saleOpen", modal: null })
+
+    if (shortcut !== null && shortcut.type === "intent") {
+      switch (shortcut.name) {
+        case "itemUp":
+        case "itemDown": {
+          if (items.length > 0) {
+            // forma funcional: duas setas no mesmo tick (autorepeat, teste) compõem em vez de repetir
+            const delta = shortcut.name === "itemUp" ? -1 : 1
+            setSelected((current) => moveSelection(current, delta, items.length))
+          }
+
+          return true
+        }
+
+        case "quantityUp":
+          void changeQuantity(1)
+          return true
+
+        case "quantityDown":
+          void changeQuantity(-1)
+          return true
+
+        case "removeItem":
+        case "cancelItem": // DEL e F3 fazem o mesmo: uma confirmação, um caminho
+          askRemove()
+          return true
+
+        case "help":
+          setModal({ kind: "help" })
+          return true
+
+        default:
+          return false // F2/F4/F5/F6/F7/F8/F9/F10/F11/F12 são dos passos seguintes (1126b/c/d, 1127)
+      }
     }
 
     // com uma falha de envio à vista, o ENTER refaz a chamada do bipe que ficou na fila
@@ -325,21 +387,73 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
   }
 
   /**
+   * DEL e F3 (1126a): abre a confirmação do item selecionado — nada vai à API antes do ENTER. É o
+   * mesmo caminho dos dois (o mapa do `core/keys` resolve `removeItem` e `cancelItem`), então a
+   * confirmação é uma só.
+   */
+  function askRemove(): void {
+    if (selectedItem === null || busy()) {
+      return
+    }
+
+    setRemovalNotice(null)
+    setModal({ kind: "removeItemConfirm", item: selectedItem })
+  }
+
+  /** Fecha o modal e limpa o que era dele — a próxima abertura nasce sem aviso velho. */
+  function closeModal(): void {
+    setModal(null)
+    setRemovalNotice(null)
+  }
+
+  /**
+   * ENTER da confirmação (1126a): o `DELETE` do item que o modal guardou, pela mesma `runMutation`
+   * da quantidade (uma mutação por vez, a fila de bipes drenada no `finally`). O desfecho decide o
+   * modal: sucesso fecha e o rodapé confirma `removido: <nome>`; 404 fecha e avisa; falha
+   * transitória o mantém à vista com o aviso e o ENTER refaz; bloqueante vai para a tela de erro.
+   */
+  async function removeConfirmedItem(): Promise<void> {
+    const item = modal?.kind === "removeItemConfirm" ? modal.item : null
+
+    if (item === null || removing) {
+      return
+    }
+
+    setRemoving(true)
+    const retry = await runMutation(
+      (saleId) => api.removeSaleItem(saleId, item.productId),
+      item,
+      () => `removido: ${item.name}`,
+      REMOVE_FAILURE_NOTICE,
+    )
+    setRemoving(false)
+
+    if (retry) {
+      setRemovalNotice(REMOVE_FAILURE_NOTICE) // a confirmação fica à vista: o ENTER refaz
+      return
+    }
+
+    closeModal()
+  }
+
+  /**
    * Uma mutação de item por vez: marca o "enviando…", chama a API e traduz o desfecho — sucesso vira
    * `saleUpdated` com a venda que o servidor recalculou, 404 avisa e a venda fica como está, o resto
    * é falha (transitória avisa e a tecla refaz; bloqueante vai para a tela de erro). O `finally`
-   * libera a trava e drena a fila de bipes que chegou durante a chamada.
+   * libera a trava e drena a fila de bipes que chegou durante a chamada. Devolve `true` quando a
+   * falha é **transitória**: a confirmação do DEL (1126a) fica à vista esperando o ENTER refazer.
    */
   async function runMutation(
     send: (saleId: string) => Promise<SaleItemMutationOutcome>,
     item: SaleItemView,
     success: (sale: SaleView) => string,
     failureNotice: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const saleId = latest.current.sale?.id ?? null
 
     if (saleId === null) {
-      return
+      // sem venda não há item: o modal fecha e a tela segue como está (só acontece fora da venda)
+      return false
     }
 
     mutatingRef.current = true
@@ -351,15 +465,16 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
       if (outcome.ok) {
         dispatch({ type: "saleUpdated", sale: outcome.sale })
         setFeedback({ kind: "success", text: success(outcome.sale) })
-        return
+        return false
       }
 
       if (outcome.kind === "notFound") {
         setFeedback({ kind: "notice", text: missingItem(item.name) })
-        return
+        return false
       }
 
       sendFailed(outcome, failureNotice)
+      return outcome.kind === "retryable"
     } finally {
       mutatingRef.current = false
       setMutating(false)
@@ -458,6 +573,26 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
     }
 
     dispatch({ type: "apiFailed", problem: failure.problem })
+  }
+
+  // modal bloqueante (1126a): o corpo da venda sai de cena e o quadro do modal ocupa o lugar — o
+  // leitor já está desligado (`barcodeEnabled`) e o `handleKey` daqui não age enquanto ele existe
+  if (modal !== null) {
+    return (
+      <box width="100%" height="100%" flexDirection="column" alignItems="center" justifyContent="center">
+        {modal.kind === "help" ? (
+          <HelpModal onClosed={closeModal} />
+        ) : (
+          <RemoveItemConfirmModal
+            item={modal.item}
+            busy={removing}
+            notice={removalNotice}
+            onConfirm={() => void removeConfirmedItem()}
+            onCancel={closeModal}
+          />
+        )}
+      </box>
+    )
   }
 
   return (
