@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import type {
   AddSaleItemOutcome,
+  ApplyDiscountOutcome,
   BarcodeLookupOutcome,
   CashRegisterOption,
   CashRegistersOutcome,
@@ -13,6 +14,7 @@ import type {
   SaleItemMutationOutcome,
   TerminalApi,
 } from '../api/terminalApi';
+import type { SaleView } from '../core/state';
 import { App } from './App';
 
 /**
@@ -38,6 +40,22 @@ const CAIXA_02: CashRegisterOption = {
   open: true,
   operatorName: 'Maria',
 };
+
+/**
+ * Venda com um item e o desconto calculado pelo servidor (1111): subtotal 24,90 e total já com o
+ * desconto — os números são os da resposta, a TUI não calcula nada (BR-12).
+ */
+function saleDiscounted(discountAmount: number): SaleView {
+  return {
+    id: 'sale-1',
+    items: [
+      { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+    ],
+    subtotal: 24.9,
+    discountAmount,
+    total: 24.9 - discountAmount,
+  };
+}
 
 function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
   return {
@@ -84,6 +102,10 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     removeSaleItem: vi.fn(
       async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'notFound' }),
+    ),
+    // desconto (1111): a venda volta com o desconto que o servidor calculou
+    applyDiscount: vi.fn(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: saleDiscounted(2.49) }),
     ),
     ...overrides,
   };
@@ -503,5 +525,130 @@ describe('App: bipe adiciona item (1109)', () => {
 
     await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
     expect(ui.lastFrame()).toContain('TOTAL: R$ 0,00');
+  });
+});
+
+describe('App: desconto (1111)', () => {
+  /** Venda com um item: o F5 só abre o modal quando a venda já existe (1109). */
+  async function reachSaleWithItem(api: TerminalApi) {
+    const ui = render(<App api={api} />);
+    await reachSale(ui);
+    ui.stdin.write('7891000100103\r');
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+
+    return ui;
+  }
+
+  /** Abre o modal pelo F5 do canal cru. */
+  async function openDiscount(ui: { stdin: { write: (data: string) => void }; lastFrame: () => string | undefined }) {
+    ui.stdin.write('\u001b[15~'); // F5: o `useInput` do Ink não entrega as teclas F
+    await expectFrame(ui.lastFrame, 'Desconto na venda (F5)');
+  }
+
+  test('F5 abre o modal sobre a venda: o corpo da venda sai de cena', async () => {
+    const ui = await reachSaleWithItem(apiStub());
+
+    await openDiscount(ui);
+
+    expect(ui.lastFrame()).toContain('Tipo: [VALOR] · PERCENTUAL');
+    expect(ui.lastFrame()).not.toContain('Subtotal:'); // a venda fica escondida enquanto o modal está à vista
+  });
+
+  test('F5 sem venda criada não abre nada: não há o que descontar', async () => {
+    const applyDiscount = vi.fn(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: saleDiscounted(10) }),
+    );
+    const ui = render(<App api={apiStub({ applyDiscount })} />);
+    await reachSale(ui);
+
+    ui.stdin.write('\u001b[15~');
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(ui.lastFrame()).not.toContain('Desconto na venda (F5)');
+    expect(applyDiscount).not.toHaveBeenCalled();
+  });
+
+  test('aplicar o valor fecha o modal e os totais são os que o servidor devolveu', async () => {
+    const applyDiscount = vi.fn(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: saleDiscounted(10) }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ applyDiscount }));
+
+    await openDiscount(ui);
+
+    ui.stdin.write('1000');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 10,00');
+    ui.stdin.write('\t');
+    await expectFrame(ui.lastFrame, '› Motivo:');
+    ui.stdin.write('cliente pediu');
+    await expectFrame(ui.lastFrame, 'Motivo: cliente pediu');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'Desconto: R$ 10,00');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 14,90');
+    expect(ui.lastFrame()).not.toContain('Desconto na venda (F5)');
+    expect(applyDiscount).toHaveBeenCalledWith('sale-1', {
+      type: 'VALUE',
+      value: 10,
+      reason: 'cliente pediu',
+    });
+  });
+
+  test('ESC cancela sem chamar a API e sem mexer na venda', async () => {
+    const applyDiscount = vi.fn(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: saleDiscounted(10) }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ applyDiscount }));
+    await openDiscount(ui);
+
+    ui.stdin.write('1000'); // com o formulário já preenchido: cancelar não aplica nada
+    await expectFrame(ui.lastFrame, 'Valor: R$ 10,00');
+    ui.stdin.write('\u001b'); // ESC pelo canal cru fecha o modal (§11.3)
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Desconto na venda (F5)');
+    });
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90'); // a venda intacta
+    expect(applyDiscount).not.toHaveBeenCalled();
+  });
+
+  test('com o modal aberto os demais atalhos ficam bloqueados', async () => {
+    const ui = await reachSaleWithItem(apiStub());
+    await openDiscount(ui);
+
+    ui.stdin.write('\u001b[23~'); // F11 (autoteste) com o desconto aberto: bloqueado
+
+    await expectFrame(ui.lastFrame, 'Desconto na venda (F5)');
+    expect(ui.lastFrame()).not.toContain('Autoteste do leitor');
+  });
+
+  test('bipe com o modal aberto não vira item nem aplica o desconto', async () => {
+    const addSaleItem = vi.fn(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: true,
+        sale: {
+          id: 'sale-1',
+          items: [
+            { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+          ],
+          subtotal: 24.9,
+          discountAmount: 0,
+          total: 24.9,
+        },
+      }),
+    );
+    const applyDiscount = vi.fn(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: saleDiscounted(10) }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ addSaleItem, applyDiscount }));
+    expect(addSaleItem).toHaveBeenCalledTimes(1); // o bipe que criou a venda com o item
+
+    await openDiscount(ui);
+
+    ui.stdin.write('7891000100103\r'); // rajada com o modal à vista
+
+    await expectFrame(ui.lastFrame, 'Desconto na venda (F5)');
+    expect(addSaleItem).toHaveBeenCalledTimes(1); // o bipe não virou item: a venda saiu de cena
+    expect(applyDiscount).not.toHaveBeenCalled(); // o terminador colado no texto não aplica nada
   });
 });

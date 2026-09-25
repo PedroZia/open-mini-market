@@ -973,7 +973,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** quantidade e totais atualizam; remover zera item; confirmação evita remoção acidental.
   **Commit:** `feat(tui): permite alterar quantidade e remover itens`
 
-- [ ] **1111 — Fluxo: desconto (F5)**
+- [x] **1111 — Fluxo: desconto (F5)**
   **Objetivo:** aplicar desconto com motivo. **Depende:** 1110, 811
   **Implementar:** modal com tipo (valor/percentual), valor e motivo; erros de permissão e de limite exibidos claramente.
   **Testes/aceite:** desconto aplicado reflete nos totais; OPERADOR sem permissão vê mensagem clara (403 tratado); ESC cancela sem alterar.

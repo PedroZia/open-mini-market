@@ -14,21 +14,22 @@ import { createTerminalApi } from './terminalApi';
 type Handlers = {
   get?: (path: string) => Promise<unknown>;
   post?: (path: string, body?: unknown) => Promise<unknown>;
+  put?: (path: string, body?: unknown) => Promise<unknown>;
   patch?: (path: string, body?: unknown) => Promise<unknown>;
   delete?: (path: string) => Promise<unknown>;
 };
 
 /** Client dublê: só as rotas da entrada do PDV entram; o resto é erro de teste. */
 function stubClient(handlers: Handlers): ApiClient {
-  const unused = (method: string) => () => Promise.reject(new Error(`${method} não usado aqui`));
-
   return {
     get: <T>(path: string) =>
       (handlers.get?.(path) ?? Promise.reject(new Error(`GET inesperado: ${path}`))) as Promise<T>,
     post: <T>(path: string, body?: unknown) =>
       (handlers.post?.(path, body) ?? Promise.reject(new Error(`POST inesperado: ${path}`))) as
         Promise<T>,
-    put: unused('PUT') as ApiClient['put'],
+    put: <T>(path: string, body?: unknown) =>
+      (handlers.put?.(path, body) ?? Promise.reject(new Error(`PUT inesperado: ${path}`))) as
+        Promise<T>,
     patch: <T>(path: string, body?: unknown) =>
       (handlers.patch?.(path, body) ?? Promise.reject(new Error(`PATCH inesperado: ${path}`))) as
         Promise<T>,
@@ -659,6 +660,133 @@ describe('createTerminalApi', () => {
       ok: false,
       kind: 'failed',
       problem: { status: 0, code: null, detail: 'item alterado sem venda na resposta' },
+    });
+  });
+
+  test('desconto manda tipo, valor e motivo no PUT e devolve a venda recalculada pelo servidor', async () => {
+    const put = vi.fn(async () => ({
+      id: 'sale-1',
+      status: 'OPEN',
+      subtotal: 24.9,
+      discountType: 'PERCENT',
+      discountValue: 10,
+      discountAmount: 2.49,
+      total: 22.41,
+      items: [
+        { productId: 'p1', barcode: '7891000100103', name: 'Arroz 5kg', unit: 'UN', unitPrice: 24.9, quantity: 1, lineTotal: 24.9 },
+      ],
+    }));
+    const api = createTerminalApi(stubClient({ put }));
+
+    expect(
+      await api.applyDiscount('sale-1', { type: 'PERCENT', value: 10, reason: 'cliente pediu' }),
+    ).toEqual({
+      ok: true,
+      sale: {
+        id: 'sale-1',
+        items: [
+          { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+        ],
+        subtotal: 24.9,
+        discountAmount: 2.49,
+        total: 22.41,
+      },
+    });
+    expect(put).toHaveBeenCalledWith('/api/v1/sales/sale-1/discount', {
+      type: 'PERCENT',
+      value: 10,
+      reason: 'cliente pediu',
+    });
+  });
+
+  test('403 sem `sale.discount.apply` vira recusa com a mensagem fixa, sem expor o código', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        put: async () => {
+          throw new ApiError(403, {
+            code: 'ACCESS_DENIED',
+            detail: 'permissão sale.discount.apply',
+          });
+        },
+      }),
+    );
+
+    expect(
+      await api.applyDiscount('sale-1', { type: 'VALUE', value: 10, reason: 'cliente pediu' }),
+    ).toEqual({ ok: false, kind: 'rejected', message: 'sem permissão para aplicar desconto' });
+  });
+
+  test('422 do limite da loja vira recusa com a mensagem que o servidor mandou', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        put: async () => {
+          throw new ApiError(422, {
+            code: 'DISCOUNT_LIMIT_EXCEEDED',
+            detail: 'desconto de 30% excede o limite de 10% da loja',
+          });
+        },
+      }),
+    );
+
+    expect(
+      await api.applyDiscount('sale-1', { type: 'PERCENT', value: 30, reason: 'promoção' }),
+    ).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'desconto de 30% excede o limite de 10% da loja',
+    });
+  });
+
+  test('400 da forma/motivo vira recusa com o detail; 409 e rede não são recusa do modal', async () => {
+    const invalid = createTerminalApi(
+      stubClient({
+        put: async () => {
+          throw new ApiError(400, { code: 'VALIDATION_ERROR', detail: 'motivo do desconto é obrigatório' });
+        },
+      }),
+    );
+    const closed = createTerminalApi(
+      stubClient({
+        put: async () => {
+          throw new ApiError(409, { code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' });
+        },
+      }),
+    );
+    const offline = createTerminalApi(
+      stubClient({
+        put: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+    const discount = { type: 'VALUE', value: 10, reason: 'cliente pediu' } as const;
+
+    expect(await invalid.applyDiscount('sale-1', discount)).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'motivo do desconto é obrigatório',
+    });
+    expect(await closed.applyDiscount('sale-1', discount)).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 409, code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' },
+    });
+    expect(await offline.applyDiscount('sale-1', discount)).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+  });
+
+  test('200 sem venda na resposta do desconto é falha bloqueante', async () => {
+    const api = createTerminalApi(stubClient({ put: async () => ({ status: 'OPEN' }) }));
+
+    expect(
+      await api.applyDiscount('sale-1', { type: 'VALUE', value: 10, reason: 'cliente pediu' }),
+    ).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'desconto aplicado sem venda na resposta' },
     });
   });
 });

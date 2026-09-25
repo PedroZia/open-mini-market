@@ -109,6 +109,34 @@ export type SaleItemMutationOutcome =
   | { ok: false; kind: 'notFound' }
   | SendFailure;
 
+/** Tipo do desconto como o contrato o define (`DiscountType`, passo 811b): valor ou percentual. */
+export type DiscountType = 'VALUE' | 'PERCENT';
+
+/**
+ * O que o modal de desconto manda (`SaleDiscountRequest`, passo 811b): o valor informado pelo
+ * operador e o motivo obrigatório (BR-04). Quem calcula desconto e total é o servidor (BR-12).
+ */
+export type SaleDiscountIntent = {
+  type: DiscountType;
+  /** Em reais no `VALUE` (`10.5`) ou percentual inteiro no `PERCENT` (`10` = 10%). */
+  value: number;
+  reason: string;
+};
+
+/**
+ * Resultado de aplicar o desconto (passo 1111):
+ * - `ok`: a venda inteira com o desconto e os totais recalculados pelo servidor (BR-12);
+ * - `rejected`: recusa com a mensagem que o **próprio modal** mostra — 403 sem
+ *   `sale.discount.apply` (matriz do 810), 422 `DISCOUNT_LIMIT_EXCEEDED` do limite da loja e 400 da
+ *   forma/motivo —, sem fechar o formulário;
+ * - `SendFailure`: retry manual no modal (rede/5xx) ou tela de erro (404/409/contrato), como nos
+ *   demais envios (1109/1110).
+ */
+export type ApplyDiscountOutcome =
+  | { ok: true; sale: SaleView }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -165,6 +193,13 @@ export type TerminalApi = {
    * venda vazia — quem decide voltar ao estado vazio é a tela (1108).
    */
   removeSaleItem(saleId: string, productId: string): Promise<SaleItemMutationOutcome>;
+  /**
+   * Aplica o desconto na venda aberta (`PUT /sales/{id}/discount`, passo 811b): o tipo, o valor
+   * informado e o motivo obrigatório (BR-04) vão no corpo, mas quem calcula o desconto e o total é
+   * o servidor (BR-03/BR-12) — o limite da loja é dele, não da TUI. A resposta é a venda inteira
+   * recalculada, que a tela registra com `saleUpdated` (1111).
+   */
+  applyDiscount(saleId: string, discount: SaleDiscountIntent): Promise<ApplyDiscountOutcome>;
 };
 
 /** Monta a camada de API sobre um client já configurado (base URL + token da sessão). */
@@ -373,6 +408,33 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         ),
       );
     },
+
+    async applyDiscount(saleId, discount) {
+      try {
+        const response = await client.put<components['schemas']['SaleDetailResponse']>(
+          `/api/v1/sales/${saleId}/discount`,
+          { type: discount.type, value: discount.value, reason: discount.reason },
+        );
+        const sale = toSaleView(response);
+
+        if (sale === null) {
+          return failed({
+            status: 0,
+            code: null,
+            detail: 'desconto aplicado sem venda na resposta',
+          });
+        }
+
+        return { ok: true, sale };
+      } catch (error) {
+        if (error instanceof ApiError && isDiscountRejection(error.status)) {
+          // recusa fica no modal de desconto: o operador corrige e tenta de novo ali mesmo (1111)
+          return { ok: false, kind: 'rejected', message: discountRejectionMessage(error) };
+        }
+
+        return sendFailure(error);
+      }
+    },
   };
 }
 
@@ -440,6 +502,24 @@ function rejectionMessage(error: ApiError, barcode: string): string {
   return error.code === 'PRODUCT_INACTIVE'
     ? `produto desativado no cadastro: ${barcode} — fale com o gerente`
     : `código recusado: ${error.detail}`;
+}
+
+/**
+ * Recusa do desconto que fica no próprio modal (passo 1111): 400 da forma/motivo, 403 da permissão
+ * `sale.discount.apply` (matriz do 810) e 422 do limite da loja (BR-04). O 404/409 não entra aqui —
+ * é falha bloqueante, como nas demais operações da venda.
+ */
+function isDiscountRejection(status: number): boolean {
+  return status === 400 || status === 403 || status === 422;
+}
+
+/**
+ * Mensagem da recusa do desconto: o 403 ganha texto fixo (o OPERADOR não tem a permissão) sem
+ * expor o código dela; 400 (forma/motivo) e 422 (limite da loja) já trazem o que fazer no `detail`
+ * do servidor.
+ */
+function discountRejectionMessage(error: ApiError): string {
+  return error.status === 403 ? 'sem permissão para aplicar desconto' : error.detail;
 }
 
 /** `SaleDetailResponse` → `SaleView` da tela; `null` quando a resposta não trouxe a venda. */

@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import type {
   AddSaleItemOutcome,
+  ApplyDiscountOutcome,
   BarcodeLookupOutcome,
   CashRegistersOutcome,
   CreateSaleOutcome,
@@ -67,6 +68,10 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     removeSaleItem: vi.fn(
       async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'notFound' }),
+    ),
+    // o desconto (1111) é do modal de venda: aqui só fecha o contrato
+    applyDiscount: vi.fn(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),
     ),
     ...overrides,
   };
