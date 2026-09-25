@@ -1059,14 +1059,20 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** RestAssured 201 (OPERADOR com a permissão), 403 (sem permissão), 409 `BARCODE_ALREADY_EXISTS`, 400 validações + auditoria registrada; `./mvnw verify` verde.
   **Commit:** `feat(catalog): adiciona cadastro rapido de produto`
 
-- [ ] **1123 — Fundação da UI OpenTUI**
+- [ ] **1123a — Fundação da UI OpenTUI**
   **Objetivo:** esqueleto executável da UI nova, sem portar telas. **Depende:** 1121
-  **Implementar:** `terminal/src/opentui/`: entry com `createCliRenderer` + `createRoot`, `theme.ts`, regiões de layout, adaptadores `KeyEvent`→`core/keys` e `KeyEvent`→scanner (puros), foco, error boundary e shutdown com `renderer.destroy` em toda saída; `jsxImportSource`; script `start:opentui` (Bun); fontes do OpenTUI em `docs/referencias.md`.
-  **Testes/aceite:** teste de fumaça renderiza o shell em 80×24; adaptadores puros testados; `tsc --noEmit` e runner do 1121 verdes.
+  **Implementar:** `terminal/src/opentui/`: entry com `createCliRenderer` + `createRoot`, `theme.ts` com fallback monocromático, regiões de layout do shell, error boundary e shutdown (`renderer.destroy` em toda saída); dependências `@opentui/core`/`@opentui/react` (versões do spike), `jsxImportSource` por arquivo (sem contaminar os `.tsx` da Ink), script `start:opentui` (Bun), `test:opentui` (`bun test src/opentui`) e `src/opentui/**` fora do vitest; fontes do OpenTUI em `docs/referencias.md`. Passo dividido do 1123 original (diff estimado acima de ~300 linhas); o restante é o 1123b.
+  **Testes/aceite:** teste de fumaça renderiza o shell em 80×24; `bun test src/opentui`, `tsc --noEmit` e `npm test` (vitest) verdes.
   **Commit:** `feat(tui): cria fundacao da UI em OpenTUI`
 
+- [ ] **1123b — Adaptadores de teclado e leitor da UI nova**
+  **Objetivo:** ligar o `KeyEvent` da OpenTUI ao `core/` sem canal cru. **Depende:** 1123a
+  **Implementar:** adaptadores puros `KeyEvent`→`core/keys` (`KeyName`) e `KeyEvent`→scanner (`\r`/`\t`/caractere, ignorando release e ctrl/meta) e o hook global que alimenta `core/scanner` com listener **antes** do input focado (`preventDefault`/`stopPropagation`); foco do shell; `useRawShortcuts`/`resolveRawKeys` da Ink intocados (saem no 1130).
+  **Testes/aceite:** adaptadores puros testados (F1–F12, setas, ENTER/TAB/BACKSPACE/DEL, release/ctrl ignorados) e rajada interceptada antes do `<input>` focado no `testRender`; `bun test src/opentui` e `tsc --noEmit` verdes.
+  **Commit:** `feat(tui): liga teclado e leitor ao core na UI nova`
+
 - [ ] **1124 — Entrada: login, abertura de caixa e erro**
-  **Objetivo:** portar a entrada do PDV para a UI nova. **Depende:** 1123
+  **Objetivo:** portar a entrada do PDV para a UI nova. **Depende:** 1123b
   **Implementar:** portar `LoginScreen` (senha mascarada própria — o `<input>` do OpenTUI não tem máscara), seleção de caixa, `OpeningCashScreen` (máscara de dinheiro) e `ErrorScreen`, reaproveitando os dublês de API dos testes da Ink.
   **Testes/aceite:** testes de tela equivalentes aos da Ink (login OK/credencial inválida, valor inválido, retry); gate do 1121 verde.
   **Commit:** `feat(tui): porta entrada do PDV para OpenTUI`
