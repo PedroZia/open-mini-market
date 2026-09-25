@@ -14,8 +14,10 @@ import type {
   CustomerSaleOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
+  ProductStockOutcome,
   SaleItemMutationOutcome,
   SearchCustomersOutcome,
+  SearchProductsOutcome,
   CancelSaleOutcome,
   CashSessionSummaryOutcome,
   CloseCashSessionOutcome,
@@ -54,8 +56,14 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     resolveBarcode: vi.fn(
       async (): Promise<BarcodeLookupOutcome> => ({
         ok: true,
-        product: { name: 'Arroz 5kg', price: 24.9, quantity: null },
+        product: { id: 'p1', name: 'Arroz 5kg', price: 24.9, unit: 'UN', quantity: null },
       }),
+    ),
+    searchProducts: vi.fn(
+      async (): Promise<SearchProductsOutcome> => ({ ok: true, products: [] }),
+    ),
+    productStock: vi.fn(
+      async (): Promise<ProductStockOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),
     ),
     createSale: vi.fn(
       async (): Promise<CreateSaleOutcome> => ({

@@ -57,18 +57,31 @@ export type CurrentCashSessionOutcome =
   | { ok: true; sessionId: string }
   | { ok: false; problem: ApiProblem };
 
-/** Produto do bipe (passos 409 e 1104b3): o que a tela precisa para mostrar o item ou o autoteste. */
+/**
+ * Produto do bipe (passos 409, 1104b3 e 1116): o que a tela precisa para mostrar o item, o
+ * autoteste ou a consulta de preço — o `id` é o que o saldo do F2 usa e a `unit` é o rótulo que a
+ * consulta exibe (nunca cálculo, BR-12).
+ */
 export type BarcodeProduct = {
+  id: string;
   name: string;
   price: number;
+  unit: string;
   /** Quantidade sugerida pela etiqueta de balança; `null` fora dela (BR-14). */
   quantity: number | null;
 };
 
-/** Resultado do bipe: produto resolvido pelo servidor ou o `problem+json` da recusa (§9.2). */
+/**
+ * Resultado do bipe (`GET /products/barcode/{barcode}`, passo 409):
+ * - `ok`: o produto resolvido pelo servidor (§9.2);
+ * - `notFound`: 404 `PRODUCT_NOT_FOUND` ou 422 `INVALID_INTERNAL_BARCODE` — o código não é
+ *   conhecido; o autoteste exibe o `problem` e a consulta de preço (F2) segue pelo nome (1116);
+ * - `SendFailure`: retry manual (rede/5xx) ou tela de erro (403/400/contrato).
+ */
 export type BarcodeLookupOutcome =
   | { ok: true; product: BarcodeProduct }
-  | { ok: false; problem: ApiProblem };
+  | { ok: false; kind: 'notFound'; problem: ApiProblem }
+  | SendFailure;
 
 /** O que o bipe manda ao servidor (`SaleItemRequest` do contrato): código **bruto** e quantidade (BR-14). */
 export type SaleItemIntent = {
@@ -326,6 +339,46 @@ export type CancelSaleOutcome =
   | { ok: false; kind: 'rejected'; message: string }
   | SendFailure;
 
+/** Produto como a consulta de preço (F2) o exibe: o `ProductResponse`/barcode normalizados (1116). */
+export type ProductOption = {
+  id: string;
+  name: string;
+  price: number;
+  /** `UN` ou `KG` do cadastro: rótulo da apresentação, nunca cálculo (BR-12). */
+  unit: string;
+};
+
+/**
+ * Resultado da busca de produtos por nome (F2, `GET /products?search=&size=`, passo 404):
+ * - `ok`: os produtos da página que o servidor devolveu (a busca dele cobre trecho do nome);
+ * - `rejected`: 403 sem `product.read` — o modal diz que não dá para consultar;
+ * - `SendFailure`: retry manual no modal (rede/5xx) ou tela de erro (400/contrato).
+ */
+export type SearchProductsOutcome =
+  | { ok: true; products: ProductOption[] }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
+/** Saldo do produto como o `StockDetailResponse` o traz (passo 704): tudo do servidor (BR-12). */
+export type StockBalanceView = {
+  quantity: number;
+  minQuantity: number;
+  /** Estoque baixo: sinal calculado pelo servidor, a TUI só exibe. */
+  lowStock: boolean;
+};
+
+/**
+ * Resultado do saldo (F2, `GET /stock/{productId}`, passo 704):
+ * - `ok`: saldo e mínimo do servidor, com o aviso de estoque baixo dele (BR-12);
+ * - `rejected`: 403 sem `stock.read` e 404 `PRODUCT_NOT_FOUND` do produto que sumiu entre a busca
+ *   e o saldo — o modal avisa sem fechar;
+ * - `SendFailure`: retry manual no modal (rede/5xx) ou tela de erro (400/contrato).
+ */
+export type ProductStockOutcome =
+  | { ok: true; stock: StockBalanceView }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -351,10 +404,23 @@ export type TerminalApi = {
    * passo 409): o servidor decide se é GTIN, código interno ou etiqueta de balança e devolve a
    * quantidade sugerida quando a etiqueta embute peso ou preço (BR-14).
    *
-   * Toda recusa (404 do produto, 422 da etiqueta, 5xx) volta como `problem+json` em `problem` — quem
-   * decide o que fazer com ela é a tela (o autoteste do F11 mostra, o bipe da venda 1109 avisa).
+   * - `ok`: o produto como o servidor o devolveu — o autoteste (F11) e a consulta de preço (F2),
+   *   que usa o `id` para buscar o saldo (1116);
+   * - `notFound`: 404/422 — o termo não é um código conhecido; o F2 segue tratando-o como nome;
+   * - `SendFailure`: retry manual (rede/5xx) ou tela de erro (403/400/contrato).
    */
   resolveBarcode(barcode: string): Promise<BarcodeLookupOutcome>;
+  /**
+   * Busca produtos por trecho do nome (`GET /products`, passo 404) na consulta de preço (F2): o
+   * termo vai **como o operador digitou** — quem decide o que é nome é o servidor —, com a primeira
+   * página pequena, que é o que cabe no modal (1116).
+   */
+  searchProducts(term: string): Promise<SearchProductsOutcome>;
+  /**
+   * Saldo do produto (`GET /stock/{productId}`, passo 704) para a consulta de preço (F2): a
+   * quantidade, o mínimo e o aviso de estoque baixo são do servidor (BR-12) — a TUI só exibe.
+   */
+  productStock(productId: string): Promise<ProductStockOutcome>;
   /**
    * Abre a venda (`POST /sales`, 201, sem corpo) no primeiro bipe: a resposta só traz os totais
    * zerados (ainda sem itens), e é o id dela que o `addSaleItem` usa. A `Idempotency-Key` é do
@@ -600,13 +666,62 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         return {
           ok: true,
           product: {
+            id: response.id ?? '',
             name: response.name ?? '',
             price: response.price ?? 0,
+            unit: response.unit ?? '',
             quantity: response.quantity ?? null,
           },
         };
       } catch (error) {
-        return { ok: false, problem: problemOf(error) };
+        if (error instanceof ApiError && isUnknownBarcode(error)) {
+          // 404 do produto e 422 da etiqueta não são falha para quem consulta preço (1116): o termo
+          // não é um código conhecido e o modal segue tratando-o como nome
+          return { ok: false, kind: 'notFound', problem: problemOf(error) };
+        }
+
+        return sendFailure(error);
+      }
+    },
+
+    async searchProducts(term) {
+      try {
+        // a busca por trecho do nome é do servidor (404): a TUI manda o termo como veio do campo
+        const query = new URLSearchParams({ search: term, size: '10' });
+        const response = await client.get<components['schemas']['PageResponseProductResponse']>(
+          `/api/v1/products?${query.toString()}`,
+        );
+
+        return { ok: true, products: toProductOptions(response.items ?? []) };
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) {
+          return { ok: false, kind: 'rejected', message: 'sem permissão para consultar produtos' };
+        }
+
+        return sendFailure(error);
+      }
+    },
+
+    async productStock(productId) {
+      try {
+        const response = await client.get<components['schemas']['StockDetailResponse']>(
+          `/api/v1/stock/${productId}`,
+        );
+
+        return {
+          ok: true,
+          stock: {
+            quantity: response.quantity ?? 0,
+            minQuantity: response.minQuantity ?? 0,
+            lowStock: response.lowStock ?? false,
+          },
+        };
+      } catch (error) {
+        if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+          return { ok: false, kind: 'rejected', message: stockRejectionMessage(error) };
+        }
+
+        return sendFailure(error);
       }
     },
 
@@ -981,6 +1096,15 @@ async function mutateSaleItem(
   }
 }
 
+/**
+ * Código que o servidor não conhece (`GET /products/barcode/{barcode}`, passo 409): 404
+ * `PRODUCT_NOT_FOUND` do produto e 422 `INVALID_INTERNAL_BARCODE` da etiqueta malformada. Os dois
+ * valem como "não é um código" para a consulta de preço (1116), que segue pelo nome.
+ */
+function isUnknownBarcode(error: ApiError): boolean {
+  return error.status === 404 || error.status === 422;
+}
+
 /** Mensagem do 422 para a tela: o operador precisa saber o que fazer, sem ver o UUID do produto. */
 function rejectionMessage(error: ApiError, barcode: string): string {
   return error.code === 'PRODUCT_INACTIVE'
@@ -1214,6 +1338,37 @@ function closeRejectionMessage(error: ApiError): string {
 /** Mensagem da recusa do cancelamento: o 403 ganha texto fixo; o 400 do motivo diz o que corrigir. */
 function cancelSaleRejectionMessage(error: ApiError): string {
   return error.status === 403 ? 'sem permissão para cancelar a venda' : error.detail;
+}
+
+/**
+ * Recusa do saldo que fica no próprio modal (F2, 1116): o 403 ganha texto fixo (o OPERADOR não tem
+ * `stock.read`) sem expor o código da permissão; o 404 `PRODUCT_NOT_FOUND` do produto que sumiu
+ * entre a busca e o saldo diz que a consulta precisa ser refeita.
+ */
+function stockRejectionMessage(error: ApiError): string {
+  return error.status === 403
+    ? 'sem permissão para consultar o estoque'
+    : 'produto não encontrado — faça a consulta de novo';
+}
+
+/** Normaliza a página de produtos para a lista do F2; registro sem `id` não é consultável e fica de fora. */
+function toProductOptions(
+  products: readonly components['schemas']['ProductResponse'][],
+): ProductOption[] {
+  const options: ProductOption[] = [];
+
+  for (const product of products) {
+    if (product.id !== undefined) {
+      options.push({
+        id: product.id,
+        name: product.name ?? '',
+        price: product.price ?? 0,
+        unit: product.unit ?? '',
+      });
+    }
+  }
+
+  return options;
 }
 
 /** Normaliza a página de clientes para a lista do modal; registro sem `id` não é vinculável. */

@@ -21,8 +21,12 @@ import type {
   CustomerSaleOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
+  ProductOption,
+  ProductStockOutcome,
   SaleItemMutationOutcome,
   SearchCustomersOutcome,
+  SearchProductsOutcome,
+  StockBalanceView,
   TerminalApi,
 } from '../api/terminalApi';
 import type { PaymentMethod, PaymentView, SaleView } from '../core/state';
@@ -88,7 +92,18 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     resolveBarcode: vi.fn(
       async (): Promise<BarcodeLookupOutcome> => ({
         ok: true,
-        product: { name: 'Arroz 5kg', price: 24.9, quantity: null },
+        product: { id: 'p1', name: 'Arroz 5kg', price: 24.9, unit: 'UN', quantity: null },
+      }),
+    ),
+    // a consulta de preço (1116) tem o seu próprio describe; aqui só fecha o contrato
+    searchProducts: vi.fn(
+      async (): Promise<SearchProductsOutcome> => ({ ok: true, products: [] }),
+    ),
+    productStock: vi.fn(
+      async (): Promise<ProductStockOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'saldo não usado neste teste' },
       }),
     ),
     createSale: vi.fn(
@@ -521,7 +536,7 @@ describe('App: venda e canal cru do teclado (1108)', () => {
     const resolveBarcode = vi.fn(
       async (): Promise<BarcodeLookupOutcome> => ({
         ok: true,
-        product: { name: 'Banana prata', price: 6.99, quantity: 0.75 },
+        product: { id: 'p2', name: 'Banana prata', price: 6.99, unit: 'KG', quantity: 0.75 },
       }),
     );
     const ui = render(<App api={apiStub({ resolveBarcode })} />);
@@ -545,6 +560,7 @@ describe('App: venda e canal cru do teclado (1108)', () => {
     const resolveBarcode = vi.fn(
       async (): Promise<BarcodeLookupOutcome> => ({
         ok: false,
+        kind: 'notFound',
         problem: { status: 404, code: 'PRODUCT_NOT_FOUND', detail: 'produto não encontrado' },
       }),
     );
@@ -1770,5 +1786,234 @@ describe('App: fechamento de caixa e cancelamentos (1115)', () => {
     expect(cancelSale).not.toHaveBeenCalled();
     expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90'); // a venda intacta
     expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90');
+  });
+});
+
+describe('App: consulta de preço e ajuda (1116)', () => {
+  /** F1/F2 no canal cru: o `useInput` do Ink não entrega as teclas F (1105). */
+  const F1 = '\u001bOP';
+  const F2 = '\u001bOQ';
+
+  /** Produto que a busca por nome devolve: o preço é do servidor (BR-12). */
+  const ARROZ: ProductOption = { id: 'p1', name: 'Arroz 5kg', price: 24.9, unit: 'UN' };
+  const FEIJAO: ProductOption = { id: 'p2', name: 'Feijão 1kg', price: 8.5, unit: 'UN' };
+
+  /** Saldo que o `GET /stock/{productId}` devolve: estoque baixo é sinal do servidor (704). */
+  const SALDO: StockBalanceView = { quantity: 3, minQuantity: 5, lowStock: true };
+
+  /** Venda com um item na tela: o bipe que a criou é o único `addSaleItem` esperado. */
+  async function reachSaleWithItem(api: TerminalApi) {
+    const ui = render(<App api={api} />);
+    await reachSale(ui);
+    ui.stdin.write('7891000100103\r');
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+
+    return ui;
+  }
+
+  /** Digita o termo na consulta esperando o frame; o ENTER que consulta é do teste. */
+  async function typeTerm(
+    ui: { stdin: { write: (data: string) => void }; lastFrame: () => string | undefined },
+    term: string,
+  ): Promise<void> {
+    ui.stdin.write(term);
+    await expectFrame(ui.lastFrame, `Busca: ${term}`);
+  }
+
+  test('F2 abre a consulta sobre a venda: o corpo da venda sai de cena', async () => {
+    const ui = render(<App api={apiStub()} />);
+    await reachSale(ui);
+
+    ui.stdin.write(F2);
+
+    await expectFrame(ui.lastFrame, 'Consulta de preço (F2)');
+    expect(ui.lastFrame()).toContain('digite o código de barras ou o nome e ENTER consulta');
+    expect(ui.lastFrame()).not.toContain('Subtotal:'); // a venda fica escondida com o overlay à vista
+  });
+
+  test('F2 com código mostra nome, preço e saldo sem criar venda nenhuma', async () => {
+    const resolveBarcode = vi.fn(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: true,
+        product: { id: 'p1', name: 'Arroz 5kg', price: 24.9, unit: 'UN', quantity: null },
+      }),
+    );
+    const productStock = vi.fn(
+      async (): Promise<ProductStockOutcome> => ({ ok: true, stock: SALDO }),
+    );
+    const api = apiStub({ resolveBarcode, productStock });
+    // a consulta roda **antes** do primeiro bipe: nenhuma venda existe ainda
+    const ui = render(<App api={api} />);
+    await reachSale(ui);
+
+    ui.stdin.write(F2);
+    await expectFrame(ui.lastFrame, 'Consulta de preço (F2)');
+    await typeTerm(ui, '7891000100103');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'Produto: Arroz 5kg');
+    expect(ui.lastFrame()).toContain('Preço: R$ 24,90 · UN');
+    expect(ui.lastFrame()).toContain('Saldo: 3 · mínimo 5 · ESTOQUE BAIXO');
+    expect(resolveBarcode).toHaveBeenCalledWith('7891000100103');
+    expect(productStock).toHaveBeenCalledWith('p1');
+    // consulta não é venda: nenhuma chamada de venda saiu do F2
+    expect(api.createSale).not.toHaveBeenCalled();
+    expect(api.addSaleItem).not.toHaveBeenCalled();
+    expect(api.changeSaleItemQuantity).not.toHaveBeenCalled();
+    expect(api.removeSaleItem).not.toHaveBeenCalled();
+    expect(api.applyDiscount).not.toHaveBeenCalled();
+    expect(api.cancelSale).not.toHaveBeenCalled();
+
+    ui.stdin.write('\u001b'); // ESC fecha e volta para a venda vazia, como estava
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Consulta de preço (F2)');
+    });
+    expect(ui.lastFrame()).toContain('bipar o primeiro item para iniciar a venda');
+  });
+
+  test('F2 por nome lista os resultados e o ENTER no selecionado mostra preço e estoque', async () => {
+    const resolveBarcode = vi.fn(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: false,
+        kind: 'notFound',
+        problem: { status: 404, code: 'PRODUCT_NOT_FOUND', detail: 'produto não encontrado' },
+      }),
+    );
+    const searchProducts = vi.fn(
+      async (): Promise<SearchProductsOutcome> => ({ ok: true, products: [ARROZ, FEIJAO] }),
+    );
+    const productStock = vi.fn(
+      async (): Promise<ProductStockOutcome> => ({ ok: true, stock: SALDO }),
+    );
+    const ui = render(<App api={apiStub({ resolveBarcode, searchProducts, productStock })} />);
+    await reachSale(ui);
+
+    ui.stdin.write(F2);
+    await expectFrame(ui.lastFrame, 'Consulta de preço (F2)');
+    await typeTerm(ui, 'arroz');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, '› Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).toContain('Feijão 1kg — R$ 8,50');
+    expect(searchProducts).toHaveBeenCalledWith('arroz');
+    expect(productStock).not.toHaveBeenCalled(); // a lista ainda não consultou saldo
+
+    ui.stdin.write('\x1b[B'); // ↓ escolhe o segundo
+    await expectFrame(ui.lastFrame, '› Feijão 1kg');
+    ui.stdin.write('\r'); // consulta o saldo do selecionado
+
+    await expectFrame(ui.lastFrame, 'Produto: Feijão 1kg');
+    expect(ui.lastFrame()).toContain('Preço: R$ 8,50 · UN');
+    expect(ui.lastFrame()).toContain('Saldo: 3 · mínimo 5');
+    expect(productStock).toHaveBeenCalledWith('p2');
+  });
+
+  test('F2 não encontrado avisa e a venda continua intacta', async () => {
+    const resolveBarcode = vi.fn(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: false,
+        kind: 'notFound',
+        problem: { status: 404, code: 'PRODUCT_NOT_FOUND', detail: 'produto não encontrado' },
+      }),
+    );
+    const searchProducts = vi.fn(
+      async (): Promise<SearchProductsOutcome> => ({ ok: true, products: [] }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ resolveBarcode, searchProducts }));
+
+    ui.stdin.write(F2);
+    await expectFrame(ui.lastFrame, 'Consulta de preço (F2)');
+    await typeTerm(ui, 'zzz');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'nenhum produto encontrado');
+
+    ui.stdin.write('\u001b'); // ESC fecha e volta para a venda
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Consulta de preço (F2)');
+    });
+    expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90');
+  });
+
+  test('F2 não abre com a tela de sucesso à vista: o ENTER é dela', async () => {
+    const completeSale = vi.fn(
+      async (): Promise<CompleteSaleOutcome> => ({
+        ok: true,
+        receipt: { number: 42, total: 24.9, changeAmount: 0 },
+      }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ completeSale }));
+
+    ui.stdin.write('\u001b[20~'); // F9 abre o pagamento
+    await expectFrame(ui.lastFrame, 'Pagamento (F9)');
+    ui.stdin.write('\u001b[20~'); // F9 conclui
+    await expectFrame(ui.lastFrame, 'Venda 42 concluída');
+
+    ui.stdin.write(F2);
+
+    await expectFrame(ui.lastFrame, 'Venda 42 concluída'); // a consulta não abriu
+    expect(ui.lastFrame()).not.toContain('Consulta de preço (F2)');
+  });
+
+  test('F1 abre a ajuda com todos os atalhos e o ESC volta para a venda', async () => {
+    const ui = await reachSaleWithItem(apiStub());
+
+    ui.stdin.write(F1);
+
+    await expectFrame(ui.lastFrame, 'Ajuda — atalhos da venda (F1)');
+    expect(ui.lastFrame()).toContain('F1 — esta ajuda');
+    expect(ui.lastFrame()).toContain('F2 — consulta de preço e estoque, sem vender');
+    expect(ui.lastFrame()).toContain('F12 — troca o operador do caixa');
+    expect(ui.lastFrame()).toContain('ENTER — confirma o bipe');
+    expect(ui.lastFrame()).toContain('ESC — fecha o modal e volta para a venda');
+    expect(ui.lastFrame()).toContain('↑ ↓ — navega nos itens');
+    expect(ui.lastFrame()).toContain('+ - — altera a quantidade');
+    expect(ui.lastFrame()).toContain('DEL — remove o item selecionado');
+    expect(ui.lastFrame()).not.toContain('Subtotal:'); // a venda fica escondida com o overlay à vista
+
+    ui.stdin.write('\u001b'); // ESC pelo canal cru fecha (§11.3)
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Ajuda — atalhos da venda (F1)');
+    });
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90'); // a venda voltou como estava
+  });
+
+  test('F1 abre antes do primeiro bipe: a ajuda não depende da venda', async () => {
+    const ui = render(<App api={apiStub()} />);
+    await reachSale(ui);
+
+    ui.stdin.write(F1);
+
+    await expectFrame(ui.lastFrame, 'Ajuda — atalhos da venda (F1)');
+    expect(ui.lastFrame()).not.toContain('bipar o primeiro item'); // o corpo da venda saiu de cena
+  });
+
+  test('com a consulta aberta os demais atalhos ficam bloqueados', async () => {
+    const ui = render(<App api={apiStub()} />);
+    await reachSale(ui);
+
+    ui.stdin.write(F2);
+    await expectFrame(ui.lastFrame, 'Consulta de preço (F2)');
+
+    ui.stdin.write('\u001b[15~'); // F5 (desconto) com a consulta aberta: bloqueado
+
+    await expectFrame(ui.lastFrame, 'Consulta de preço (F2)');
+    expect(ui.lastFrame()).not.toContain('Desconto na venda (F5)');
+
+    ui.stdin.write('\u001b'); // e o ESC fecha a consulta
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Consulta de preço (F2)');
+    });
+
+    ui.stdin.write(F1); // com a ajuda aberta, idem
+    await expectFrame(ui.lastFrame, 'Ajuda — atalhos da venda (F1)');
+    ui.stdin.write('\u001b[21~'); // F10 (fechar caixa) com a ajuda aberta: bloqueado
+
+    await expectFrame(ui.lastFrame, 'Ajuda — atalhos da venda (F1)');
+    expect(ui.lastFrame()).not.toContain('Fechamento de caixa');
   });
 });

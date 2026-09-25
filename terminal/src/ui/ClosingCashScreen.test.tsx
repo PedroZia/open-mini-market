@@ -21,8 +21,10 @@ import type {
   CustomerSaleOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
+  ProductStockOutcome,
   SaleItemMutationOutcome,
   SearchCustomersOutcome,
+  SearchProductsOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import { reduce } from '../core/reducer';
@@ -88,7 +90,13 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
       async (): Promise<CurrentCashSessionOutcome> => ({ ok: false, problem: PROBLEM }),
     ),
     resolveBarcode: vi.fn(
-      async (): Promise<BarcodeLookupOutcome> => ({ ok: false, problem: PROBLEM }),
+      async (): Promise<BarcodeLookupOutcome> => ({ ok: false, kind: 'failed', problem: PROBLEM }),
+    ),
+    searchProducts: vi.fn(
+      async (): Promise<SearchProductsOutcome> => ({ ok: true, products: [] }),
+    ),
+    productStock: vi.fn(
+      async (): Promise<ProductStockOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),
     ),
     createSale: vi.fn(
       async (): Promise<CreateSaleOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),

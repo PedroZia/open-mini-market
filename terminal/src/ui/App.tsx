@@ -9,9 +9,11 @@ import { ClosingCashScreen } from './ClosingCashScreen';
 import { CustomerModal } from './CustomerModal';
 import { DiscountModal } from './DiscountModal';
 import { ErrorScreen } from './ErrorScreen';
+import { HelpModal } from './HelpModal';
 import { LoginScreen } from './LoginScreen';
 import { OpeningCashScreen } from './OpeningCashScreen';
 import { PaymentScreen, type PaymentScreenHandle } from './PaymentScreen';
+import { PriceLookupModal } from './PriceLookupModal';
 import { ReaderSelfTestScreen, type BarcodeResolver } from './ReaderSelfTestScreen';
 import { SaleScreen, type SaleScreenHandle } from './SaleScreen';
 import { SaleSuccessScreen } from './SaleSuccessScreen';
@@ -52,6 +54,13 @@ import { useRawShortcuts } from './useRawShortcuts';
  * `closingCash`, a primeira tela do shell que não é overlay: o resumo e o contado são dela, e a
  * diferença que ela exibe vem do corpo do close (BR-12). Com o caixa fechado, o ENTER da tela faz o
  * logout e qualquer outra tecla volta ao login sem revogar a sessão.
+ *
+ * O 1116 traz as duas consultas: o F1 abre a ajuda — o mapa de teclas (§11.3) — **sempre** que a
+ * venda está à vista, inclusive antes do primeiro bipe e com a tela de sucesso, porque não age
+ * sobre nada e o ESC devolve a tela como estava; e o F2 abre a consulta de preço, que segue a regra
+ * dos overlays que consultam a venda/servidor (1114/1115) e não abre com a tela de sucesso à vista,
+ * onde o ENTER é dela. A consulta não cria venda nem toca na aberta: só lê o produto (código bruto
+ * ou nome, quem decide é o servidor — BR-14) e o saldo (BR-12).
  */
 export function App({ api }: { api: TerminalApi }) {
   const [state, dispatch] = useReducer(reduce, initialState);
@@ -63,6 +72,10 @@ export function App({ api }: { api: TerminalApi }) {
   const [customerOpen, setCustomerOpen] = useState(false);
   /** Modal do cancelamento aberto sobre a venda (F4, 1115): estado de UI, fora do reducer. */
   const [cancelSaleOpen, setCancelSaleOpen] = useState(false);
+  /** Consulta de preço aberta sobre a venda (F2, 1116): estado de UI, fora do reducer. */
+  const [priceLookupOpen, setPriceLookupOpen] = useState(false);
+  /** Ajuda aberta sobre a venda (F1, 1116): estado de UI, fora do reducer. */
+  const [helpOpen, setHelpOpen] = useState(false);
   /** Modal da gaveta aberto sobre a venda (1114): sangria (F7) ou suprimento (F8), fora do reducer. */
   const [cashMovement, setCashMovement] = useState<CashMovementKind | null>(null);
   /** Cliente que esta sessão vinculou, com o nome da busca; `null` na venda anônima (1112). */
@@ -80,6 +93,16 @@ export function App({ api }: { api: TerminalApi }) {
 
       if (shortcut.name === 'readerSelfTest') {
         setReaderSelfTest(true);
+      } else if (shortcut.name === 'help') {
+        // F1 é o mapa de teclas: não age sobre nada e volta com o ESC — abre sempre na venda,
+        // inclusive com a tela de sucesso à vista (1116)
+        setHelpOpen(true);
+      } else if (shortcut.name === 'priceLookup') {
+        // F2 consulta sem vender nem mexer na venda (1116); com a tela de sucesso à vista o ENTER é
+        // dela, como nos demais overlays (1114/1115)
+        if (state.kind === 'saleOpen' && state.receipt === null) {
+          setPriceLookupOpen(true);
+        }
       } else if (shortcut.name === 'discount') {
         // sem venda criada não há o que descontar: a venda nasce no primeiro bipe (1109)
         if (state.kind === 'saleOpen' && state.sale !== null) {
@@ -119,6 +142,8 @@ export function App({ api }: { api: TerminalApi }) {
         }
       } else if (shortcut.name === 'closeModal') {
         setReaderSelfTest(false);
+        setHelpOpen(false);
+        setPriceLookupOpen(false);
         setDiscountOpen(false);
         setCustomerOpen(false);
         setCancelSaleOpen(false);
@@ -135,9 +160,13 @@ export function App({ api }: { api: TerminalApi }) {
             ? 'customer'
             : cancelSaleOpen
               ? 'cancelSale'
-              : readerSelfTest
-                ? 'readerSelfTest'
-                : null),
+              : priceLookupOpen
+                ? 'priceLookup'
+                : helpOpen
+                  ? 'help'
+                  : readerSelfTest
+                    ? 'readerSelfTest'
+                    : null),
     },
   );
 
@@ -175,6 +204,12 @@ export function App({ api }: { api: TerminalApi }) {
   /** Falha bloqueante do cancelamento: fecha o modal e manda o problema para a tela de erro (§11.4). */
   function saleCancelFailed(problem: ApiProblem): void {
     setCancelSaleOpen(false);
+    dispatch({ type: 'apiFailed', problem });
+  }
+
+  /** Falha bloqueante da consulta de preço: fecha o modal e manda o problema para a tela de erro (§11.4). */
+  function priceLookupFailed(problem: ApiProblem): void {
+    setPriceLookupOpen(false);
     dispatch({ type: 'apiFailed', problem });
   }
 
@@ -260,6 +295,14 @@ export function App({ api }: { api: TerminalApi }) {
             onFailed={saleCancelFailed}
           />
         );
+      }
+
+      if (priceLookupOpen) {
+        return <PriceLookupModal api={api} onFailed={priceLookupFailed} />;
+      }
+
+      if (helpOpen) {
+        return <HelpModal />;
       }
 
       return readerSelfTest ? (

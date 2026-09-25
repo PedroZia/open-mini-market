@@ -348,23 +348,29 @@ describe('createTerminalApi', () => {
 
     expect(await api.resolveBarcode('7891000100103')).toEqual({
       ok: true,
-      product: { name: 'Arroz 5kg', price: 24.9, quantity: null },
+      product: { id: 'p1', name: 'Arroz 5kg', price: 24.9, unit: 'UN', quantity: null },
     });
     expect(get).toHaveBeenCalledWith('/api/v1/products/barcode/7891000100103');
   });
 
   test('etiqueta de balança sugere a quantidade e o código vai codificado no caminho', async () => {
-    const get = vi.fn(async () => ({ name: 'Banana prata', price: 6.99, quantity: 0.75 }));
+    const get = vi.fn(async () => ({
+      id: 'p2',
+      name: 'Banana prata',
+      price: 6.99,
+      unit: 'KG',
+      quantity: 0.75,
+    }));
     const api = createTerminalApi(stubClient({ get }));
 
     expect(await api.resolveBarcode('20004200012 34')).toEqual({
       ok: true,
-      product: { name: 'Banana prata', price: 6.99, quantity: 0.75 },
+      product: { id: 'p2', name: 'Banana prata', price: 6.99, unit: 'KG', quantity: 0.75 },
     });
     expect(get).toHaveBeenCalledWith('/api/v1/products/barcode/20004200012%2034');
   });
 
-  test('produto não encontrado (404) volta como recusa com o problem+json', async () => {
+  test('código não conhecido (404) sai como `notFound` — a consulta de preço segue pelo nome', async () => {
     const api = createTerminalApi(
       stubClient({
         get: async () => {
@@ -378,11 +384,43 @@ describe('createTerminalApi', () => {
 
     expect(await api.resolveBarcode('789')).toEqual({
       ok: false,
+      kind: 'notFound',
       problem: {
         status: 404,
         code: 'PRODUCT_NOT_FOUND',
         detail: 'produto com código de barras 789 não encontrado',
       },
+    });
+  });
+
+  test('etiqueta malformada (422) também é `notFound`; o resto é falha, como nos demais envios', async () => {
+    const malformed = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiError(422, {
+            code: 'INVALID_INTERNAL_BARCODE',
+            detail: 'código interno inválido',
+          });
+        },
+      }),
+    );
+    const denied = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão product.read' });
+        },
+      }),
+    );
+
+    expect(await malformed.resolveBarcode('200')).toEqual({
+      ok: false,
+      kind: 'notFound',
+      problem: { status: 422, code: 'INVALID_INTERNAL_BARCODE', detail: 'código interno inválido' },
+    });
+    expect(await denied.resolveBarcode('789')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 403, code: 'ACCESS_DENIED', detail: 'permissão product.read' },
     });
   });
 
@@ -1627,6 +1665,108 @@ describe('createTerminalApi: fechamento de caixa e cancelamento da venda (1115)'
       ok: false,
       kind: 'failed',
       problem: { status: 409, code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' },
+    });
+  });
+});
+
+describe('createTerminalApi: consulta de preço (1116)', () => {
+  test('busca por nome manda o termo com a página pequena e normaliza os produtos do servidor', async () => {
+    const get = vi.fn(async () => ({
+      items: [
+        { id: 'p1', name: 'Arroz 5kg', price: 24.9, unit: 'UN', active: true },
+        { id: 'p2', name: 'Banana prata', price: 6.99, unit: 'KG' },
+        { name: 'sem id não é consultável' },
+      ],
+      page: 0,
+      size: 10,
+      totalItems: 2,
+      totalPages: 1,
+    }));
+    const api = createTerminalApi(stubClient({ get }));
+
+    expect(await api.searchProducts('arroz')).toEqual({
+      ok: true,
+      products: [
+        { id: 'p1', name: 'Arroz 5kg', price: 24.9, unit: 'UN' },
+        { id: 'p2', name: 'Banana prata', price: 6.99, unit: 'KG' },
+      ],
+    });
+    expect(get).toHaveBeenCalledWith('/api/v1/products?search=arroz&size=10');
+  });
+
+  test('403 sem `product.read` na busca vira recusa; rede é transitória (retry no modal)', async () => {
+    const denied = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão product.read' });
+        },
+      }),
+    );
+    const offline = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+
+    expect(await denied.searchProducts('arroz')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para consultar produtos',
+    });
+    expect(await offline.searchProducts('arroz')).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+  });
+
+  test('saldo lê o detalhe do estoque e traz só o que a consulta exibe', async () => {
+    const get = vi.fn(async () => ({
+      productId: 'p1',
+      name: 'Arroz 5kg',
+      barcode: '7891000100103',
+      unit: 'UN',
+      quantity: 3,
+      minQuantity: 5,
+      lowStock: true,
+      movements: [{ id: 'm1', type: 'SALE_OUT', quantityDelta: -1, balanceAfter: 3 }],
+    }));
+    const api = createTerminalApi(stubClient({ get }));
+
+    expect(await api.productStock('p1')).toEqual({
+      ok: true,
+      stock: { quantity: 3, minQuantity: 5, lowStock: true },
+    });
+    expect(get).toHaveBeenCalledWith('/api/v1/stock/p1');
+  });
+
+  test('saldo recusado: 403 sem `stock.read` e 404 do produto que sumiu ficam no modal', async () => {
+    const denied = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão stock.read' });
+        },
+      }),
+    );
+    const gone = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiError(404, { code: 'PRODUCT_NOT_FOUND', detail: 'produto não encontrado' });
+        },
+      }),
+    );
+
+    expect(await denied.productStock('p1')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para consultar o estoque',
+    });
+    expect(await gone.productStock('p1')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'produto não encontrado — faça a consulta de novo',
     });
   });
 });

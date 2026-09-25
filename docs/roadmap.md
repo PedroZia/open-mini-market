@@ -1003,7 +1003,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** diferença calculada corretamente; bloqueio quando há venda aberta (409 tratado); após fechar volta ao login.
   **Commit:** `feat(tui): implementa fechamento de caixa`
 
-- [ ] **1116 — Consulta de preço (F2) e ajuda (F1)**
+- [x] **1116 — Consulta de preço (F2) e ajuda (F1)**
   **Objetivo:** consultar sem vender e aprender os atalhos. **Depende:** 1108
   **Implementar:** F2 abre busca por barcode/nome mostrando preço e estoque; F1 mostra mapa de teclas.
   **Testes/aceite:** consulta não cria venda; ajuda lista todos os atalhos ativos.
