@@ -1083,14 +1083,26 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes de tela equivalentes aos da Ink (valor inválido, abrindo, 409 com/sem sessão legível, retry ENTER/ESC na tela de erro); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta abertura de caixa e erro para OpenTUI`
 
-- [ ] **1125 — Tela de venda**
-  **Objetivo:** venda operável na UI nova com leitura manual e janela rolante. **Depende:** 1124b
-  **Implementar:** cabeçalho + relógio vivo, lista com `<scrollbox>` e janela que segue a seleção (F-04), **leitura manual** com `<input>` + rajada do leitor interceptada globalmente (F-01), totais, feedback/spinner e barra de status base.
-  **Testes/aceite:** testes de bipe, digitação manual, `3*`, scroll/seleção, 80×24 e 120×40; gate do 1121 verde.
-  **Commit:** `feat(tui): migra a tela de venda para OpenTUI`
+- [ ] **1125a — Tela de venda: layout e lista**
+  **Objetivo:** abrir a venda na UI nova com a lista rolante e o relógio vivo. **Depende:** 1124b
+  **Implementar:** rota `saleOpen` no shell com `SaleScreen` (cabeçalho com caixa/operador/loja/cliente, **relógio vivo** por timer — a Ink passava `new Date()` congelado), lista com `<scrollbox>` que segue a seleção (F-04) e janela de 10 itens, totais do servidor (BR-12), barra de status base (conexão, atalhos, caixa/operador/hora), estado vazio e feedback de uma linha. Passo dividido do 1125 original; bipe/leitura manual é o 1125b e quantidade é o 1125c.
+  **Testes/aceite:** testes de layout em 80×24 e 120×40 (lista com itens do estado, seleção por setas com clamp, scroll que segue o item selecionado, relógio que anda, totais do estado); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): monta a tela de venda em OpenTUI`
+
+- [ ] **1125b — Bipe e leitura manual**
+  **Objetivo:** vender pelo código na UI nova (F-01). **Depende:** 1125a
+  **Implementar:** `<input>` de leitura manual sempre visível + rajada do leitor interceptada globalmente (hook do 1123b) com limpeza do campo no bipe; abertura da venda no primeiro bipe e envio do item (fila, retry no ENTER, feedback e bell); multiplicador `3*`; 404 com aviso (o cadastro rápido é o 1128).
+  **Testes/aceite:** bipe adiciona item e abre a venda, digitação manual funciona, `3*` vira quantidade 3, produto não encontrado avisa, falha transitória guarda o bipe e o ENTER refaz; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): vende por codigo na UI nova`
+
+- [ ] **1125c — Quantidade do item selecionado**
+  **Objetivo:** corrigir a quantidade sem sair da venda. **Depende:** 1125b
+  **Implementar:** `+`/`-` no item selecionado com `PATCH` absoluto, passo 1 em `UN` e 0,1 em `KG` (BR-12), uma mutação por vez e `-` que zeraria vira aviso para usar o DEL (a remoção é o 1126).
+  **Testes/aceite:** `+`/`-`, granularidade de KG, `-` no limite vira aviso, falha transitória refaz; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): altera a quantidade do item na UI nova`
 
 - [ ] **1126 — Modais**
-  **Objetivo:** paridade dos modais da venda. **Depende:** 1125
+  **Objetivo:** paridade dos modais da venda. **Depende:** 1125c
   **Implementar:** F1 ajuda, F2 consulta de preço, F5 desconto, F6 cliente, F4 cancelar venda, F12 trocar operador, F7/F8 gaveta e confirmação do DEL, com um `ModalFrame` único; se estourar ~300 linhas, dividir e registrar antes (1126a/1126b).
   **Testes/aceite:** testes de cada modal (recusa no modal, retry, ESC, lista com setas); gate do 1121 verde.
   **Commit:** `feat(tui): migra os modais para OpenTUI`
