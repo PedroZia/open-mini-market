@@ -2,7 +2,8 @@
 import { createCliRenderer, type CliRenderer, type KeyEvent } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 
-import { Shell } from "./shell"
+import { terminalApi } from "../api"
+import { App } from "./App"
 
 /**
  * Shutdown idempotente de toda saída. `renderer.destroy()` já é idempotente (docs do ciclo de
@@ -51,7 +52,7 @@ export async function main(): Promise<void> {
   installExitKey(renderer, shutdown)
 
   try {
-    createRoot(renderer).render(<Shell />)
+    createRoot(renderer).render(<App api={terminalApi} />)
   } catch (error) {
     shutdown()
     throw error

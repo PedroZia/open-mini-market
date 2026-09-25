@@ -13,6 +13,9 @@ import { isPrintable, keyEventToScannerChar } from "./adapters/scanner"
  * vira `KeyName` (`core/keys`) e o caractere vira leitura (`core/scanner`), sem canal cru.
  *
  * Regras de consumo (quem chama `preventDefault`/`stopPropagation`, e por quê):
+ * - handler da tela (`onKey`, 1124a): tem a **primeira palavra** e o que ele consome não vira leitura
+ *   nem chega ao renderable focado — é assim que o formulário de login recebe texto (a senha é
+ *   mascarada pela tela, porque o `<input>` do OpenTUI não tem máscara);
  * - teclas do mapa (F1–F12, setas, DEL): consumidas, não vazam para o campo focado; ENTER/TAB/`+`/`-`
  *   são caractere de leitura e seguem as regras da rajada abaixo (o humano ainda os usa no campo);
  * - rajada do leitor: o terminador que fecha o bipe é consumido (não pode submeter o formulário) e
@@ -32,9 +35,17 @@ const BURST_MAX_INTERVAL_MS = 50
 export type UseGlobalKeyboardOptions = {
   /**
    * Recebe cada bipe fechado, com o código **bruto** e a quantidade do multiplicador — o hook não
-   * interpreta nada (BR-14). Quem decide o destino é a tela (1125: reducer da venda).
+   * interpreta nada (BR-14). Quem decide o destino é a tela (1125: reducer da venda). Opcional
+   * porque a tela de login (1124a) não tem bipe: o que ela consome não chega ao scanner.
    */
-  onBarcode: (event: ScannerEvent) => void
+  onBarcode?: (event: ScannerEvent) => void
+  /**
+   * Handler da tela, com prioridade sobre o resto do hook (1124a): recebe a tecla **antes** do
+   * scanner e devolve `true` quando a consumiu — texto do formulário, ENTER que envia, TAB que
+   * troca o foco. A tecla consumida não vira leitura nem chega ao renderable focado; `false` segue
+   * o caminho normal (mapa, rajada, campo). ESC não é consumível: é a última saída do entry.
+   */
+  onKey?: (event: KeyEvent) => boolean
 }
 
 export type GlobalKeyboard = {
@@ -42,25 +53,34 @@ export type GlobalKeyboard = {
   lastKey: KeyName | null
 }
 
-export function useGlobalKeyboard({ onBarcode }: UseGlobalKeyboardOptions): GlobalKeyboard {
+export function useGlobalKeyboard({ onBarcode, onKey }: UseGlobalKeyboardOptions): GlobalKeyboard {
   const renderer = useRenderer()
   /** Um scanner por shell/tela, com o timing medido aqui (mesma regra da Ink). */
   const [scanner] = useState(createScanner)
   const [lastKey, setLastKey] = useState<KeyName | null>(null)
   /** Instante do último caractere imprimível: rajada (< 50 ms) não vira texto no campo focado. */
   const lastCharAtRef = useRef<number | null>(null)
-  /** O callback mais novo entra por ref: o listener não se re-registra a cada render. */
+  /** Os callbacks mais novos entram por ref: o listener não se re-registra a cada render. */
   const onBarcodeRef = useRef(onBarcode)
+  const onKeyRef = useRef(onKey)
 
   useEffect(() => {
     onBarcodeRef.current = onBarcode
+    onKeyRef.current = onKey
   })
 
   useEffect(() => {
-    const onKey = (event: KeyEvent): void => {
+    const handleKeyPress = (event: KeyEvent): void => {
       const keyName = keyEventToKeyName(event)
       if (keyName !== null) {
         setLastKey(keyName)
+      }
+
+      // a tela tem a primeira palavra: o que ela consome não vira leitura nem vai para o campo
+      if (onKeyRef.current?.(event) === true) {
+        event.preventDefault()
+        event.stopPropagation()
+        return
       }
 
       const char = keyEventToScannerChar(event)
@@ -81,7 +101,7 @@ export function useGlobalKeyboard({ onBarcode }: UseGlobalKeyboardOptions): Glob
         // o terminador do bipe não insere/submete no campo; o buffer do scanner já foi limpo
         event.preventDefault()
         lastCharAtRef.current = null
-        onBarcodeRef.current(scan)
+        onBarcodeRef.current?.(scan)
         return
       }
 
@@ -97,9 +117,9 @@ export function useGlobalKeyboard({ onBarcode }: UseGlobalKeyboardOptions): Glob
       }
     }
 
-    renderer.keyInput.prependListener("keypress", onKey)
+    renderer.keyInput.prependListener("keypress", handleKeyPress)
     return () => {
-      renderer.keyInput.off("keypress", onKey)
+      renderer.keyInput.off("keypress", handleKeyPress)
     }
   }, [renderer, scanner])
 

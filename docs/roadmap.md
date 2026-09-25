@@ -1071,7 +1071,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** adaptadores puros testados (F1–F12, setas, ENTER/TAB/BACKSPACE/DEL, release/ctrl ignorados) e rajada interceptada antes do `<input>` focado no `testRender`; `bun test src/opentui` e `tsc --noEmit` verdes.
   **Commit:** `feat(tui): liga teclado e leitor ao core na UI nova`
 
-- [ ] **1124a — Entrada: login do operador e seleção de caixa**
+- [x] **1124a — Entrada: login do operador e seleção de caixa**
   **Objetivo:** portar o login do PDV para a UI nova, com o shell roteador. **Depende:** 1123b
   **Implementar:** shell em `src/opentui/App.tsx` (`useReducer(reduce, initialState)` + `withProblemGuard`, rota de `login`), `LoginScreen` com senha mascarada própria (o `<input>` do OpenTUI não tem máscara), foco/TAB, etapa de seleção de caixa com revogação da sessão provisória e relogin vinculado, `preferredRegisterId` e `notice`. Passo dividido do 1124 original (diff estimado acima de ~300 linhas); o restante é o 1124b.
   **Testes/aceite:** testes de tela equivalentes aos da Ink (login OK/credencial inválida/campo vazio/lista pendente/lista vazia/ordem login→logout→login/caixa preferido/senha nunca no frame); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
