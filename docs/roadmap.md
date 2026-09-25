@@ -1107,7 +1107,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** DEL/F3 abre a confirmação, ENTER remove e recalcula, ESC não chama a API, rajada não vira item com modal aberto, F1 abre/fecha; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): cria os modais e porta a ajuda e a remocao`
 
-- [ ] **1126b — Modais: consulta de preço e desconto**
+- [x] **1126b — Modais: consulta de preço e desconto**
   **Objetivo:** portar F2 e F5. **Depende:** 1126a
   **Implementar:** F2 consulta de preço (busca por código/nome, lista com setas, sem mexer na venda) e F5 desconto (valor + motivo, recusa no modal, retry), ambos no `ModalFrame`.
   **Testes/aceite:** busca e lista com setas no F2; desconto aplicado com o recálculo do servidor, recusa e retry no F5; ESC fecha; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

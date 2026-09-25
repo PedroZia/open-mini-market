@@ -6,8 +6,12 @@ import { act, useReducer } from "react"
 
 import type {
   AddSaleItemOutcome,
+  ApplyDiscountOutcome,
+  BarcodeLookupOutcome,
   CreateSaleOutcome,
   CustomerOption,
+  ProductOption,
+  SearchProductsOutcome,
   SendFailure,
   SaleItemIntent,
   SaleItemMutationOutcome,
@@ -22,8 +26,9 @@ import { SaleScreen } from "./SaleScreen"
  * Tela de venda: o layout do 1125a (o quadro em 80×24 e 120×40, a janela que segue a seleção, os
  * totais que vêm do `state.sale` — BR-12 — e a hora que entra por prop), a operação do 1125b — o
  * bipe do leitor, a leitura digitada no campo, o multiplicador `3*`, o 404/422 com aviso, a falha
- * transitória com retry no ENTER e o bell — e a quantidade do item selecionado do 1125c (`+`/`-`
- * com `PATCH` absoluto, passo de `UN`/`KG`, uma mutação por vez e o aviso do DEL no limite).
+ * transitória com retry no ENTER e o bell —, a quantidade do item selecionado do 1125c (`+`/`-`
+ * com `PATCH` absoluto, passo de `UN`/`KG`, uma mutação por vez e o aviso do DEL no limite) e os
+ * modais do 1126a/1126b (F1, DEL/F3, F2 e F5 no `ModalFrame`, com o leitor desligado).
  *
  * O harness tem o reducer real (1103) por trás da tela, como o shell, e a camada de API dublada com
  * `mock` (o runner do `src/opentui` é o `bun:test`): o que se testa é a operação da tela, nunca o
@@ -177,6 +182,10 @@ type RenderOptions = {
   customer?: CustomerOption | null
   store?: string | null
   online?: boolean
+  /** Dublê da API quando o teste precisa observar as chamadas dele (os modais do 1126b). */
+  api?: TerminalApi
+  /** `dispatch` observável: prova o que a tela relatou ao reducer sem trocar de tela. */
+  dispatch?: (action: Action) => void
 }
 
 /** Tela pura do 1125a: o estado entra pronto e o `dispatch` é um dublê sem reducer. */
@@ -184,8 +193,8 @@ function renderSale(state: SaleOpenState, options: RenderOptions = {}) {
   return testRender(
     <SaleScreen
       state={state}
-      api={apiStub()}
-      dispatch={mock(() => {})}
+      api={options.api ?? apiStub()}
+      dispatch={options.dispatch ?? mock(() => {})}
       now={NOW}
       customer={options.customer ?? null}
       store={options.store ?? null}
@@ -332,6 +341,59 @@ async function pressEscape(setup: Setup): Promise<void> {
   })
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+}
+
+/** ENTER do operador: o mesmo `pressEnter` do parser, usado pelos formulários dos modais. */
+async function pressEnter(setup: Setup): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressEnter()
+  })
+}
+
+/** TAB: troca o campo em foco no modal de desconto (valor → motivo). */
+async function pressTab(setup: Setup): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressTab()
+  })
+}
+
+/**
+ * Digitação humana: 60 ms por tecla, como o `scanManual` (1125b). O modal de desconto descarta a
+ * rajada do leitor (caracteres em < 50 ms, 1126b), então o teste digita na velocidade do operador.
+ */
+async function typeHuman(setup: Setup, text: string): Promise<void> {
+  await act(async () => {
+    await setup.mockInput.typeText(text, 60)
+  })
+}
+
+/** `dispatch` observável: prova o que a tela relatou ao reducer sem o reducer trocar de tela. */
+function dispatchSpy() {
+  return mock((action: Action) => {
+    void action
+  })
+}
+
+/** Espera o efeito assíncrono aparecer no dublê (mesma espera ativa do teste da abertura de caixa). */
+async function until(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) {
+      return
+    }
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2))
+    })
+  }
+
+  throw new Error("condição não satisfeita no tempo do teste")
+}
+
+/** Pausa do teste: o guard da rajada (1126b) mede o intervalo entre os caracteres. */
+async function waitMs(ms: number): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms))
   })
 }
 
@@ -1248,6 +1310,367 @@ describe("SaleScreen: modais — ajuda e remoção de item (1126a)", () => {
       expect(back).toContain("TOTAL: R$ 24,90")
       expect(back).not.toContain("Ajuda — atalhos")
       expect(back).not.toContain("remover Arroz")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+})
+
+describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
+  /** Produtos como o servidor os devolve na consulta (F2): nome, preço e unidade são dele (BR-12). */
+  const ARROZ_PRODUCT: ProductOption = { id: "p1", name: "Arroz 5kg", price: 24.9, unit: "UN" }
+  const FEIJAO_PRODUCT: ProductOption = { id: "p2", name: "Feijão 1kg", price: 8.5, unit: "KG" }
+
+  /** Venda como o servidor a devolveu depois do desconto (BR-12): desconto de R$ 5,00 e total novo. */
+  const discounted = saleOf([ARROZ], { subtotal: 24.9, discountAmount: 5, total: 19.9 })
+
+  test("F2 abre a consulta: o código conhecido mostra nome, preço e unidade e a venda não muda", async () => {
+    const resolveBarcode = mock(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: true,
+        product: { ...ARROZ_PRODUCT, quantity: null },
+      }),
+    )
+    const searchProducts = mock(
+      async (): Promise<SearchProductsOutcome> => ({ ok: true, products: [] }),
+    )
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
+    )
+    const removeSaleItem = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleOf([]) }),
+    )
+    const setup = await renderHarness(
+      apiStub({ resolveBarcode, searchProducts, addSaleItem, removeSaleItem }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F2)
+
+      const opened = await expectFrame(setup, "Consulta de preço (F2)")
+
+      expect(opened).toContain("digite o código de barras ou o nome e ENTER consulta")
+      expect(opened).toContain("ENTER consulta · ESC fecha")
+      expect(resolveBarcode).not.toHaveBeenCalled() // abrir não consulta nada
+
+      await typeHuman(setup, BARCODE)
+      await pressEnter(setup)
+
+      const detail = await expectFrame(setup, "Produto: Arroz 5kg")
+
+      expect(detail).toContain("Preço: R$ 24,90 · UN")
+      expect(resolveBarcode).toHaveBeenCalledWith(BARCODE) // o código vai bruto ao servidor (BR-14)
+      expect(searchProducts).not.toHaveBeenCalled() // código conhecido não vira busca por nome
+      expectLayout(detail, 80, 24)
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).toContain("TOTAL: R$ 24,90") // consulta não é venda: nada mudou (aceite do 1126b)
+      expect(back).not.toContain("Consulta de preço (F2)")
+      expect(addSaleItem).not.toHaveBeenCalled()
+      expect(removeSaleItem).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("o código desconhecido cai na busca por nome: lista com setas e ENTER no selecionado", async () => {
+    const resolveBarcode = mock(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: false,
+        kind: "notFound",
+        problem: { status: 404, code: "PRODUCT_NOT_FOUND", detail: "produto não encontrado" },
+      }),
+    )
+    const searchProducts = mock(
+      async (): Promise<SearchProductsOutcome> => ({
+        ok: true,
+        products: [ARROZ_PRODUCT, FEIJAO_PRODUCT],
+      }),
+    )
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
+    )
+    const setup = await renderHarness(
+      apiStub({ resolveBarcode, searchProducts, addSaleItem }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F2)
+      await expectFrame(setup, "Consulta de preço (F2)")
+
+      await typeHuman(setup, "arroz")
+      await pressEnter(setup)
+
+      const list = await expectFrame(setup, "› Arroz 5kg — R$ 24,90")
+
+      expect(list).toContain("Feijão 1kg — R$ 8,50")
+      expect(list).toContain("↑↓ escolhe · ENTER consulta · ESC fecha")
+      expect(resolveBarcode).toHaveBeenCalledWith("arroz") // o termo vai como o operador digitou
+      expect(searchProducts).toHaveBeenCalledWith("arroz")
+      expectLayout(list, 80, 24)
+
+      await pressArrow(setup, "down")
+
+      const moved = await expectFrame(setup, "› Feijão 1kg — R$ 8,50")
+
+      expect(moved).not.toContain("› Arroz 5kg — R$ 24,90") // a seta moveu o destaque
+
+      await pressEnter(setup)
+
+      const detail = await expectFrame(setup, "Produto: Feijão 1kg")
+
+      expect(detail).toContain("Preço: R$ 8,50 · KG")
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).toContain("TOTAL: R$ 24,90")
+      expect(addSaleItem).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F5 aplica o desconto: valor em centavos mascarado, motivo obrigatório e venda do servidor", async () => {
+    const applyDiscount = mock(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: discounted }),
+    )
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ applyDiscount }),
+      stateWith(saleOf([ARROZ])),
+      (action) => actions.push(action),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F5)
+
+      const opened = await expectFrame(setup, "Desconto na venda (F5)")
+
+      expect(opened).toContain("› Valor: R$ 0,00")
+      expect(opened).toContain("digite o valor em centavos: 1250 vira R$ 12,50")
+      expect(opened).toContain("TAB troca o campo · ENTER aplica · ESC cancela")
+
+      // ENTER sem nada: valor e motivo são obrigatórios (BR-04) e nada vai à API
+      await pressEnter(setup)
+      await expectFrame(setup, "informe o valor do desconto")
+
+      await typeHuman(setup, "1250")
+      await expectFrame(setup, "› Valor: R$ 12,50") // a máscara de centavos da abertura de caixa
+
+      await pressEnter(setup)
+
+      const missing = await expectFrame(setup, "informe o motivo do desconto")
+
+      expect(missing).toContain("Desconto na venda (F5)")
+      expect(applyDiscount).not.toHaveBeenCalled()
+
+      await pressTab(setup)
+      await expectFrame(setup, "› Motivo:")
+      await typeHuman(setup, "cliente antigo")
+      await expectFrame(setup, "Motivo: cliente antigo")
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "desconto: R$ 5,00 — total R$ 19,90")
+
+      expect(applyDiscount).toHaveBeenCalledWith(SALE_ID, {
+        type: "VALUE",
+        value: 12.5,
+        reason: "cliente antigo",
+      })
+      expect(actions).toContainEqual({ type: "saleUpdated", sale: discounted })
+      expect(frame).not.toContain("Desconto na venda (F5)") // o modal saiu de cena
+      expect(frame).toContain("TOTAL: R$ 19,90") // os totais são os do servidor (BR-12)
+      expectLayout(frame, 80, 24)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("a recusa do desconto fica no modal com a mensagem do servidor, sem fechar", async () => {
+    const applyDiscount = mock(
+      async (): Promise<ApplyDiscountOutcome> => ({
+        ok: false,
+        kind: "rejected",
+        message: "desconto excede o limite de 10% da loja",
+      }),
+    )
+    const setup = await renderHarness(apiStub({ applyDiscount }), stateWith(saleOf([ARROZ])))
+
+    try {
+      await pressNamed(setup, KeyCodes.F5)
+      await expectFrame(setup, "Desconto na venda (F5)")
+      await typeHuman(setup, "1250")
+      await pressTab(setup)
+      await typeHuman(setup, "cliente antigo")
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "desconto excede o limite de 10% da loja")
+
+      expect(frame).toContain("Desconto na venda (F5)") // o modal não fechou
+      expect(frame).toContain("Valor: R$ 12,50") // nem perdeu o que foi digitado
+      expect(frame).toContain("› Motivo: cliente antigo") // o foco ficou onde o operador digitou
+      expect(applyDiscount).toHaveBeenCalledTimes(1)
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).toContain("TOTAL: R$ 24,90") // a venda segue como estava
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("falha transitória mantém o modal com o aviso e o ENTER refaz a aplicação", async () => {
+    let attempts = 0
+    const applyDiscount = mock(async (): Promise<ApplyDiscountOutcome> => {
+      attempts += 1
+
+      return attempts === 1 ? sendFailure() : { ok: true, sale: discounted }
+    })
+    const setup = await renderHarness(apiStub({ applyDiscount }), stateWith(saleOf([ARROZ])))
+
+    try {
+      await pressNamed(setup, KeyCodes.F5)
+      await expectFrame(setup, "Desconto na venda (F5)")
+      await typeHuman(setup, "1250")
+      await pressTab(setup)
+      await typeHuman(setup, "cliente antigo")
+      await pressEnter(setup)
+
+      const failed = await expectFrame(setup, "falha ao aplicar o desconto — ENTER tenta de novo")
+
+      expect(failed).toContain("Desconto na venda (F5)") // o formulário continua à vista
+      expect(applyDiscount).toHaveBeenCalledTimes(1) // sem retry automático
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "desconto: R$ 5,00 — total R$ 19,90")
+
+      expect(applyDiscount).toHaveBeenCalledTimes(2)
+      expect(frame).not.toContain("Desconto na venda (F5)")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("falha bloqueante do desconto vai para a tela de erro com o modal fechado", async () => {
+    const problem: ApiProblem = { status: 409, code: "SALE_NOT_OPEN", detail: "venda não está aberta" }
+    const applyDiscount = mock(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: false, kind: "failed", problem }),
+    )
+    const dispatch = dispatchSpy()
+    const setup = await renderSale(stateWith(saleOf([ARROZ])), {
+      api: apiStub({ applyDiscount }),
+      dispatch,
+    })
+
+    try {
+      await pressNamed(setup, KeyCodes.F5)
+      await expectFrame(setup, "Desconto na venda (F5)")
+      await typeHuman(setup, "1250")
+      await pressTab(setup)
+      await typeHuman(setup, "cliente antigo")
+      await pressEnter(setup)
+
+      await until(() => dispatch.mock.calls.length > 0)
+
+      expect(dispatch).toHaveBeenCalledWith({ type: "apiFailed", problem })
+
+      // o modal sai de cena e a venda volta: a tela de erro é do shell, que reage ao `apiFailed`
+      const frame = await expectFrame(setup, "PDV minimercado · Caixa 01")
+
+      expect(frame).not.toContain("Desconto na venda (F5)")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F5 sem venda criada não abre (a venda nasce no bipe); o F2 abre mesmo sem venda", async () => {
+    const applyDiscount = mock(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: saleOf([]) }),
+    )
+    const resolveBarcode = mock(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: false,
+        kind: "notFound",
+        problem: { status: 404, code: "PRODUCT_NOT_FOUND", detail: "produto não encontrado" },
+      }),
+    )
+    const setup = await renderHarness(
+      apiStub({ applyDiscount, resolveBarcode }),
+      stateWith(null),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F5)
+      // sem venda o F5 é ignorado: a venda continua respondendo (o F1 abre a ajuda logo depois)
+      await pressNamed(setup, KeyCodes.F1)
+
+      const help = await expectFrame(setup, "Ajuda — atalhos da venda (F1)")
+
+      expect(help).not.toContain("Desconto na venda (F5)")
+      expect(applyDiscount).not.toHaveBeenCalled()
+
+      await pressEscape(setup)
+      await pressNamed(setup, KeyCodes.F2)
+
+      const lookup = await expectFrame(setup, "Consulta de preço (F2)")
+
+      expect(lookup).not.toContain("bipar o primeiro item para iniciar a venda") // o corpo saiu
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(back).toContain("TOTAL: R$ 0,00")
+      expect(resolveBarcode).not.toHaveBeenCalled() // consultar não cria venda nem lê nada sozinho
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("a rajada do leitor no desconto não vira valor nem aplica (o terminador não é o ENTER)", async () => {
+    const applyDiscount = mock(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: discounted }),
+    )
+    const setup = await renderHarness(apiStub({ applyDiscount }), stateWith(saleOf([ARROZ])))
+
+    try {
+      await pressNamed(setup, KeyCodes.F5)
+      await expectFrame(setup, "Desconto na venda (F5)")
+
+      // o motivo é digitado antes: se o terminador do bipe aplicasse, a API seria chamada
+      await pressTab(setup)
+      await typeHuman(setup, "cliente antigo")
+      await pressTab(setup)
+      await waitMs(60) // o operador parou de digitar: o primeiro caractere do bipe não é rajada
+
+      await act(async () => {
+        await setup.mockInput.typeText(BARCODE) // os caracteres, todos em rajada
+        setup.mockInput.pressEnter() // e o terminador colado neles
+      })
+
+      const frame = await expectFrame(setup, "Valor: R$ 0,07")
+
+      expect(frame).toContain("Desconto na venda (F5)")
+      expect(frame).toContain("Motivo: cliente antigo")
+      expect(applyDiscount).not.toHaveBeenCalled() // o bipe não aplicou desconto nenhum
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).toContain("TOTAL: R$ 24,90")
+      expect(applyDiscount).not.toHaveBeenCalled()
     } finally {
       setup.renderer.destroy()
     }

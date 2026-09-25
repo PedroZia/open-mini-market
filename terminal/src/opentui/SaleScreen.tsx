@@ -11,7 +11,7 @@ import { useEffect, useRef, useState, type Dispatch } from "react"
 
 import type {
   CustomerOption,
-  SaleItemMutationOutcome,
+  SaleDiscountIntent,
   SendFailure,
   TerminalApi,
 } from "../api/terminalApi"
@@ -20,10 +20,12 @@ import { resolveShortcut } from "../core/keys"
 import type { Action } from "../core/reducer"
 import { moveSelection, nextQuantity, selectionIndex, touchedItem } from "../core/sale"
 import { createScanner, type Scanner, type ScannerEvent } from "../core/scanner"
-import type { SaleItemView, SaleOpenState, SaleView, ScanIntent } from "../core/state"
+import type { ApiProblem, SaleItemView, SaleOpenState, SaleView, ScanIntent } from "../core/state"
 import { keyEventToKeyName } from "./adapters/keys"
+import { DiscountModal, type DiscountApplyResult } from "./DiscountModal"
 import { HelpModal } from "./HelpModal"
 import { useGlobalKeyboard } from "./keyboard"
+import { PriceLookupModal } from "./PriceLookupModal"
 import { RemoveItemConfirmModal } from "./RemoveItemConfirmModal"
 import { theme } from "./theme"
 
@@ -52,11 +54,12 @@ import { theme } from "./theme"
  * do leitor deixou no campo é limpo no bipe — o primeiro caractere chega antes de o `\r` fechar a
  * leitura.
  *
- * Modais (1126a): a ajuda do F1 e a confirmação do DEL/F3 são estado **desta** tela (`modal`) e
- * saem no `ModalFrame` no lugar do corpo da venda — o leitor fica desligado (`barcodeEnabled:
- * modal === null`, §11.3) e o `handleKey` daqui devolve `false`: quem trata a tecla é o handler do
- * próprio modal, que o hook global chama **antes** deste listener (o `prependListener` põe o mais
- * novo na frente) e que consome o que é dele. Sem modal, a tela age como sempre.
+ * Modais (1126a/1126b): a ajuda do F1, a confirmação do DEL/F3, a consulta de preço do F2 e o
+ * desconto do F5 são estado **desta** tela (`modal`) e saem no `ModalFrame` no lugar do corpo da
+ * venda — o leitor fica desligado (`barcodeEnabled: modal === null`, §11.3) e o `handleKey` daqui
+ * devolve `false`: quem trata a tecla é o handler do próprio modal, que o hook global chama
+ * **antes** deste listener (o `prependListener` põe o mais novo na frente) e que consome o que é
+ * dele. Sem modal, a tela age como sempre.
  *
  * O envio é uma fila local (`queueRef`) drenada pelo `pump`, um bipe por vez, na ordem em que
  * chegaram: sem venda criada, o primeiro bipe abre a venda (`POST /sales`) e o item entra em
@@ -134,6 +137,9 @@ const QUANTITY_FAILURE_NOTICE = "falha ao falar com o servidor — +/- tenta de 
 /** Falha transitória da remoção (1126a): a confirmação fica à vista e o ENTER refaz o `DELETE`. */
 const REMOVE_FAILURE_NOTICE = "falha ao remover o item — ENTER tenta de novo"
 
+/** Falha transitória do desconto (1126b): o formulário fica à vista e o ENTER refaz o `PUT`. */
+const DISCOUNT_FAILURE_NOTICE = "falha ao aplicar o desconto — ENTER tenta de novo"
+
 /** `-` que zeraria a quantidade não vai à API: quem remove o item é o DEL (com confirmação, 1126). */
 const REMOVE_HINT = "use DEL para remover o item"
 
@@ -160,10 +166,35 @@ type Feedback =
   | { kind: "failure"; text: string }
 
 /**
- * Modal bloqueante aberto sobre a venda (1126a): a ajuda do F1 e a confirmação do DEL/F3. O item
- * guardado na confirmação é o alvo fixo do `DELETE` — com o modal à vista a seleção não se move.
+ * Modal bloqueante aberto sobre a venda (1126a/1126b): a ajuda do F1, a confirmação do DEL/F3, a
+ * consulta de preço do F2 e o desconto do F5. O item guardado na confirmação é o alvo fixo do
+ * `DELETE` — com o modal à vista a seleção não se move.
  */
-type SaleModal = { kind: "help" } | { kind: "removeItemConfirm"; item: SaleItemView }
+type SaleModal =
+  | { kind: "help" }
+  | { kind: "removeItemConfirm"; item: SaleItemView }
+  | { kind: "priceLookup" }
+  | { kind: "discount" }
+
+/**
+ * Desfecho de uma mutação da venda (1125c/1126a/1126b) para quem a pediu decidir o que fica à
+ * vista: `applied` é a venda que o servidor recalculou e já entrou no estado; `notFound` é o item
+ * que sumiu entre a leitura e a ação; `rejected` é a recusa que o **próprio modal** mostra (o
+ * desconto do F5); `retryable` pede a mesma tecla de novo; `failed` já foi para a tela de erro.
+ */
+type MutationResult =
+  | { kind: "applied" }
+  | { kind: "notFound" }
+  | { kind: "rejected"; message: string }
+  | { kind: "retryable" }
+  | { kind: "failed" }
+
+/** Desfecho de uma mutação da venda, como as rotas a devolvem (item, remoção ou desconto). */
+type SaleMutationOutcome =
+  | { ok: true; sale: SaleView }
+  | { ok: false; kind: "notFound" }
+  | { ok: false; kind: "rejected"; message: string }
+  | SendFailure
 
 export function SaleScreen({ state, now, api, dispatch, customer, store, online }: SaleScreenProps) {
   const renderer = useRenderer()
@@ -242,14 +273,15 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
   /**
    * Teclado da venda resolvido pelo contexto do `core/keys` (§11.3, como o `useRawShortcuts` da
    * Ink): as setas movem a seleção com clamp nas pontas, `+`/`-` mexem na quantidade do item
-   * selecionado, DEL e F3 abrem a **mesma** confirmação de remoção e o F1 abre a ajuda — tudo
+   * selecionado, DEL e F3 abrem a **mesma** confirmação de remoção, o F1 abre a ajuda, o F2 a
+   * consulta de preço (sem venda criada inclusive) e o F5 o desconto (só com venda criada) — tudo
    * consumido, não chega ao campo de leitura —, e o ENTER refaz o bipe que ficou na fila depois de
-   * uma falha transitória. As intenções dos passos seguintes (1126b/c/d, 1127) não agem aqui: a
-   * tecla devolve `false` e o hook global a engole pelo mapa.
+   * uma falha transitória. As intenções dos passos seguintes (1126c/d, 1127) não agem aqui: a tecla
+   * devolve `false` e o hook global a engole pelo mapa.
    *
-   * Com um modal à vista (1126a) a tela **não** age: o handler devolve `false` e quem trata a tecla
-   * é o handler do próprio modal, que roda antes deste (o `prependListener` do hook global põe o
-   * listener mais novo na frente) e consome o que é dele — nenhuma tecla vaza entre os dois.
+   * Com um modal à vista (1126a/1126b) a tela **não** age: o handler devolve `false` e quem trata a
+   * tecla é o handler do próprio modal, que roda antes deste (o `prependListener` do hook global põe
+   * o listener mais novo na frente) e consome o que é dele — nenhuma tecla vaza entre os dois.
    */
   function handleKey(event: KeyEvent): boolean {
     if (modal !== null) {
@@ -290,8 +322,21 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
           setModal({ kind: "help" })
           return true
 
+        case "priceLookup":
+          // F2 consulta sem vender: abre mesmo sem venda criada, como na Ink (1116)
+          setModal({ kind: "priceLookup" })
+          return true
+
+        case "discount":
+          // F5 só com venda criada: sem venda não há o que descontar (a venda nasce no primeiro bipe)
+          if (sale !== null) {
+            setModal({ kind: "discount" })
+          }
+
+          return true
+
         default:
-          return false // F2/F4/F5/F6/F7/F8/F9/F10/F11/F12 são dos passos seguintes (1126b/c/d, 1127)
+          return false // F4/F6/F7/F8/F9/F10/F11/F12 são dos passos seguintes (1126c/d, 1127)
       }
     }
 
@@ -406,6 +451,12 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
     setRemovalNotice(null)
   }
 
+  /** Falha bloqueante de um modal (consulta do F2): o problema vai para a tela de erro e o modal sai. */
+  function failModal(problem: ApiProblem): void {
+    closeModal()
+    dispatch({ type: "apiFailed", problem })
+  }
+
   /**
    * ENTER da confirmação (1126a): o `DELETE` do item que o modal guardou, pela mesma `runMutation`
    * da quantidade (uma mutação por vez, a fila de bipes drenada no `finally`). O desfecho decide o
@@ -420,7 +471,7 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
     }
 
     setRemoving(true)
-    const retry = await runMutation(
+    const result = await runMutation(
       (saleId) => api.removeSaleItem(saleId, item.productId),
       item,
       () => `removido: ${item.name}`,
@@ -428,32 +479,67 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
     )
     setRemoving(false)
 
-    if (retry) {
+    if (result.kind === "retryable") {
       setRemovalNotice(REMOVE_FAILURE_NOTICE) // a confirmação fica à vista: o ENTER refaz
       return
     }
 
-    closeModal()
+    closeModal() // sucesso, 404 do item que sumiu ou falha bloqueante: a confirmação sai de cena
   }
 
   /**
-   * Uma mutação de item por vez: marca o "enviando…", chama a API e traduz o desfecho — sucesso vira
-   * `saleUpdated` com a venda que o servidor recalculou, 404 avisa e a venda fica como está, o resto
-   * é falha (transitória avisa e a tecla refaz; bloqueante vai para a tela de erro). O `finally`
-   * libera a trava e drena a fila de bipes que chegou durante a chamada. Devolve `true` quando a
-   * falha é **transitória**: a confirmação do DEL (1126a) fica à vista esperando o ENTER refazer.
+   * ENTER do desconto (F5, 1126b): o `PUT` vai pela **mesma** `runMutation` da quantidade e da
+   * remoção — uma mutação por vez, com a fila de bipes drenada no `finally` — e o desfecho é
+   * traduzido para o formulário: o sucesso registra a venda recalculada pelo servidor e fecha o
+   * modal; a recusa (limite da loja, permissão, forma) volta com a mensagem dele para o modal
+   * continuar à vista; a falha transitória pede o ENTER de novo; a bloqueante já foi para a tela de
+   * erro e o modal sai de cena.
+   */
+  async function applyDiscountFromModal(intent: SaleDiscountIntent): Promise<DiscountApplyResult> {
+    const result = await runMutation(
+      (saleId) => api.applyDiscount(saleId, intent),
+      null,
+      describeDiscount,
+      DISCOUNT_FAILURE_NOTICE,
+    )
+
+    if (result.kind === "applied") {
+      closeModal()
+      return { kind: "applied" }
+    }
+
+    if (result.kind === "rejected") {
+      return { kind: "rejected", message: result.message }
+    }
+
+    if (result.kind === "retryable") {
+      return { kind: "retryable" }
+    }
+
+    closeModal() // item que sumiu (não há no desconto) ou falha bloqueante: nada fica à vista
+    return { kind: "failed" }
+  }
+
+  /**
+   * Uma mutação de venda por vez: marca o "enviando…", chama a API e traduz o desfecho para quem a
+   * pediu — sucesso vira `saleUpdated` com a venda que o servidor recalculou; o 404 do item que
+   * sumiu avisa e a venda fica como está; a recusa do servidor (o desconto do F5) volta como
+   * mensagem para o próprio modal; a falha transitória avisa e a mesma tecla refaz; a bloqueante vai
+   * para a tela de erro. O `finally` libera a trava e drena a fila de bipes que chegou durante a
+   * chamada. O `item` é o alvo do 404 (quantidade e remoção); nas mutações que não têm item (o
+   * desconto) ele é `null`.
    */
   async function runMutation(
-    send: (saleId: string) => Promise<SaleItemMutationOutcome>,
-    item: SaleItemView,
+    send: (saleId: string) => Promise<SaleMutationOutcome>,
+    item: SaleItemView | null,
     success: (sale: SaleView) => string,
     failureNotice: string,
-  ): Promise<boolean> {
+  ): Promise<MutationResult> {
     const saleId = latest.current.sale?.id ?? null
 
     if (saleId === null) {
-      // sem venda não há item: o modal fecha e a tela segue como está (só acontece fora da venda)
-      return false
+      // sem venda não há mutação: o modal fecha e a tela segue como está (só acontece fora da venda)
+      return { kind: "failed" }
     }
 
     mutatingRef.current = true
@@ -465,16 +551,24 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
       if (outcome.ok) {
         dispatch({ type: "saleUpdated", sale: outcome.sale })
         setFeedback({ kind: "success", text: success(outcome.sale) })
-        return false
+        return { kind: "applied" }
       }
 
       if (outcome.kind === "notFound") {
-        setFeedback({ kind: "notice", text: missingItem(item.name) })
-        return false
+        if (item !== null) {
+          setFeedback({ kind: "notice", text: missingItem(item.name) })
+        }
+
+        return { kind: "notFound" }
+      }
+
+      if (outcome.kind === "rejected") {
+        // recusa que o próprio modal mostra (desconto): o rodapé da venda não muda
+        return { kind: "rejected", message: outcome.message }
       }
 
       sendFailed(outcome, failureNotice)
-      return outcome.kind === "retryable"
+      return { kind: outcome.kind === "retryable" ? "retryable" : "failed" }
     } finally {
       mutatingRef.current = false
       setMutating(false)
@@ -575,14 +669,14 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
     dispatch({ type: "apiFailed", problem: failure.problem })
   }
 
-  // modal bloqueante (1126a): o corpo da venda sai de cena e o quadro do modal ocupa o lugar — o
-  // leitor já está desligado (`barcodeEnabled`) e o `handleKey` daqui não age enquanto ele existe
+  // modal bloqueante (1126a/1126b): o corpo da venda sai de cena e o quadro do modal ocupa o lugar
+  // — o leitor já está desligado (`barcodeEnabled`) e o `handleKey` daqui não age enquanto ele existe
   if (modal !== null) {
     return (
       <box width="100%" height="100%" flexDirection="column" alignItems="center" justifyContent="center">
         {modal.kind === "help" ? (
           <HelpModal onClosed={closeModal} />
-        ) : (
+        ) : modal.kind === "removeItemConfirm" ? (
           <RemoveItemConfirmModal
             item={modal.item}
             busy={removing}
@@ -590,6 +684,10 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
             onConfirm={() => void removeConfirmedItem()}
             onCancel={closeModal}
           />
+        ) : modal.kind === "priceLookup" ? (
+          <PriceLookupModal api={api} onCancel={closeModal} onFailed={failModal} />
+        ) : (
+          <DiscountModal onApply={applyDiscountFromModal} onCancel={closeModal} />
         )}
       </box>
     )
@@ -695,6 +793,11 @@ function describeQuantity(item: SaleItemView | null): string {
   }
 
   return `quantidade: ${formatQuantity(item.quantity)} x ${item.name} — ${formatAmount(item.lineTotal)}`
+}
+
+/** Confirmação do desconto (F5, 1126b): o desconto e o total que o servidor recalculou (BR-12). */
+function describeDiscount(sale: SaleView): string {
+  return `desconto: ${formatAmount(sale.discountAmount)} — total ${formatAmount(sale.total)}`
 }
 
 /**
