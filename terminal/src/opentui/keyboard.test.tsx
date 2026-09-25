@@ -8,7 +8,6 @@ import { act } from "react"
 import type { ScannerEvent } from "../core/scanner"
 import { createShutdown, installExitKey } from "./index"
 import { useGlobalKeyboard } from "./keyboard"
-import { Shell } from "./shell"
 
 /**
  * Aceite do 1123b (tela): o hook global intercepta a rajada **antes** do `<input>` focado, entrega o
@@ -123,7 +122,7 @@ test("tecla do mapa (F3) é consumida antes dos demais listeners; texto comum pa
 })
 
 test("o hook não engole o ESC de última saída do entry", async () => {
-  const setup = await testRender(<Shell />, { width: 80, height: 24 })
+  const setup = await testRender(<Probe onBarcode={() => {}} />, { width: 60, height: 6 })
   const shutdown = createShutdown(setup.renderer)
   installExitKey(setup.renderer, shutdown)
 

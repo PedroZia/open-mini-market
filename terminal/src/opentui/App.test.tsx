@@ -13,9 +13,10 @@ import type { ApiProblem } from "../core/state"
 import { App } from "./App"
 
 /**
- * Shell roteador do 1124a com o reducer de verdade (não o dublê) e a guarda de problemas (1117) no
- * caminho: o que se testa é a fiação — login → abertura de caixa (rótulo do 1124b), recusa que fica
- * na tela de entrada e 401 que volta ao login com o aviso —, nunca o HTTP (esse é do api-client).
+ * Shell roteador do 1124a/1124b com o reducer de verdade (não o dublê) e a guarda de problemas
+ * (1117) no caminho: o que se testa é a fiação — login → abertura de caixa, erro bloqueante que
+ * reconhece e volta, recusa que fica na tela de entrada e 401 que volta ao login com o aviso —,
+ * nunca o HTTP (esse é do api-client).
  */
 
 const OPERADOR = { id: "u1", name: "Ana Souza" }
@@ -120,7 +121,7 @@ async function signIn(setup: Setup): Promise<void> {
   })
 }
 
-describe("App (1124a)", () => {
+describe("App (1124a/1124b)", () => {
   test("login e escolha do caixa roteiam para a abertura de caixa", async () => {
     const login = mock(
       async (): Promise<LoginOutcome> => ({
@@ -183,13 +184,13 @@ describe("App (1124a)", () => {
       )
 
       // a guarda trata o 401 como sessão: o aviso aparece no login, sem empilhar a tela de erro
-      expect(frame).not.toContain("Tela de erro")
+      expect(frame).not.toContain("Falha na operação")
     } finally {
       setup.renderer.destroy()
     }
   })
 
-  test("falha bloqueante no login cai no rótulo da tela de erro", async () => {
+  test("falha bloqueante no login cai na tela de erro e o ENTER volta para a entrada", async () => {
     const login = mock(
       async (): Promise<LoginOutcome> => ({
         ok: false,
@@ -201,7 +202,40 @@ describe("App (1124a)", () => {
 
     try {
       await signIn(setup)
-      await expectFrame(setup, "Tela de erro")
+      const frame = await expectFrame(setup, "503 — UNAVAILABLE — servidor fora do ar")
+      expect(frame).toContain("Falha na operação")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+      await expectFrame(setup, "PDV minimercado — entrada do operador")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("ESC também reconhece a falha bloqueante e volta para a entrada", async () => {
+    const login = mock(
+      async (): Promise<LoginOutcome> => ({
+        ok: false,
+        kind: "failed",
+        problem: { status: 0, code: null, detail: "Falha de rede ao chamar a API." },
+      }),
+    )
+    const setup = await renderApp(apiStub({ login }))
+
+    try {
+      await signIn(setup)
+      await expectFrame(setup, "0 — sem código — Falha de rede ao chamar a API.")
+
+      await act(async () => {
+        setup.mockInput.pressEscape()
+      })
+      // o parser segura um ESC sozinho por ~20 ms (ambiguidade com sequências), achado do spike
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+      await expectFrame(setup, "PDV minimercado — entrada do operador")
     } finally {
       setup.renderer.destroy()
     }

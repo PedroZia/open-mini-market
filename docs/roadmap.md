@@ -1077,7 +1077,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes de tela equivalentes aos da Ink (login OK/credencial inválida/campo vazio/lista pendente/lista vazia/ordem login→logout→login/caixa preferido/senha nunca no frame); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta o login do PDV para OpenTUI`
 
-- [ ] **1124b — Entrada: abertura de caixa e erro**
+- [x] **1124b — Entrada: abertura de caixa e erro**
   **Objetivo:** fechar a entrada do PDV na UI nova. **Depende:** 1124a
   **Implementar:** `OpeningCashScreen` com máscara de dinheiro em centavos e o caminho de caixa já aberto (409 → sessão corrente → ENTER), `ErrorScreen` e as rotas de `openingCash`/`error` no shell.
   **Testes/aceite:** testes de tela equivalentes aos da Ink (valor inválido, abrindo, 409 com/sem sessão legível, retry ENTER/ESC na tela de erro); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
