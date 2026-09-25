@@ -24,6 +24,8 @@ import type {
   CashSessionSummaryOutcome,
   CloseCashSessionOutcome,
   TerminalApi,
+  SaleReloadOutcome,
+  SessionOutcome,
 } from '../api/terminalApi';
 import { reduce } from '../core/reducer';
 import type { SaleItemView, SaleOpenState, SaleView } from '../core/state';
@@ -163,7 +165,15 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
       async (): Promise<LoginOutcome> => ({ ok: false, kind: 'rejected', message: unused.detail }),
     ),
     logout: vi.fn(async () => undefined),
-    listCashRegisters: vi.fn(
+    // a loja do cabeçalho e a releitura da reconciliação (1117) fecham o contrato; os fluxos que
+    // precisam delas sobrescrevem no próprio teste
+    currentSession: vi.fn(async (): Promise<SessionOutcome> => ({ ok: true, store: null })),
+    getSale: vi.fn(
+      async (): Promise<SaleReloadOutcome> => ({
+        ok: false,
+        problem: { status: 404, code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' },
+      }),
+    ),    listCashRegisters: vi.fn(
       async (): Promise<CashRegistersOutcome> => ({ ok: true, registers: [] }),
     ),
     openCashRegister: vi.fn(
@@ -248,10 +258,14 @@ function SaleHarness({
   api,
   initial,
   customer = null,
+  store = null,
+  online = true,
 }: {
   api: TerminalApi;
   initial: SaleOpenState;
   customer?: CustomerOption | null;
+  store?: string | null;
+  online?: boolean;
 }) {
   const [state, dispatch] = useReducer(reduce, initial);
 
@@ -259,7 +273,17 @@ function SaleHarness({
     throw new Error(`estado inesperado no harness da venda: ${state.kind}`);
   }
 
-  return <SaleScreen state={state} api={api} dispatch={dispatch} now={NOW} customer={customer} />;
+  return (
+    <SaleScreen
+      state={state}
+      api={api}
+      dispatch={dispatch}
+      now={NOW}
+      customer={customer}
+      store={store}
+      online={online}
+    />
+  );
 }
 
 function renderSale(
@@ -781,6 +805,8 @@ describe('SaleScreen: alterar quantidade e remover item (1110)', () => {
         dispatch={dispatch}
         now={NOW}
         customer={null}
+        store={null}
+        online
       />,
     );
 
@@ -814,5 +840,75 @@ describe('SaleScreen: cliente no cabeçalho (1112)', () => {
 
     expect(anonima.lastFrame()).not.toContain('Cliente:');
     expect(outra.lastFrame()).not.toContain('Cliente:');
+  });
+});
+
+describe('SaleScreen: loja, conexão e aviso do estado (1117)', () => {
+  test('o cabeçalho mostra a loja quando o shell a leu do /auth/me', () => {
+    const { lastFrame } = render(
+      <SaleHarness api={apiStub()} initial={saleOpen()} store="Mercadinho Central" />,
+    );
+
+    expect(lastFrame()).toContain('PDV minimercado · Mercadinho Central · Caixa 01');
+  });
+
+  test('sem loja o cabeçalho fica sem ela: a venda não para por causa de um rótulo', () => {
+    const { lastFrame } = render(<SaleHarness api={apiStub()} initial={saleOpen()} />);
+
+    expect(lastFrame()).toContain('PDV minimercado · Caixa 01');
+    expect(lastFrame()).not.toContain('Mercadinho');
+  });
+
+  test('conectado é o estado normal e SEM CONEXÃO aparece na barra de status', () => {
+    const { lastFrame } = renderSale(apiStub(), saleOpen());
+    expect(lastFrame()).toContain('Conexão: conectado');
+
+    const offline = render(<SaleHarness api={apiStub()} initial={saleOpen()} online={false} />);
+
+    expect(offline.lastFrame()).toContain('Conexão: SEM CONEXÃO');
+  });
+
+  test('o aviso do estado (venda retomada) fica à vista acima da lista', () => {
+    const resumed: SaleOpenState = {
+      ...saleOf([ARROZ]),
+      notice: 'venda retomada — os itens foram preservados',
+    };
+
+    const { lastFrame } = render(<SaleHarness api={apiStub()} initial={resumed} />);
+
+    expect(lastFrame()).toContain('venda retomada — os itens foram preservados');
+    expect(lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90'); // a venda retomada está lá
+  });
+
+  test('a primeira ação sobre a venda dispensa o aviso', async () => {
+    const addSaleItem = vi.fn(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: true,
+        sale: saleWithItems([ARROZ]),
+      }),
+    );
+    const resumed: SaleOpenState = {
+      ...saleOpen(),
+      notice: 'venda retomada — os itens foram preservados',
+    };
+    const ui = render(<SaleHarness api={apiStub({ addSaleItem })} initial={resumed} />);
+
+    ui.stdin.write('7891000100103\r');
+
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).not.toContain('venda retomada');
+  });
+
+  test('o layout com o aviso e a loja continua dentro das 24 linhas e das 80 colunas', () => {
+    const resumed: SaleOpenState = {
+      ...saleWith(20),
+      notice: 'venda retomada — os itens foram preservados',
+    };
+
+    const { lastFrame } = render(
+      <SaleHarness api={apiStub()} initial={resumed} store="Mercadinho Central" />,
+    );
+
+    expectLayout(lastFrame() ?? '');
   });
 });

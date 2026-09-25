@@ -3,6 +3,7 @@ import { useImperativeHandle, useRef, useState, type Dispatch, type Ref } from '
 
 import type { SalePaymentIntent, TerminalApi } from '../api/terminalApi';
 import { centsToAmount, digitsToCents, formatAmount, formatBRL } from '../core/money';
+import { problemPolicy } from '../core/problems';
 import type { Action } from '../core/reducer';
 import type { PaymentMethod, PaymentView, PayingState } from '../core/state';
 
@@ -24,9 +25,13 @@ import type { PaymentMethod, PaymentView, PayingState } from '../core/state';
  * quem cuida disso é o reducer (`cancel`), não esta tela.
  *
  * A `Idempotency-Key` é da tela porque o retry é dela (§8): a chave do pagamento em curso só troca
- * quando o operador muda o pedido (valor, recebido ou forma) e a da conclusão é uma por tentativa
+ * quando o operador muda o pedido (valor, recebido **ou forma**) e a da conclusão é uma por tentativa
  * de fechar a venda — repetir o F9 depois de uma falha transitória manda a mesma chave e o servidor
- * devolve o replay, sem um segundo pagamento nem uma segunda baixa de estoque.
+ * devolve o replay, sem um segundo pagamento nem uma segunda baixa de estoque. É por isso que o
+ * payload alterado **sempre** zera a chave: reaproveitá-la com outro corpo seria 409
+ * `IDEMPOTENCY_KEY_REUSED` do servidor. O mapa central (1117) cuida do que a tela não enxerga
+ * sozinha: sessão caída e 409 de idempotência/concorrência vão para o shell — que volta ao login com
+ * a venda preservada ou relê a venda do servidor — em vez de virar rodapé.
  */
 
 export type PaymentScreenProps = {
@@ -198,6 +203,16 @@ export function PaymentScreen({ state, api, dispatch, onCompleted, ref }: Paymen
       return;
     }
 
+    const policy = problemPolicy(outcome.problem);
+
+    if (policy.kind === 'session' || policy.kind === 'reconcile') {
+      // sessão caída ou operação a conferir: quem trata é o shell (1117), e esta tentativa não volta
+      // com a mesma chave — o estado local pode não valer mais
+      paymentKey.current = null;
+      dispatch({ type: 'apiFailed', problem: outcome.problem });
+      return;
+    }
+
     // transitória: a tentativa segue com a mesma chave, e o mesmo ENTER refaz
     setMessage({
       kind: outcome.kind === 'retryable' ? 'retry' : 'rejected',
@@ -235,6 +250,15 @@ export function PaymentScreen({ state, api, dispatch, onCompleted, ref }: Paymen
       return;
     }
 
+    const policy = problemPolicy(outcome.problem);
+
+    if (policy.kind === 'session' || policy.kind === 'reconcile') {
+      // sessão caída ou venda a conferir: o shell assume (1117) e a próxima tentativa é nova
+      completionKey.current = null;
+      dispatch({ type: 'apiFailed', problem: outcome.problem });
+      return;
+    }
+
     setMessage({
       kind: outcome.kind === 'retryable' ? 'retry' : 'rejected',
       text: outcome.kind === 'retryable' ? COMPLETE_RETRY : outcome.problem.detail,
@@ -251,6 +275,8 @@ export function PaymentScreen({ state, api, dispatch, onCompleted, ref }: Paymen
 
     setMessage(null);
     setMethod(next);
+    // mudou a forma, mudou o corpo: a chave do retry anterior não vale para esta chamada (§8)
+    paymentKey.current = null;
 
     if (next !== 'CASH') {
       setField('amount');
@@ -281,6 +307,11 @@ export function PaymentScreen({ state, api, dispatch, onCompleted, ref }: Paymen
       <Text>
         Operador: {state.operator.name} · Caixa: {state.register.name}
       </Text>
+      {state.notice === undefined ? null : (
+        <Text color="yellow" wrap="truncate-end">
+          {state.notice}
+        </Text>
+      )}
       <Text> </Text>
       <Text>
         Método:{' '}

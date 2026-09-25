@@ -29,8 +29,13 @@ import { inputChars } from './scannerInput';
  * na busca local — o vínculo é do servidor, o nome é anotação da seleção.
  *
  * O nome da loja não está no estado (§11.2), então o cabeçalho mostra o que o reducer tem — caixa e
- * operador; quando a sessão carregar a loja (`GET /auth/me`), ela entra aqui, sem inchar o reducer
- * por causa de um rótulo.
+ * operador — mais a loja que o shell leu do `GET /auth/me` (1117). A conexão com o servidor (1117)
+ * fecha a tela: a linha `Conexão:` acima dos atalhos acusa a falha de transporte e volta a
+ * `conectado` a cada resposta do servidor — inclusive nas telas que tratam o próprio rodapé.
+ * Nada disso entra no reducer: é rótulo de tela, que o shell guarda e passa por prop.
+ *
+ * O `notice` do estado (1117) é o recado do shell — venda retomada depois de queda de sessão ou
+ * estado conferido no servidor depois de um 409 —, exibido acima da lista até a próxima ação.
  *
  * O layout assume 80×24 (§11.3): a janela mostra os últimos `MAX_ITEM_ROWS` itens — o que fica
  * acima vira uma linha com a contagem —, o rodapé é uma única linha (feedback, confirmação ou
@@ -61,6 +66,10 @@ export type SaleScreenProps = {
   dispatch: Dispatch<Action>;
   /** Cliente vinculado com o nome que a busca local capturou (1112); `null` na venda anônima. */
   customer: CustomerOption | null;
+  /** Loja do cabeçalho (`GET /auth/me`, 1117); `null` quando não chegou — o cabeçalho segue sem ela. */
+  store: string | null;
+  /** Conexão com o servidor (1117): `false` mostra SEM CONEXÃO na barra de status. */
+  online: boolean;
   /** O shell chama `askRemove()` no F3 do canal cru — a tecla não passa pelo `useInput`. */
   ref?: Ref<SaleScreenHandle>;
 };
@@ -100,7 +109,7 @@ type Feedback =
   | { kind: 'notice'; text: string }
   | { kind: 'failure'; text: string };
 
-export function SaleScreen({ state, now, api, dispatch, customer, ref }: SaleScreenProps) {
+export function SaleScreen({ state, now, api, dispatch, customer, store, online, ref }: SaleScreenProps) {
   const { stdout } = useStdout();
   /** Buffer do leitor: um por tela, com o timing medido no wiring. */
   const scannerRef = useRef<Scanner | null>(null);
@@ -449,11 +458,18 @@ export function SaleScreen({ state, now, api, dispatch, customer, ref }: SaleScr
 
   return (
     <Box flexDirection="column">
-      <Text bold>PDV minimercado · {state.register.name}</Text>
+      <Text bold>
+        PDV minimercado{store === null ? '' : ` · ${store}`} · {state.register.name}
+      </Text>
       <Text>
         Operador: {state.operator.name} · {formatTime(now)}
       </Text>
       {customerName === null ? null : <Text>Cliente: {customerName}</Text>}
+      {state.notice === undefined ? null : (
+        <Text color="yellow" wrap="truncate-end">
+          {state.notice}
+        </Text>
+      )}
       <Text> </Text>
       {hidden === 0 ? null : <Text dimColor>… {hidden} itens acima</Text>}
       {items.length === 0 ? (
@@ -479,6 +495,9 @@ export function SaleScreen({ state, now, api, dispatch, customer, ref }: SaleScr
       ) : feedback === null ? null : (
         <FeedbackRow feedback={feedback} />
       )}
+      <Text color={online ? 'green' : 'red'}>
+        Conexão: {online ? 'conectado' : 'SEM CONEXÃO'}
+      </Text>
       {SHORTCUT_ROWS.map((row) => (
         <Text key={row} dimColor>
           {row}

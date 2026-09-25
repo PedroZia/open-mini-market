@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { createScanner, type Scanner, type ScannerEvent } from './scanner';
+import { createScanner, isScanBurst, type Scanner, type ScannerEvent } from './scanner';
 
 const ENTER = '\r';
 const TAB = '\t';
@@ -181,5 +181,40 @@ describe('leitor de código de barras', () => {
     scanner.setEnabled(true);
 
     expect(scan(scanner, BARCODE, { startMs: 300 })).toMatchObject({ quantity: 1 });
+  });
+});
+
+/**
+ * Bipe em campo de formulário (1117): nos modais com campo (o desconto do F5, por exemplo) a
+ * rajada do leitor não pode virar texto nem submeter — o detector reconhece o chunk inteiro
+ * (código + terminador), o mesmo pressuposto do wiring da venda.
+ */
+describe('rajada do leitor em campo de formulário', () => {
+  test('código com o terminador no mesmo chunk é bipe: o campo descarta o chunk inteiro', () => {
+    expect(isScanBurst([...BARCODE, ENTER])).toBe(true);
+    expect(isScanBurst([...BARCODE, TAB])).toBe(true);
+  });
+
+  test('ENTER/TAB isolado é tecla humana: aplica o formulário e troca de campo', () => {
+    expect(isScanBurst([ENTER])).toBe(false);
+    expect(isScanBurst([TAB])).toBe(false);
+  });
+
+  test('digitação sem terminador é texto normal, caractere a caractere ou colada', () => {
+    expect(isScanBurst(['1'])).toBe(false);
+    expect(isScanBurst([...'1000'])).toBe(false);
+    expect(isScanBurst([...'cliente pediu'])).toBe(false);
+  });
+
+  test('um caractere com o terminador não é leitura: a tecla solta continua sendo do operador', () => {
+    expect(isScanBurst(['5', ENTER])).toBe(false);
+  });
+
+  test('tecla de controle no chunk não é rajada: quem decide é o campo, como antes', () => {
+    expect(isScanBurst([...BARCODE, '\u001b'])).toBe(false);
+  });
+
+  test('chunk vazio (seta, ESC) não é rajada', () => {
+    expect(isScanBurst([])).toBe(false);
   });
 });

@@ -3,15 +3,19 @@ import { useState } from 'react';
 
 import type { DiscountType, TerminalApi } from '../api/terminalApi';
 import { centsToAmount, digitsToCents, formatBRL } from '../core/money';
+import { isScanBurst } from '../core/scanner';
 import type { ApiProblem, SaleView } from '../core/state';
+import { inputChars } from './scannerInput';
 
 /**
  * Desconto na venda (F5, passo 1111): modal bloqueante que o shell abre **no lugar** do corpo da
  * venda — como o autoteste do leitor (1108), o overlay desmonta a venda, então a rajada do leitor
  * não vira item enquanto ele está à vista, e no contexto `discount` do mapa (§11.3) só o ESC do
  * canal cru do shell atua: os demais atalhos ficam bloqueados e o ESC cancela sem chamar a API.
- * Como aqui há formulário, o que o leitor mandar cai no campo em foco (o leitor é teclado): o
- * terminador colado no texto não aplica nada, como no campo da abertura de caixa (1107).
+ * Como aqui há formulário, o que o leitor mandar cairia no campo em foco — e o terminador colado,
+ * no ENTER que aplica: por isso o **bipe completo** é descartado inteiro (1117), pelo mesmo critério
+ * de rajada do `core/scanner` (código + ENTER/TAB no mesmo chunk). Digitação humana continua normal:
+ * os dígitos entram no campo e o ENTER dela aplica.
  *
  * A TUI não calcula desconto nenhum (BR-12): manda tipo, valor e motivo ao servidor (`PUT
  * /sales/{id}/discount`, passos 810/811b) e recebe a venda inteira com subtotal, desconto e total
@@ -70,6 +74,11 @@ export function DiscountModal({ saleId, api, onApplied, onFailed }: DiscountModa
   useInput((input, key) => {
     // requisição em andamento: ENTER repetido não aplica duas vezes
     if (busy) {
+      return;
+    }
+
+    // bipe do leitor com o modal aberto: a rajada não vira texto nem aplica o desconto (1117)
+    if (isScanBurst(inputChars(input, key))) {
       return;
     }
 

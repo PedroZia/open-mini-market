@@ -1,4 +1,4 @@
-import { ApiError, type ApiClient, type RequestOptions } from '@minimarket/api-client';
+import { ApiError, ApiNetworkError, type ApiClient, type RequestOptions } from '@minimarket/api-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { clearToken, getToken } from './session';
@@ -1767,6 +1767,155 @@ describe('createTerminalApi: consulta de preço (1116)', () => {
       ok: false,
       kind: 'rejected',
       message: 'produto não encontrado — faça a consulta de novo',
+    });
+  });
+});
+
+describe('createTerminalApi: sessão, releitura e o que não é recusa da tela (1117)', () => {
+  /** Sessão corrente e venda como o servidor as responde: fixtures mínimas do contrato. */
+  const ME = {
+    user: { id: 'u1', username: 'ana', displayName: 'Ana Souza' },
+    roles: ['OPERADOR'],
+    permissions: ['sale.create'],
+    store: { code: '01', name: 'Mercadinho Central' },
+    cashRegisterId: 'r1',
+  };
+
+  const DETAIL = {
+    id: 'sale-1',
+    number: 42,
+    status: 'OPEN',
+    subtotal: 24.9,
+    discountAmount: 0,
+    total: 24.9,
+    paidAmount: 0,
+    changeAmount: 0,
+    items: [
+      { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', unitPrice: 24.9, quantity: 1, lineTotal: 24.9 },
+    ],
+    payments: [],
+  };
+
+  test('currentSession normaliza a loja do /auth/me para o cabeçalho', async () => {
+    const get = vi.fn(async () => ME);
+    const api = createTerminalApi(stubClient({ get }));
+
+    expect(await api.currentSession()).toEqual({
+      ok: true,
+      store: { code: '01', name: 'Mercadinho Central' },
+    });
+    expect(get).toHaveBeenCalledWith('/api/v1/auth/me');
+  });
+
+  test('sessão sem loja no contrato devolve store nulo: o cabeçalho fica sem ela', async () => {
+    const api = createTerminalApi(stubClient({ get: async () => ({ ...ME, store: undefined }) }));
+
+    expect(await api.currentSession()).toEqual({ ok: true, store: null });
+  });
+
+  test('falha do /auth/me devolve o problema sem lançar: a venda não para por um rótulo', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiNetworkError(new Error('fetch failed'));
+        },
+      }),
+    );
+
+    expect(await api.currentSession()).toEqual({
+      ok: false,
+      problem: { status: 0, code: null, detail: 'Falha de rede ao chamar a API.' },
+    });
+  });
+
+  test('getSale devolve a venda inteira como o servidor a tem agora (a releitura da reconciliação)', async () => {
+    const get = vi.fn(async () => DETAIL);
+    const api = createTerminalApi(stubClient({ get }));
+
+    expect(await api.getSale('sale-1')).toEqual({
+      ok: true,
+      sale: {
+        id: 'sale-1',
+        items: [
+          {
+            productId: 'p1',
+            name: 'Arroz 5kg',
+            unit: 'UN',
+            quantity: 1,
+            unitPrice: 24.9,
+            lineTotal: 24.9,
+          },
+        ],
+        subtotal: 24.9,
+        discountAmount: 0,
+        total: 24.9,
+        paidAmount: 0,
+        changeAmount: 0,
+        payments: [],
+        customerId: null,
+      },
+    });
+    expect(get).toHaveBeenCalledWith('/api/v1/sales/sale-1');
+  });
+
+  test('a releitura falhou: o problema do servidor volta para o shell decidir', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiError(404, { code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' });
+        },
+      }),
+    );
+
+    expect(await api.getSale('sale-9')).toEqual({
+      ok: false,
+      problem: { status: 404, code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' },
+    });
+  });
+
+  test('401 na gaveta não é recusa do modal: vira falha para o shell voltar ao login', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(401, {
+            code: 'SESSION_EXPIRED',
+            detail: 'sessão expirada; faça login novamente',
+          });
+        },
+      }),
+    );
+
+    expect(await api.withdrawCash('r1', { amount: 10, reason: 'troco' }, 'k')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: {
+        status: 401,
+        code: 'SESSION_EXPIRED',
+        detail: 'sessão expirada; faça login novamente',
+      },
+    });
+  });
+
+  test('409 IDEMPOTENCY_KEY_REUSED não é recusa: o shell relê a venda e nada se repete às cegas', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(409, {
+            code: 'IDEMPOTENCY_KEY_REUSED',
+            detail: 'chave já usada com outra requisição',
+          });
+        },
+      }),
+    );
+
+    expect(await api.closeCashSession('r1', { countedAmount: 30 }, 'k')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: {
+        status: 409,
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        detail: 'chave já usada com outra requisição',
+      },
     });
   });
 });

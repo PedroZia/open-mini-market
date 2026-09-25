@@ -129,3 +129,34 @@ export function createScanner(): Scanner {
 function isPrintable(char: string): boolean {
   return char.length === 1 && char >= ' ' && char !== '\u007f';
 }
+
+/**
+ * O chunk do teclado é um bipe do leitor? (1117)
+ *
+ * Nos campos de formulário (o desconto do F5, por exemplo) a rajada não pode virar texto nem
+ * submeter: o leitor manda o código e o terminador **no mesmo chunk** — o mesmo pressuposto do
+ * wiring da venda (1104a: "o Ink pode entregar a rajada inteira de uma vez, terminador incluso") —,
+ * então é o chunk inteiro que o detector reconhece: `MIN_BURST_LENGTH` caracteres imprimíveis ou
+ * mais fechados em `ENTER`/`TAB`. Terminador sozinho é tecla humana (o ENTER que aplica o desconto,
+ * o TAB que troca de campo) e texto sem terminador (a digitação) entra no campo normalmente.
+ */
+export function isScanBurst(chars: readonly string[]): boolean {
+  let printable = 0;
+  let terminated = false;
+
+  for (const char of chars) {
+    if (TERMINATORS.has(char)) {
+      terminated = true;
+      continue;
+    }
+
+    if (!isPrintable(char)) {
+      // controle no meio não é rajada de leitor: quem decide é o campo, como antes
+      return false;
+    }
+
+    printable += 1;
+  }
+
+  return terminated && printable >= MIN_BURST_LENGTH;
+}

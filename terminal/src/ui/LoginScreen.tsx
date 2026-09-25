@@ -19,6 +19,9 @@ import type { LoginState, Operator } from '../core/state';
  * `loginSucceeded` leva para a abertura de caixa, `loginRejected` **fica aqui** com a mensagem do
  * servidor e `apiFailed` vai para a tela de erro com volta. Nada de conta, total ou parse (BR-12).
  *
+ * O `notice` do estado (1117) é o aviso da sessão que caiu no meio da operação — o login volta para
+ * cá com a venda ainda em memória, e o mesmo caixa a retoma depois de abrir o turno de novo.
+ *
  * O token fica só na sessão em memória (`src/api/session.ts`), nunca no estado da tela nem na
  * saída — a senha também não é renderizada em momento algum.
  */
@@ -229,6 +232,7 @@ export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
       <Box flexDirection="column">
         <Text bold>Escolha o caixa</Text>
         <Text>Operador: {stage.operator.name}</Text>
+        {state.notice === undefined ? null : <NoticeRow notice={state.notice} />}
         <Text> </Text>
         {stage.registers === null ? (
           <Text dimColor>carregando caixas...</Text>
@@ -259,11 +263,21 @@ export function LoginScreen({ state, api, dispatch }: LoginScreenProps) {
       <Text>
         {focus === 'password' ? '›' : ' '} Senha: {'•'.repeat(password.length)}
       </Text>
+      {state.notice === undefined ? null : <NoticeRow notice={state.notice} />}
       {message === null ? null : <Text color="red">{message}</Text>}
       {busy ? <Text dimColor>entrando...</Text> : null}
       <Text> </Text>
       <Text dimColor>TAB alterna os campos · ENTER entra</Text>
     </Box>
+  );
+}
+
+/** Aviso da sessão que caiu (1117): amarelo, uma linha, com a venda preservada explicada ao operador. */
+function NoticeRow({ notice }: { notice: string }) {
+  return (
+    <Text color="yellow" wrap="truncate-end">
+      {notice}
+    </Text>
   );
 }
 

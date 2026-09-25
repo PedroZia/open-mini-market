@@ -23,6 +23,8 @@ import type {
   CashSessionSummaryOutcome,
   CloseCashSessionOutcome,
   TerminalApi,
+  SaleReloadOutcome,
+  SessionOutcome,
 } from '../api/terminalApi';
 import { LoginScreen } from './LoginScreen';
 
@@ -53,7 +55,15 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
   return {
     login: vi.fn(async (): Promise<LoginOutcome> => ({ ok: true, operator: OPERADOR })),
     logout: vi.fn(async () => undefined),
-    listCashRegisters: vi.fn(
+    // a loja do cabeçalho e a releitura da reconciliação (1117) fecham o contrato; os fluxos que
+    // precisam delas sobrescrevem no próprio teste
+    currentSession: vi.fn(async (): Promise<SessionOutcome> => ({ ok: true, store: null })),
+    getSale: vi.fn(
+      async (): Promise<SaleReloadOutcome> => ({
+        ok: false,
+        problem: { status: 404, code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' },
+      }),
+    ),    listCashRegisters: vi.fn(
       async (): Promise<CashRegistersOutcome> => ({ ok: true, registers: [CAIXA_01, CAIXA_02] }),
     ),
     openCashRegister: vi.fn(

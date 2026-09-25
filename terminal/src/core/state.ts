@@ -108,16 +108,35 @@ export type CashContext = {
   sessionId: string;
 };
 
+/**
+ * Venda preservada quando a sessão cai (1117): o 401 leva ao login **sem descartar** o que estava em
+ * memória, e o próximo login do mesmo caixa retoma a venda.
+ */
+export type ResumeTicket = {
+  /** Caixa que abriu a venda (BR-11): a retomada só vale no mesmo caixa. */
+  registerId: string;
+  /** Nome do caixa, para o aviso de quando a retomada não for possível. */
+  registerName: string;
+  /** Venda em andamento, como o servidor a devolveu; `null` antes do primeiro bipe. */
+  sale: SaleView | null;
+};
+
 export type LoginState = {
   kind: 'login';
   /** mensagem do último login recusado pelo servidor; o formulário continua na tela. */
   failure: string | null;
+  /** aviso do login que voltou por queda de sessão (1117): "a venda continua aberta". */
+  notice?: string;
+  /** venda preservada pela queda de sessão, retomada quando o login voltar ao mesmo caixa (1117). */
+  resume?: ResumeTicket;
 };
 
 export type OpeningCashState = {
   kind: 'openingCash';
   operator: Operator;
   register: CashRegister;
+  /** venda preservada atravessando a abertura do caixa até a retomada (1117). */
+  resume?: ResumeTicket;
 };
 
 export type SaleOpenState = CashContext & {
@@ -131,11 +150,18 @@ export type SaleOpenState = CashContext & {
    * está no lugar da venda e o ENTER inicia a próxima.
    */
   receipt: ReceiptView | null;
+  /**
+   * Recado do shell para a tela (1117) — venda retomada depois de queda de sessão ou estado
+   * conferido no servidor depois de um 409 —; a primeira ação sobre a venda o dispensa.
+   */
+  notice?: string;
 };
 
 export type PayingState = CashContext & {
   kind: 'paying';
   sale: SaleView;
+  /** mesmo recado do `saleOpen` (1117): a conferência do 409 aparece também no pagamento. */
+  notice?: string;
 };
 
 export type ClosingCashState = CashContext & {

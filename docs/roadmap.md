@@ -1009,7 +1009,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** consulta não cria venda; ajuda lista todos os atalhos ativos.
   **Commit:** `feat(tui): adiciona consulta de preco e ajuda`
 
-- [ ] **1117 — Resiliência: rede, sessão e erros**
+- [x] **1117 — Resiliência: rede, sessão e erros**
   **Objetivo:** o PDV não perde venda nem estado. **Depende:** 1113
   **Implementar:** tratamento central de erros por `code`; `401` → volta ao login preservando a venda aberta em memória (com aviso); `409` de idempotência → reconcilia; indicador de conexão na barra de status; nenhuma operação destrutiva silenciosa.
   **Testes/aceite:** queda de rede simulada não perde itens; reconexão retoma a venda; 401 exige novo login.

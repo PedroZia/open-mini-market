@@ -28,6 +28,8 @@ import type {
   SearchProductsOutcome,
   StockBalanceView,
   TerminalApi,
+  SaleReloadOutcome,
+  SessionOutcome,
 } from '../api/terminalApi';
 import type { PaymentMethod, PaymentView, SaleView } from '../core/state';
 import { App } from './App';
@@ -80,7 +82,15 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
   return {
     login: vi.fn(async (): Promise<LoginOutcome> => ({ ok: true, operator: OPERADOR })),
     logout: vi.fn(async () => undefined),
-    listCashRegisters: vi.fn(
+    // a loja do cabeçalho e a releitura da reconciliação (1117) fecham o contrato; os fluxos que
+    // precisam delas sobrescrevem no próprio teste
+    currentSession: vi.fn(async (): Promise<SessionOutcome> => ({ ok: true, store: null })),
+    getSale: vi.fn(
+      async (): Promise<SaleReloadOutcome> => ({
+        ok: false,
+        problem: { status: 404, code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' },
+      }),
+    ),    listCashRegisters: vi.fn(
       async (): Promise<CashRegistersOutcome> => ({ ok: true, registers: [CAIXA_01, CAIXA_02] }),
     ),
     openCashRegister: vi.fn(
@@ -2015,5 +2025,276 @@ describe('App: consulta de preço e ajuda (1116)', () => {
 
     await expectFrame(ui.lastFrame, 'Ajuda — atalhos da venda (F1)');
     expect(ui.lastFrame()).not.toContain('Fechamento de caixa');
+  });
+});
+
+describe('App: resiliência de rede e sessão (1117)', () => {
+  /** Venda de um item como o servidor a devolve — o ponto de partida dos fluxos. */
+  function saleWithOneItem(): SaleView {
+    return {
+      id: 'sale-1',
+      items: [
+        {
+          productId: 'p1',
+          name: 'Arroz 5kg',
+          unit: 'UN',
+          quantity: 1,
+          unitPrice: 24.9,
+          lineTotal: 24.9,
+        },
+      ],
+      subtotal: 24.9,
+      discountAmount: 0,
+      total: 24.9,
+      paidAmount: 0,
+      changeAmount: 0,
+      payments: [],
+      customerId: null,
+    };
+  }
+
+  function paidSale(paid: number, payments: PaymentView[]): SaleView {
+    return { ...saleWithOneItem(), paidAmount: paid, payments };
+  }
+
+  function cashPayment(id: string, amount: number): PaymentView {
+    return { id, method: 'CASH', amount, changeAmount: 0, status: 'APPROVED' };
+  }
+
+  /** Entra na venda com o item do primeiro bipe: o ponto de partida dos fluxos de resiliência. */
+  async function reachSaleWithItem(api: TerminalApi) {
+    const ui = render(<App api={api} />);
+    await reachSale(ui);
+    ui.stdin.write('7891000100103\r');
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+
+    return ui;
+  }
+
+  /** Falha de transporte: o servidor não respondeu, a venda continua em memória. */
+  const networkProblem = { status: 0, code: null, detail: 'Falha de rede ao chamar a API.' };
+
+  /** 401 do servidor: a sessão caiu no meio da operação. */
+  const sessionProblem = {
+    status: 401,
+    code: 'SESSION_EXPIRED',
+    detail: 'sessão expirada; faça login novamente',
+  };
+
+  test('queda de rede não perde o bipe: o indicador acusa SEM CONEXÃO e o retry do ENTER retoma', async () => {
+    let attempt = 0;
+    const addSaleItem = vi.fn(async (): Promise<AddSaleItemOutcome> => {
+      attempt += 1;
+
+      return attempt === 1
+        ? { ok: false, kind: 'retryable', problem: networkProblem }
+        : { ok: true, sale: saleWithOneItem() };
+    });
+    const ui = render(<App api={apiStub({ addSaleItem })} />);
+    await reachSale(ui);
+    expect(ui.lastFrame()).toContain('conectado');
+
+    ui.stdin.write('7891000100103\r');
+
+    await expectFrame(ui.lastFrame, 'SEM CONEXÃO');
+    expect(ui.lastFrame()).toContain('falha ao enviar o bipe — ENTER tenta de novo');
+
+    ui.stdin.write('\r'); // retry manual: o bipe que ficou na fila
+
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).toContain('conectado'); // o servidor respondeu de novo
+    expect(addSaleItem).toHaveBeenCalledTimes(2);
+  });
+
+  test('401 no meio da venda volta ao login com aviso e a mesma venda é retomada no novo login', async () => {
+    let attempt = 0;
+    const addSaleItem = vi.fn(async (): Promise<AddSaleItemOutcome> => {
+      attempt += 1;
+
+      return attempt === 1
+        ? { ok: true, sale: saleWithOneItem() }
+        : { ok: false, kind: 'failed', problem: sessionProblem };
+    });
+    const ui = await reachSaleWithItem(apiStub({ addSaleItem }));
+
+    ui.stdin.write('7891000100103\r'); // a sessão cai no meio da segunda leitura
+
+    await expectFrame(
+      ui.lastFrame,
+      'sessão expirada — entre novamente; a venda continua aberta',
+    );
+    expect(ui.lastFrame()).toContain('Usuário:'); // o formulário voltou
+
+    // login de novo, mesmo caixa: o fluxo 1106/1107 inteiro
+    await signIn(ui.lastFrame, ui.stdin);
+    await expectFrame(ui.lastFrame, 'Escolha o caixa');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'Abertura de caixa');
+    ui.stdin.write('1000');
+    await expectFrame(ui.lastFrame, 'Fundo de troco: R$ 10,00');
+    ui.stdin.write('\r');
+
+    // a mesma venda, com os mesmos itens, e o aviso da retomada à vista
+    await expectFrame(ui.lastFrame, 'venda retomada — os itens foram preservados');
+    expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90');
+    expect(ui.lastFrame()).toContain('PDV minimercado · Caixa principal');
+  });
+
+  test('a loja do /auth/me aparece no cabeçalho, uma vez por login', async () => {
+    const currentSession = vi.fn(
+      async (): Promise<SessionOutcome> => ({
+        ok: true,
+        store: { code: '01', name: 'Mercadinho Central' },
+      }),
+    );
+    const ui = render(<App api={apiStub({ currentSession })} />);
+
+    await reachSale(ui);
+
+    await expectFrame(ui.lastFrame, 'PDV minimercado · Mercadinho Central · Caixa principal');
+    expect(currentSession).toHaveBeenCalledTimes(1);
+    expect(ui.lastFrame()).toContain('bipar o primeiro item para iniciar a venda');
+  });
+
+  test('falha do /auth/me não bloqueia a venda: o cabeçalho só fica sem loja', async () => {
+    const currentSession = vi.fn(
+      async (): Promise<SessionOutcome> => ({
+        ok: false,
+        problem: { status: 503, code: 'UNAVAILABLE', detail: 'servidor fora do ar' },
+      }),
+    );
+    const ui = render(<App api={apiStub({ currentSession })} />);
+
+    await reachSale(ui);
+
+    await vi.waitFor(() => {
+      expect(currentSession).toHaveBeenCalledTimes(1);
+    });
+    expect(ui.lastFrame()).toContain('PDV minimercado · Caixa principal');
+    expect(ui.lastFrame()).not.toContain('503 — UNAVAILABLE'); // o rótulo não vira tela de erro
+    expect(ui.lastFrame()).toContain('bipar o primeiro item para iniciar a venda');
+  });
+
+  test('409 de idempotência relê a venda do servidor e avisa, sem repetir a operação', async () => {
+    const addPayment = vi.fn(
+      async (): Promise<AddPaymentOutcome> => ({
+        ok: false,
+        kind: 'failed',
+        problem: {
+          status: 409,
+          code: 'IDEMPOTENCY_KEY_REUSED',
+          detail: 'chave de idempotência já usada com outra requisição',
+        },
+      }),
+    );
+    // a releitura: o pagamento que já estava gravado com a chave antiga
+    const getSale = vi.fn(
+      async (): Promise<SaleReloadOutcome> => ({
+        ok: true,
+        sale: paidSale(10, [cashPayment('pay-1', 10)]),
+      }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ addPayment, getSale }));
+
+    ui.stdin.write('\u001b[20~'); // F9 abre o pagamento
+    await expectFrame(ui.lastFrame, 'Pagamento (F9)');
+    ui.stdin.write('1500');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 15,00');
+    ui.stdin.write('\r');
+
+    await expectFrame(
+      ui.lastFrame,
+      'operação já registrada com outros dados — venda conferida no servidor',
+    );
+    expect(getSale).toHaveBeenCalledWith('sale-1');
+    expect(addPayment).toHaveBeenCalledTimes(1); // a operação não foi repetida
+    expect(ui.lastFrame()).toContain('1. DINHEIRO — R$ 10,00'); // a venda é a que o servidor tem
+    expect(ui.lastFrame()).toContain('Pago: R$ 10,00 de R$ 24,90');
+    expect(ui.lastFrame()).toContain('Pagamento (F9)');
+  });
+
+  test('retry idêntico do pagamento reusa a chave, para o servidor devolver o replay', async () => {
+    let attempt = 0;
+    const addPayment = vi.fn<TerminalApi['addPayment']>(async () => {
+      attempt += 1;
+
+      return attempt === 1
+        ? { ok: false, kind: 'retryable', problem: networkProblem }
+        : { ok: true, sale: paidSale(24.9, [cashPayment('pay-1', 24.9)]) };
+    });
+    const ui = await reachSaleWithItem(apiStub({ addPayment }));
+
+    ui.stdin.write('\u001b[20~'); // F9
+    await expectFrame(ui.lastFrame, 'Pagamento (F9)');
+    ui.stdin.write('2490');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 24,90');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'falha ao registrar o pagamento — ENTER tenta de novo');
+    expect(addPayment).toHaveBeenCalledTimes(1);
+
+    ui.stdin.write('\r'); // o mesmo ENTER, com o mesmo pedido: mesma chave
+
+    await expectFrame(ui.lastFrame, '1. DINHEIRO — R$ 24,90');
+    expect(addPayment).toHaveBeenCalledTimes(2);
+    expect(addPayment.mock.calls[0]?.[2]).toBe(addPayment.mock.calls[1]?.[2]);
+  });
+
+  test('mudar a forma do pagamento é nova intenção: a chave antiga não é reaproveitada', async () => {
+    let attempt = 0;
+    const addPayment = vi.fn<TerminalApi['addPayment']>(async () => {
+      attempt += 1;
+
+      return attempt === 1
+        ? { ok: false, kind: 'retryable', problem: networkProblem }
+        : { ok: true, sale: paidSale(24.9, [{ ...cashPayment('pay-1', 24.9), method: 'PIX' }]) };
+    });
+    const ui = await reachSaleWithItem(apiStub({ addPayment }));
+
+    ui.stdin.write('\u001b[20~'); // F9
+    await expectFrame(ui.lastFrame, 'Pagamento (F9)');
+    ui.stdin.write('2490');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 24,90');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'falha ao registrar o pagamento — ENTER tenta de novo');
+
+    ui.stdin.write('\u001b[C'); // seta → muda a forma: o corpo mudou, a chave não vale mais
+    await expectFrame(ui.lastFrame, '[PIX]');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, '1. PIX — R$ 24,90');
+    expect(addPayment).toHaveBeenCalledTimes(2);
+    expect(addPayment.mock.calls[0]?.[2]).not.toBe(addPayment.mock.calls[1]?.[2]);
+  });
+
+  test('401 na gaveta leva ao login preservando a venda, em vez de ficar no modal', async () => {
+    const withdrawCash = vi.fn(
+      async (): Promise<CashMovementOutcome> => ({
+        ok: false,
+        kind: 'failed',
+        problem: sessionProblem,
+      }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ withdrawCash }));
+
+    ui.stdin.write('\u001b[18~'); // F7 abre a sangria
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+    ui.stdin.write('1000');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 10,00');
+    ui.stdin.write('\t');
+    await expectFrame(ui.lastFrame, '› Motivo:');
+    ui.stdin.write('troco para o banco');
+    await expectFrame(ui.lastFrame, 'Motivo: troco para o banco');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'confirmar sangria de R$ 10,00?');
+    ui.stdin.write('\r');
+
+    await expectFrame(
+      ui.lastFrame,
+      'sessão expirada — entre novamente; a venda continua aberta',
+    );
+    expect(ui.lastFrame()).toContain('Usuário:');
+    expect(ui.lastFrame()).not.toContain('Sangria (F7)');
   });
 });

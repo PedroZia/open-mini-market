@@ -1,5 +1,6 @@
 import { ApiError, type ApiClient, type components } from '@minimarket/api-client';
 
+import { problemMessage, problemPolicy } from '../core/problems';
 import type {
   ApiProblem,
   CashClosingView,
@@ -14,8 +15,10 @@ import { clearToken, setToken } from './session';
  * Camada de API da TUI: o contrato do backend (`components['schemas'][...]`, gerado no
  * `@minimarket/api-client`) traduzido para o que as telas precisam — operador autenticado, caixas
  * disponíveis e a sessão de caixa — com as falhas já separadas em "recusa" (a tela fica e avisa) e
- * "falha" (tela de erro, §11.4). Nenhuma regra de negócio aqui (BR-12): a TUI não calcula nada, só
- * transporta o que o servidor respondeu.
+ * "falha" (tela de erro, §11.4). A sessão caída e os 409 de idempotência/concorrência nunca são
+ * recusa do operador: o mapa central (`core/problems`, 1117) os roteia para o shell, que volta ao
+ * login preservando a venda ou relê o estado do servidor. Nenhuma regra de negócio aqui (BR-12): a
+ * TUI não calcula nada, só transporta o que o servidor respondeu.
  *
  * A instância do client entra por parâmetro (`createTerminalApi(client)`): os testes injetam um
  * dublê e o app injeta a instância única de `src/api/index.ts`.
@@ -379,6 +382,30 @@ export type ProductStockOutcome =
   | { ok: false; kind: 'rejected'; message: string }
   | SendFailure;
 
+/** Loja da sessão corrente (`GET /auth/me`, 1117): o que o cabeçalho da venda mostra. */
+export type StoreView = {
+  code: string;
+  name: string;
+};
+
+/**
+ * Resultado da sessão corrente (`GET /api/v1/auth/me`, passos 207/1117):
+ * - `ok`: a loja da sessão como o servidor a devolveu; `store` é `null` quando a resposta não a traz
+ *   — o cabeçalho fica sem loja e a venda não para por isso;
+ * - `{ ok: false }`: qualquer falha; o shell ignora (é rótulo, não operação).
+ */
+export type SessionOutcome =
+  | { ok: true; store: StoreView | null }
+  | { ok: false; problem: ApiProblem };
+
+/**
+ * Resultado da releitura da venda (`GET /api/v1/sales/{id}`, passo 812, usado pela reconciliação do
+ * 1117): a venda inteira como o servidor a tem agora, ou a falha que impede a releitura.
+ */
+export type SaleReloadOutcome =
+  | { ok: true; sale: SaleView }
+  | { ok: false; problem: ApiProblem };
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -387,6 +414,11 @@ export type TerminalApi = {
    * tela refaz depois de escolher o caixa (1107).
    */
   login(username: string, password: string, cashRegisterId?: string): Promise<LoginOutcome>;
+  /**
+   * Sessão corrente (`GET /api/v1/auth/me`, passo 207) só para o que o cabeçalho exibe (1117): a
+   * loja do operador. Falha não bloqueia nada — sem a resposta o cabeçalho fica sem loja.
+   */
+  currentSession(): Promise<SessionOutcome>;
   /**
    * Revoga a sessão provisória (`POST /auth/logout`, 204) e **esquece o token local mesmo se a
    * revogação falhar**: a sessão é descartável e o token revogado não pode sobrar para o próximo
@@ -427,6 +459,11 @@ export type TerminalApi = {
    * client (1102), uma por chamada.
    */
   createSale(): Promise<CreateSaleOutcome>;
+  /**
+   * Venda inteira do servidor (`GET /api/v1/sales/{id}`, passo 812): a releitura da reconciliação
+   * (1117), usada quando um 409 de idempotência/concorrência diz que o estado local não vale mais.
+   */
+  getSale(saleId: string): Promise<SaleReloadOutcome>;
   /**
    * Inclui o item pelo código **bruto** do bipe (BR-14): o servidor resolve GTIN, código interno ou
    * etiqueta de balança e soma na linha do produto que já está na venda (BR-01).
@@ -577,6 +614,25 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         };
       } catch (error) {
         return loginFailure(error);
+      }
+    },
+
+    async currentSession() {
+      try {
+        const response = await client.get<components['schemas']['CurrentSessionResponse']>(
+          '/api/v1/auth/me',
+        );
+        const store = response.store;
+
+        if (store === undefined || (store.name === undefined && store.code === undefined)) {
+          // sessão sem loja no contrato: o cabeçalho fica sem ela, a venda segue (1117)
+          return { ok: true, store: null };
+        }
+
+        return { ok: true, store: { code: store.code ?? '', name: store.name ?? '' } };
+      } catch (error) {
+        // rótulo do cabeçalho: a falha não bloqueia a operação (1117)
+        return { ok: false, problem: problemOf(error) };
       }
     },
 
@@ -753,6 +809,23 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         };
       } catch (error) {
         return sendFailure(error);
+      }
+    },
+
+    async getSale(saleId) {
+      try {
+        const sale = toSaleView(
+          await client.get<components['schemas']['SaleDetailResponse']>(`/api/v1/sales/${saleId}`),
+        );
+
+        if (sale === null) {
+          return { ok: false, problem: { status: 0, code: null, detail: 'venda sem id na resposta' } };
+        }
+
+        return { ok: true, sale };
+      } catch (error) {
+        // leitura da reconciliação: qualquer falha bloqueia com o problema do servidor (1117)
+        return { ok: false, problem: problemOf(error) };
       }
     },
 
@@ -998,7 +1071,7 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
 
         return { ok: true, closing: view };
       } catch (error) {
-        if (error instanceof ApiError && error.status < 500) {
+        if (error instanceof ApiError && error.status < 500 && !handledByShell(error)) {
           // a recusa fica na própria tela do fechamento: o operador lê o que fazer ali mesmo (1115)
           return { ok: false, kind: 'rejected', message: closeRejectionMessage(error) };
         }
@@ -1025,7 +1098,8 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
           error instanceof ApiError &&
           error.status < 500 &&
           error.status !== 404 &&
-          error.status !== 409
+          error.status !== 409 &&
+          !handledByShell(error)
         ) {
           // a recusa fica no modal do F4: 403 sem `sale.cancel` e 400 do motivo (1115)
           return { ok: false, kind: 'rejected', message: cancelSaleRejectionMessage(error) };
@@ -1056,6 +1130,17 @@ function loginFailure(error: unknown): LoginOutcome {
 
 function failed(problem: ApiProblem): { ok: false; kind: 'failed'; problem: ApiProblem } {
   return { ok: false, kind: 'failed', problem };
+}
+
+/**
+ * A falha que o mapa central (1117) manda para o shell, não para o modal: sessão caída (401) e os
+ * 409 de idempotência/concorrência — que exigem releitura do servidor — nunca são recusa do
+ * operador, mesmo nos fluxos que tratam todo 4xx como recusa da própria tela (gaveta, fechamento e
+ * cancelamento).
+ */
+function handledByShell(error: ApiError): boolean {
+  const kind = problemPolicy(problemOf(error)).kind;
+  return kind === 'session' || kind === 'reconcile';
 }
 
 /**
@@ -1165,21 +1250,13 @@ function isCustomerRejection(error: ApiError): boolean {
   return error.status === 403 || error.status === 422 || error.code === 'CUSTOMER_NOT_FOUND';
 }
 
-/** Mensagem da recusa: o 403 ganha texto fixo (sem expor o código da permissão); os demais já dizem o que fazer. */
+/** Mensagem da recusa: o 403 ganha texto fixo (sem expor o código da permissão); os códigos do cliente vêm do mapa central (1117). */
 function customerRejectionMessage(error: ApiError): string {
   if (error.status === 403) {
     return 'sem permissão para alterar o cliente da venda';
   }
 
-  if (error.code === 'CUSTOMER_NOT_FOUND') {
-    return 'cliente não encontrado — busque de novo';
-  }
-
-  if (error.code === 'CUSTOMER_INACTIVE') {
-    return 'cliente desativado no cadastro — escolha outro';
-  }
-
-  return error.detail;
+  return problemMessage(problemOf(error)) ?? error.detail;
 }
 
 /**
@@ -1191,21 +1268,12 @@ function isPaymentRejection(status: number): boolean {
   return status === 400 || status === 403 || status === 422;
 }
 
-/** Mensagens dos 422 de dinheiro: o operador precisa saber o que corrigir, sem ver o código do erro. */
-const PAYMENT_REJECTIONS: Readonly<Record<string, string>> = {
-  PAYMENT_INSUFFICIENT: 'pagamento insuficiente — registre o valor que falta',
-  PAYMENT_EXCEEDS_TOTAL: 'valor acima do que falta na venda — ajuste o valor',
-  INVALID_TENDERED_AMOUNT: 'valor recebido inválido — o dinheiro precisa cobrir o valor do pagamento',
-};
-
 /**
  * Recusa de dinheiro (1113): o 403 ganha o texto fixo de quem chamou (sem expor o código da
- * permissão) e os 422 do servidor têm mensagem própria; o resto mostra o `detail` dele.
+ * permissão) e os 422 do servidor têm a mensagem do mapa central (1117); o resto mostra o `detail`.
  */
 function moneyRejectionMessage(error: ApiError, forbidden: string): string {
-  return error.status === 403
-    ? forbidden
-    : (PAYMENT_REJECTIONS[error.code ?? ''] ?? error.detail);
+  return error.status === 403 ? forbidden : (problemMessage(problemOf(error)) ?? error.detail);
 }
 
 /** Rótulo pt-BR do movimento, nas mensagens do modal (F7/F8). */
@@ -1249,7 +1317,7 @@ async function cashMovement(
       },
     };
   } catch (error) {
-    if (error instanceof ApiError && error.status < 500) {
+    if (error instanceof ApiError && error.status < 500 && !handledByShell(error)) {
       return { ok: false, kind: 'rejected', message: cashMovementRejectionMessage(error, kind) };
     }
 
@@ -1259,23 +1327,15 @@ async function cashMovement(
 
 /**
  * Mensagem da recusa que fica no modal da gaveta: o 403 ganha texto fixo (o OPERADOR não tem
- * `cash.withdrawal`/`cash.supply`, BR-10) sem expor o código da permissão; a sessão de caixa que
- * mudou por fora tem texto próprio e o 400 do valor/motivo vem com o `detail` do servidor.
+ * `cash.withdrawal`/`cash.supply`, BR-10) sem expor o código da permissão; o 400 do valor/motivo e
+ * os códigos da sessão de caixa vêm do mapa central (1117).
  */
 function cashMovementRejectionMessage(error: ApiError, kind: CashMovementKind): string {
   if (error.status === 403) {
     return `sem permissão para registrar ${MOVEMENT_LABELS[kind]}`;
   }
 
-  if (error.code === 'CASH_SESSION_NOT_OPEN' || error.code === 'CASH_SESSION_REQUIRED') {
-    return 'caixa sem sessão aberta — fale com o gerente';
-  }
-
-  if (error.code === 'CASH_REGISTER_NOT_FOUND') {
-    return 'caixa não encontrado — verifique o cadastro';
-  }
-
-  return error.detail;
+  return problemMessage(problemOf(error)) ?? error.detail;
 }
 
 /**
@@ -1320,19 +1380,15 @@ function toClosingView(
 /**
  * Mensagem da recusa que fica na tela do fechamento: o 403 ganha texto fixo (o OPERADOR não tem
  * `cash.close`, BR-10) sem expor o código da permissão, e a venda em andamento — o único 409 que o
- * operador resolve sozinho — diz o que fazer (cancelar com o F4). O resto mostra o `detail` do
- * servidor, que já é pt-BR.
+ * operador resolve sozinho — diz o que fazer (cancelar com o F4), pela mensagem do mapa central
+ * (1117). O resto mostra o `detail` do servidor, que já é pt-BR.
  */
 function closeRejectionMessage(error: ApiError): string {
   if (error.status === 403) {
     return 'sem permissão para fechar o caixa';
   }
 
-  if (error.code === 'SESSION_HAS_OPEN_SALES') {
-    return 'há venda em andamento — cancele a venda (F4) antes de fechar';
-  }
-
-  return error.detail;
+  return problemMessage(problemOf(error)) ?? error.detail;
 }
 
 /** Mensagem da recusa do cancelamento: o 403 ganha texto fixo; o 400 do motivo diz o que corrigir. */

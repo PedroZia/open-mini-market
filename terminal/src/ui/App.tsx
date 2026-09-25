@@ -1,8 +1,9 @@
-import { useReducer, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
+import { withProblemGuard } from '../api/problemGuard';
 import type { CashMovementKind, CustomerOption, TerminalApi } from '../api/terminalApi';
 import { reduce } from '../core/reducer';
-import { initialState, type ApiProblem, type SaleView } from '../core/state';
+import { initialState, type ApiProblem, type SaleView, type State } from '../core/state';
 import { CancelSaleModal } from './CancelSaleModal';
 import { CashMovementModal } from './CashMovementModal';
 import { ClosingCashScreen } from './ClosingCashScreen';
@@ -61,9 +62,27 @@ import { useRawShortcuts } from './useRawShortcuts';
  * dos overlays que consultam a venda/servidor (1114/1115) e não abre com a tela de sucesso à vista,
  * onde o ENTER é dela. A consulta não cria venda nem toca na aberta: só lê o produto (código bruto
  * ou nome, quem decide é o servidor — BR-14) e o saldo (BR-12).
+ *
+ * O 1117 é a resiliência, e ela também é do shell: a API que as telas recebem é a **embrulhada**
+ * pela guarda (`withProblemGuard`), então sessão caída, idempotência reusada e conexão são
+ * observadas num lugar só — a política de cada `code` vem de `core/problems`. A sessão caída leva ao
+ * login com aviso e guarda a venda para o próximo login do mesmo caixa; o 409 de
+ * idempotência/concorrência relê a venda do servidor (`GET /sales/{id}`) em vez de repetir a
+ * operação; e o `online` da barra de status cai na falha de transporte e volta a cada resposta —
+ * inclusive nas telas que tratam o próprio rodapé. A loja do cabeçalho vem do `GET /auth/me`, uma
+ * vez por login, sem bloquear a venda se a chamada falhar.
  */
-export function App({ api }: { api: TerminalApi }) {
+export function App({ api: rawApi }: { api: TerminalApi }) {
   const [state, dispatch] = useReducer(reduce, initialState);
+  /** Conexão com o servidor (1117): cai na falha de transporte, volta a cada resposta dele. */
+  const [online, setOnline] = useState(true);
+  /** Loja do cabeçalho (`GET /auth/me`, 1117); `null` enquanto não chegou — ou se falhou. */
+  const [store, setStore] = useState<string | null>(null);
+  /** Estado corrente fora do render: a releitura da reconciliação lê a venda daqui (1117). */
+  const latest = useRef(state);
+  latest.current = state;
+  /** A loja é perguntada uma vez por login (1117), não a cada troca de tela. */
+  const storeAsked = useRef(false);
   /** Autoteste do leitor aberto sobre a venda: estado de UI, fora do reducer. */
   const [readerSelfTest, setReaderSelfTest] = useState(false);
   /** Modal de desconto aberto sobre a venda (1111): estado de UI, fora do reducer. */
@@ -84,6 +103,74 @@ export function App({ api }: { api: TerminalApi }) {
   const paymentRef = useRef<PaymentScreenHandle | null>(null);
   /** Handle da tela de venda: é por ele que o F3 do canal cru abre a confirmação do DEL (1115). */
   const saleRef = useRef<SaleScreenHandle | null>(null);
+
+  /**
+   * A API que as telas recebem é a embrulhada pela guarda (1117): toda chamada passa pela política
+   * central antes de virar tela. Os handlers fecham sobre `dispatch`, `setOnline` e `latest`, que são
+   * estáveis — a guarda só é refeita se a API injetada mudar (o teste troca o dublê).
+   */
+  const api = useMemo(
+    () =>
+      withProblemGuard(rawApi, {
+        onSession: (message) => dispatch({ type: 'sessionExpired', message }),
+        onReconcile: (saleId, message) => void reconcile(saleId, message),
+        onConnection: (next) => setOnline((current) => (current === next ? current : next)),
+      }),
+    [rawApi],
+  );
+
+  /**
+   * Loja do cabeçalho (`GET /auth/me`, 1117): uma vez por login, na entrada da operação. A falha
+   * não bloqueia a venda — o cabeçalho fica sem loja e o operador segue.
+   */
+  useEffect(() => {
+    if (state.kind === 'login') {
+      // login novo (logout, fechamento ou queda de sessão): a loja é perguntada de novo
+      storeAsked.current = false;
+      setStore(null);
+      return;
+    }
+
+    if (state.kind !== 'saleOpen' || storeAsked.current) {
+      return;
+    }
+
+    storeAsked.current = true;
+    void loadStore();
+  }, [state.kind]);
+
+  /** Lê a loja da sessão e guarda o rótulo do cabeçalho; falha ou loja ausente deixam `store` nulo. */
+  async function loadStore(): Promise<void> {
+    const outcome = await api.currentSession();
+
+    if (!outcome.ok || outcome.store === null) {
+      return;
+    }
+
+    setStore(outcome.store.name === '' ? outcome.store.code : outcome.store.name);
+  }
+
+  /**
+   * 409 de idempotência/concorrência (1117): nada é repetido às cegas — a venda é relida do
+   * servidor e o operador vê o estado de verdade, com o aviso do mapa central à vista.
+   */
+  async function reconcile(saleId: string | null, message: string): Promise<void> {
+    const id = saleId ?? currentSaleId(latest.current);
+
+    if (id === null) {
+      return;
+    }
+
+    const outcome = await api.getSale(id);
+
+    if (outcome.ok) {
+      dispatch({ type: 'saleReconciled', sale: outcome.sale, notice: message });
+      return;
+    }
+
+    // a própria releitura falhou: a falha dela é que decide (rede bloqueia, sessão volta ao login)
+    dispatch({ type: 'apiFailed', problem: outcome.problem });
+  }
 
   useRawShortcuts(
     (shortcut) => {
@@ -315,6 +402,8 @@ export function App({ api }: { api: TerminalApi }) {
           api={api}
           dispatch={dispatch}
           customer={customer}
+          store={store}
+          online={online}
         />
       );
     case 'paying':
@@ -332,4 +421,13 @@ export function App({ api }: { api: TerminalApi }) {
     case 'error':
       return <ErrorScreen problem={state.problem} dispatch={dispatch} />;
   }
+}
+
+/** A venda em cima da mesa agora — venda, pagamento ou fechamento —: o alvo da releitura (1117). */
+function currentSaleId(state: State): string | null {
+  if (state.kind === 'saleOpen' || state.kind === 'paying' || state.kind === 'closingCash') {
+    return state.sale?.id ?? null;
+  }
+
+  return null;
 }

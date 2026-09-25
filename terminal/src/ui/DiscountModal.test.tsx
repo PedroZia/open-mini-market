@@ -22,6 +22,8 @@ import type {
   CashSessionSummaryOutcome,
   CloseCashSessionOutcome,
   TerminalApi,
+  SaleReloadOutcome,
+  SessionOutcome,
 } from '../api/terminalApi';
 import type { SaleItemView, SaleView } from '../core/state';
 import { DiscountModal } from './DiscountModal';
@@ -72,7 +74,15 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
       async (): Promise<LoginOutcome> => ({ ok: false, kind: 'rejected', message: unused.detail }),
     ),
     logout: vi.fn(async () => undefined),
-    listCashRegisters: vi.fn(
+    // a loja do cabeçalho e a releitura da reconciliação (1117) fecham o contrato; os fluxos que
+    // precisam delas sobrescrevem no próprio teste
+    currentSession: vi.fn(async (): Promise<SessionOutcome> => ({ ok: true, store: null })),
+    getSale: vi.fn(
+      async (): Promise<SaleReloadOutcome> => ({
+        ok: false,
+        problem: { status: 404, code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' },
+      }),
+    ),    listCashRegisters: vi.fn(
       async (): Promise<CashRegistersOutcome> => ({ ok: true, registers: [] }),
     ),
     openCashRegister: vi.fn(
@@ -438,6 +448,64 @@ describe('DiscountModal', () => {
         value: 10,
         reason: 'cliente pedi',
       });
+    });
+  });
+});
+
+describe('DiscountModal: bipe do leitor no campo (1117)', () => {
+  test('rajada completa (código + ENTER no mesmo chunk) não preenche o valor nem aplica', async () => {
+    const applyDiscount = vi.fn(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: discounted(10) }),
+    );
+    const ui = renderModal(apiStub({ applyDiscount }));
+
+    ui.stdin.write('7891000100103\r'); // o bipe inteiro, terminador incluso
+
+    await expectFrame(ui.lastFrame, 'Valor: R$ 0,00'); // nada entrou no campo
+    expect(ui.lastFrame()).toContain('Desconto na venda (F5)');
+    expect(applyDiscount).not.toHaveBeenCalled();
+
+    // e o formulário continua utilizável: a digitação humana entra e aplica normalmente
+    ui.stdin.write('500');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 5,00');
+    await tabTo(ui, 'Motivo:');
+    ui.stdin.write('cliente pediu');
+    await expectFrame(ui.lastFrame, 'Motivo: cliente pediu');
+    ui.stdin.write('\r');
+
+    await vi.waitFor(() => {
+      expect(applyDiscount).toHaveBeenCalledWith(SALE_ID, {
+        type: 'VALUE',
+        value: 5,
+        reason: 'cliente pediu',
+      });
+    });
+  });
+
+  test('o TAB do bipe não troca de campo: a rajada é descartada inteira', async () => {
+    const ui = renderModal();
+
+    ui.stdin.write('7891000100103\t'); // leitura com TAB colado
+
+    await expectFrame(ui.lastFrame, '› Valor: R$ 0,00'); // o foco continua no valor
+    expect(ui.lastFrame()).not.toContain('› Motivo:');
+  });
+
+  test('o ENTER humano (digitado depois dos dígitos) continua aplicando', async () => {
+    const applyDiscount = vi.fn(
+      async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: discounted(10) }),
+    );
+    const ui = renderModal(apiStub({ applyDiscount }));
+
+    ui.stdin.write('1000');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 10,00');
+    await tabTo(ui, 'Motivo:');
+    ui.stdin.write('cliente pediu');
+    await expectFrame(ui.lastFrame, 'Motivo: cliente pediu');
+    ui.stdin.write('\r');
+
+    await vi.waitFor(() => {
+      expect(applyDiscount).toHaveBeenCalledTimes(1);
     });
   });
 });
