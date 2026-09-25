@@ -4,7 +4,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { withProblemGuard } from "../api/problemGuard"
 import type { TerminalApi } from "../api/terminalApi"
 import { reduce } from "../core/reducer"
-import { initialState } from "../core/state"
+import { initialState, type State } from "../core/state"
 import { useClock } from "./clock"
 import { ErrorScreen } from "./ErrorScreen"
 import { LoginScreen } from "./LoginScreen"
@@ -22,11 +22,11 @@ import { theme } from "./theme"
  * de verdade; o pagamento e o fechamento ainda não têm rota (1127).
  *
  * A API que as telas recebem é a embrulhada pela guarda (1117), como no App da Ink: sessão caída
- * (401) volta ao login com aviso, sem descartar a venda preservada. O login não produz os 409 de
- * idempotência/concorrência — a releitura da venda chega com o bipe (1125b), quando a tela de venda
- * passar a chamar a API —, então `onReconcile` ainda não tem o que reler e fica explícito para a
- * guarda não perder o desfecho no caminho; a conexão (`onConnection`) já alimenta a barra de status
- * da venda, e a loja do cabeçalho vem do `GET /auth/me` uma vez por login.
+ * (401) volta ao login com aviso, sem descartar a venda preservada, e o 409 de
+ * idempotência/concorrência é conferido no servidor (`getSale`) antes de qualquer repetição — o
+ * desfecho vira `saleReconciled` com o aviso, ou `apiFailed` quando a própria releitura falha. A
+ * conexão (`onConnection`) alimenta a barra de status da venda, e a loja do cabeçalho vem do
+ * `GET /auth/me` uma vez por login.
  *
  * O relógio do cabeçalho é **deste** shell (`useClock`, um tique por segundo): a tela recebe a hora
  * por prop, então o desenho dela é determinístico no teste e a hora não congela como na Ink.
@@ -39,14 +39,20 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
   const [store, setStore] = useState<string | null>(null)
   /** A loja é perguntada uma vez por login (1117), não a cada troca de tela. */
   const storeAsked = useRef(false)
+  /** Estado da última render: a releitura da reconciliação (1117) lê o id da venda daqui. */
+  const latest = useRef(state)
   /** Hora do cabeçalho da venda: o timer vive no shell e a tela só desenha o que recebe. */
   const now = useClock()
+
+  useEffect(() => {
+    latest.current = state
+  })
 
   const api = useMemo(
     () =>
       withProblemGuard(rawApi, {
         onSession: (message) => dispatch({ type: "sessionExpired", message }),
-        onReconcile: () => {},
+        onReconcile: (saleId, message) => void reconcile(saleId, message),
         onConnection: (next) => setOnline((current) => (current === next ? current : next)),
       }),
     [rawApi],
@@ -83,6 +89,28 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
     setStore(outcome.store.name === "" ? outcome.store.code : outcome.store.name)
   }
 
+  /**
+   * 409 de idempotência/concorrência (1117): nada é repetido às cegas — a venda é relida do
+   * servidor e o operador vê o estado de verdade, com o aviso do mapa central à vista. A falha da
+   * própria releitura é que decide o desfecho dela (rede bloqueia, sessão volta ao login).
+   */
+  async function reconcile(saleId: string | null, message: string): Promise<void> {
+    const id = saleId ?? currentSaleId(latest.current)
+
+    if (id === null) {
+      return
+    }
+
+    const outcome = await api.getSale(id)
+
+    if (outcome.ok) {
+      dispatch({ type: "saleReconciled", sale: outcome.sale, notice: message })
+      return
+    }
+
+    dispatch({ type: "apiFailed", problem: outcome.problem })
+  }
+
   if (state.kind === "login") {
     return (
       // o F12 (1118) ainda não existe na UI nova: o login nasce sem caixa preferido
@@ -95,8 +123,17 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
   }
 
   if (state.kind === "saleOpen") {
-    // o cliente vinculado (1112) e o `api`/`dispatch` da venda chegam no 1125b (bipe)
-    return <SaleScreen state={state} now={now} customer={null} store={store} online={online} />
+    return (
+      <SaleScreen
+        state={state}
+        api={api}
+        dispatch={dispatch}
+        now={now}
+        customer={null}
+        store={store}
+        online={online}
+      />
+    )
   }
 
   if (state.kind === "error") {
@@ -109,4 +146,13 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
       <text fg={theme.muted}>Tela ainda não migrada</text>
     </box>
   )
+}
+
+/** A venda em cima da mesa agora — venda, pagamento ou fechamento —: o alvo da releitura (1117). */
+function currentSaleId(state: State): string | null {
+  if (state.kind === "saleOpen" || state.kind === "paying" || state.kind === "closingCash") {
+    return state.sale?.id ?? null
+  }
+
+  return null
 }

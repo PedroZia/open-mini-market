@@ -1,19 +1,30 @@
 /** @jsxImportSource @opentui/react */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, spyOn, test } from "bun:test"
 import { testRender } from "@opentui/react/test-utils"
-import { act } from "react"
+import { act, useReducer } from "react"
 
-import type { CustomerOption } from "../api/terminalApi"
-import type { SaleItemView, SaleOpenState, SaleView } from "../core/state"
+import type {
+  AddSaleItemOutcome,
+  CreateSaleOutcome,
+  CustomerOption,
+  SendFailure,
+  SaleItemIntent,
+  TerminalApi,
+} from "../api/terminalApi"
+import type { Action } from "../core/reducer"
+import { reduce } from "../core/reducer"
+import type { ApiProblem, SaleItemView, SaleOpenState, SaleView } from "../core/state"
 import { SaleScreen } from "./SaleScreen"
 
 /**
- * Layout e lista da tela de venda (1125a): o quadro em 80×24 e 120×40, a janela que segue a seleção
- * (F-04), os totais que vêm do `state.sale` (BR-12) e a hora que entra por prop.
+ * Tela de venda: o layout do 1125a (o quadro em 80×24 e 120×40, a janela que segue a seleção, os
+ * totais que vêm do `state.sale` — BR-12 — e a hora que entra por prop) e a operação do 1125b — o
+ * bipe do leitor, a leitura digitada no campo, o multiplicador `3*`, o 404/422 com aviso, a falha
+ * transitória com retry no ENTER e o bell.
  *
- * A tela não chama a API neste passo — o bipe, a leitura manual e as mutações chegam no 1125b/c —,
- * então o teste monta o estado do reducer direto e dirige as teclas pelo `mockInput`. Nada de
- * cálculo de dinheiro no teste: as fixtures são o que o servidor devolveria (BR-12).
+ * O harness tem o reducer real (1103) por trás da tela, como o shell, e a camada de API dublada com
+ * `mock` (o runner do `src/opentui` é o `bun:test`): o que se testa é a operação da tela, nunca o
+ * HTTP (esse é do api-client).
  */
 
 /** Hora local fixa: o cabeçalho mostra `14:32:05` em qualquer fuso (o `getHours` é local). */
@@ -21,6 +32,36 @@ const NOW = new Date(2026, 8, 25, 14, 32, 5)
 
 const OPERADOR = { id: "u1", name: "Ana Souza" }
 const CAIXA = { id: "r1", name: "Caixa 01" }
+
+/** Venda que o `createSale` abre; o id é o mesmo que o `addSaleItem` recebe. */
+const SALE_ID = "sale-1"
+/** Código conhecido do bipe e o código que o servidor não resolve (404). */
+const BARCODE = "7891000100103"
+const MISSING = "7899999999999"
+
+/** Produto que o servidor devolveu para o bipe; os valores são os dele, a tela só exibe (BR-12). */
+const ARROZ: SaleItemView = {
+  productId: "p1",
+  name: "Arroz 5kg",
+  unit: "UN",
+  quantity: 1,
+  unitPrice: 24.9,
+  lineTotal: 24.9,
+}
+
+/** O mesmo produto com o multiplicador `3*` aplicado pelo servidor. */
+const ARROZ_3: SaleItemView = { ...ARROZ, quantity: 3, lineTotal: 74.7 }
+
+/** Texto do campo de leitura vazio (o placeholder do `<input>`), como o operador o vê. */
+const MANUAL_PLACEHOLDER = "bipe ou digite o código e ENTER"
+
+/** Problema que nenhum fluxo deste teste usa — os demais métodos só fecham o contrato. */
+const API_PROBLEM: ApiProblem = { status: 0, code: null, detail: "não usado neste teste" }
+
+/** Falha de envio do contrato (rede/5xx), como o `SendFailure` das telas de venda. */
+function sendFailure(): SendFailure {
+  return { ok: false, kind: "retryable", problem: API_PROBLEM }
+}
 
 /** Estado da operação como o reducer o entrega à tela, com a venda que o servidor devolveu. */
 function stateWith(sale: SaleView | null, extra: Partial<SaleOpenState> = {}): SaleOpenState {
@@ -52,19 +93,56 @@ function farmItems(count: number): SaleItemView[] {
   })
 }
 
-/** Venda do servidor; os totais só mudam quando o teste quer provar que a tela os exibe (BR-12). */
+/**
+ * Venda do servidor: por padrão os totais seguem as linhas, que é o que ele devolveria; os testes
+ * que querem provar que a tela exibe o total dele passam valores próprios (BR-12).
+ */
 function saleOf(items: SaleItemView[], totals: Partial<SaleView> = {}): SaleView {
+  const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0)
+
   return {
-    id: "sale-1",
+    id: SALE_ID,
     items,
-    subtotal: 0,
+    subtotal,
     discountAmount: 0,
-    total: 0,
+    total: subtotal,
     paidAmount: 0,
     changeAmount: 0,
     payments: [],
     customerId: null,
     ...totals,
+  }
+}
+
+/** Dublê da camada de API: só o que a venda usa importa; o resto existe para satisfazer o tipo. */
+function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
+  return {
+    login: mock(async () => ({ ok: false as const, kind: "rejected" as const, message: API_PROBLEM.detail })),
+    logout: mock(async () => undefined),
+    currentSession: mock(async () => ({ ok: true as const, store: null })),
+    listCashRegisters: mock(async () => ({ ok: true as const, registers: [] })),
+    openCashRegister: mock(async () => ({ ok: false as const, kind: "alreadyOpen" as const })),
+    currentCashSession: mock(async () => ({ ok: false as const, problem: API_PROBLEM })),
+    resolveBarcode: mock(async () => sendFailure()),
+    searchProducts: mock(async () => ({ ok: true as const, products: [] })),
+    productStock: mock(async () => sendFailure()),
+    createSale: mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleOf([]) })),
+    getSale: mock(async () => ({ ok: false as const, problem: API_PROBLEM })),
+    addSaleItem: mock(async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ]) })),
+    changeSaleItemQuantity: mock(async () => ({ ok: false as const, kind: "notFound" as const })),
+    removeSaleItem: mock(async () => ({ ok: false as const, kind: "notFound" as const })),
+    applyDiscount: mock(async () => sendFailure()),
+    searchCustomers: mock(async () => sendFailure()),
+    linkCustomer: mock(async () => sendFailure()),
+    unlinkCustomer: mock(async () => sendFailure()),
+    addPayment: mock(async () => sendFailure()),
+    completeSale: mock(async () => sendFailure()),
+    withdrawCash: mock(async () => sendFailure()),
+    supplyCash: mock(async () => sendFailure()),
+    cashSessionSummary: mock(async () => ({ ok: false as const, problem: API_PROBLEM })),
+    closeCashSession: mock(async () => sendFailure()),
+    cancelSale: mock(async () => sendFailure()),
+    ...overrides,
   }
 }
 
@@ -78,10 +156,13 @@ type RenderOptions = {
   online?: boolean
 }
 
+/** Tela pura do 1125a: o estado entra pronto e o `dispatch` é um dublê sem reducer. */
 function renderSale(state: SaleOpenState, options: RenderOptions = {}) {
   return testRender(
     <SaleScreen
       state={state}
+      api={apiStub()}
+      dispatch={mock(() => {})}
       now={NOW}
       customer={options.customer ?? null}
       store={options.store ?? null}
@@ -89,6 +170,53 @@ function renderSale(state: SaleOpenState, options: RenderOptions = {}) {
     />,
     { width: options.width ?? 80, height: options.height ?? 24 },
   )
+}
+
+/**
+ * Shell mínimo do teste (como o App faz): o reducer real (1103) por trás da tela. O `onAction` ouve
+ * o que a tela despacha — é por ele que o teste prova `saleUpdated` e `scanDismissed`.
+ */
+function SaleHarness({
+  api,
+  initial,
+  onAction,
+}: {
+  api: TerminalApi
+  initial: SaleOpenState
+  onAction?: (action: Action) => void
+}) {
+  const [state, dispatch] = useReducer(reduce, initial)
+
+  if (state.kind !== "saleOpen") {
+    throw new Error(`estado inesperado no harness da venda: ${state.kind}`)
+  }
+
+  return (
+    <SaleScreen
+      state={state}
+      api={api}
+      dispatch={(action) => {
+        onAction?.(action)
+        dispatch(action)
+      }}
+      now={NOW}
+      customer={null}
+      store={null}
+      online
+    />
+  )
+}
+
+/** Venda abrindo a operação de verdade: reducer real + API dublada, em 80×24 como o alvo. */
+function renderHarness(
+  api: TerminalApi,
+  initial: SaleOpenState = stateWith(null),
+  onAction?: (action: Action) => void,
+) {
+  return testRender(<SaleHarness api={api} initial={initial} onAction={onAction} />, {
+    width: 80,
+    height: 24,
+  })
 }
 
 /** Espera o frame alcançar o texto (a tela renderiza fora do passo da tecla que o causou). */
@@ -137,6 +265,26 @@ function itemLines(frame: string): string[] {
 async function pressArrow(setup: Setup, direction: "up" | "down"): Promise<void> {
   await act(async () => {
     setup.mockInput.pressArrow(direction)
+  })
+}
+
+/** Rajada do leitor: os caracteres chegam colados e o `\r` fecha o bipe, como no spike (1121). */
+async function scanReader(setup: Setup, code: string): Promise<void> {
+  await act(async () => {
+    await setup.mockInput.typeText(code)
+  })
+  await act(async () => {
+    setup.mockInput.pressEnter()
+  })
+}
+
+/** Leitura manual: o operador digita no campo a 60 ms por tecla (humano) e fecha no ENTER. */
+async function scanManual(setup: Setup, code: string): Promise<void> {
+  await act(async () => {
+    await setup.mockInput.typeText(code, 60)
+  })
+  await act(async () => {
+    setup.mockInput.pressEnter()
   })
 }
 
@@ -327,6 +475,227 @@ describe("SaleScreen: totais e cabeçalho (1125a)", () => {
 
       expect(frame).not.toContain("Cliente:")
     } finally {
+      setup.renderer.destroy()
+    }
+  })
+})
+
+describe("SaleScreen: bipe e leitura manual (1125b)", () => {
+  test("o bipe abre a venda, adiciona o item com o código bruto e confirma no rodapé", async () => {
+    const createSale = mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleOf([]) }))
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
+    )
+    const setup = await renderHarness(apiStub({ createSale, addSaleItem }))
+
+    try {
+      await scanReader(setup, BARCODE)
+
+      const frame = await expectFrame(setup, "adicionado: 1 x Arroz 5kg — R$ 24,90")
+
+      expect(createSale).toHaveBeenCalledTimes(1)
+      expect(addSaleItem).toHaveBeenCalledWith(SALE_ID, { barcode: BARCODE, quantity: 1 })
+      expect(frame).toContain("› 1 x Arroz 5kg — R$ 24,90")
+      expect(frame).toContain("TOTAL: R$ 24,90")
+      expectLayout(frame, 80, 24)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("a leitura digitada no campo vira item e o campo é limpo depois do ENTER", async () => {
+    const createSale = mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleOf([]) }))
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
+    )
+    const setup = await renderHarness(apiStub({ createSale, addSaleItem }))
+
+    try {
+      await scanManual(setup, BARCODE)
+
+      const frame = await expectFrame(setup, "adicionado: 1 x Arroz 5kg — R$ 24,90")
+
+      expect(createSale).toHaveBeenCalledTimes(1)
+      expect(addSaleItem).toHaveBeenCalledWith(SALE_ID, { barcode: BARCODE, quantity: 1 })
+      expect(frame).toContain("› 1 x Arroz 5kg — R$ 24,90")
+      expect(frame).not.toContain(BARCODE)
+      expect(frame).toContain(MANUAL_PLACEHOLDER) // o campo voltou a ficar vazio
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("3* antes do bipe manda quantidade 3 na mesma chamada", async () => {
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ_3]) }),
+    )
+    const setup = await renderHarness(apiStub({ addSaleItem }))
+
+    try {
+      // o `3` e o `*` são digitados devagar (80 ms): o `*` fecha o multiplicador do próximo bipe
+      await act(async () => {
+        await setup.mockInput.pressKeys(["3", "*"], 80)
+      })
+      await scanReader(setup, BARCODE)
+
+      await expectFrame(setup, "adicionado: 3 x Arroz 5kg — R$ 74,70")
+      expect(addSaleItem).toHaveBeenCalledWith(SALE_ID, { barcode: BARCODE, quantity: 3 })
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("3* digitado no campo vale como multiplicador da leitura manual", async () => {
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ_3]) }),
+    )
+    const setup = await renderHarness(apiStub({ addSaleItem }))
+
+    try {
+      await scanManual(setup, `3*${BARCODE}`)
+
+      const frame = await expectFrame(setup, "adicionado: 3 x Arroz 5kg — R$ 74,70")
+
+      expect(addSaleItem).toHaveBeenCalledWith(SALE_ID, { barcode: BARCODE, quantity: 3 })
+      expect(frame).not.toContain(`3*${BARCODE}`)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("404 avisa, não põe item na venda e o bipe é consumido", async () => {
+    const createSale = mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleOf([]) }))
+    const addSaleItem = mock(
+      async (_saleId: string, item: SaleItemIntent): Promise<AddSaleItemOutcome> =>
+        item.barcode === MISSING
+          ? { ok: false, kind: "notFound", barcode: MISSING }
+          : { ok: true, sale: saleOf([ARROZ]) },
+    )
+    const actions: Action[] = []
+    const setup = await renderHarness(apiStub({ createSale, addSaleItem }), stateWith(null), (action) =>
+      actions.push(action),
+    )
+
+    try {
+      await scanReader(setup, MISSING)
+
+      const frame = await expectFrame(
+        setup,
+        `produto não encontrado: ${MISSING} — cadastro rápido ainda não disponível`,
+      )
+
+      expect(actions).toContainEqual({ type: "scanDismissed" })
+      expect(frame).toContain("bipar o primeiro item para iniciar a venda") // a venda criada segue vazia
+      expect(frame).not.toContain("adicionado")
+
+      // o próximo bipe reusa a venda que o 404 abriu: nada é criado de novo (BR-11 não tem o que refazer)
+      await scanReader(setup, BARCODE)
+      const after = await expectFrame(setup, "adicionado: 1 x Arroz 5kg — R$ 24,90")
+
+      expect(createSale).toHaveBeenCalledTimes(1)
+      expect(after).toContain("› 1 x Arroz 5kg — R$ 24,90")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("422 avisa com a mensagem do servidor e a venda continua utilizável", async () => {
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: false,
+        kind: "rejected",
+        barcode: BARCODE,
+        message: "produto inativo no cadastro — fale com o gerente",
+      }),
+    )
+    const actions: Action[] = []
+    const setup = await renderHarness(apiStub({ addSaleItem }), stateWith(null), (action) =>
+      actions.push(action),
+    )
+
+    try {
+      await scanReader(setup, BARCODE)
+
+      const frame = await expectFrame(setup, "produto inativo no cadastro — fale com o gerente")
+
+      expect(actions).toContainEqual({ type: "scanDismissed" })
+      expect(frame).toContain("bipar o primeiro item para iniciar a venda")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("falha transitória mantém o bipe na fila e o ENTER refaz o envio", async () => {
+    let attempts = 0
+    const createSale = mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleOf([]) }))
+    const addSaleItem = mock(async (): Promise<AddSaleItemOutcome> => {
+      attempts += 1
+
+      return attempts === 1 ? sendFailure() : { ok: true, sale: saleOf([ARROZ]) }
+    })
+    const setup = await renderHarness(apiStub({ createSale, addSaleItem }))
+
+    try {
+      await scanReader(setup, BARCODE)
+
+      const failed = await expectFrame(setup, "falha ao enviar o bipe — ENTER tenta de novo")
+
+      expect(addSaleItem).toHaveBeenCalledTimes(1) // sem retry automático: o ENTER é sob demanda
+      expect(createSale).toHaveBeenCalledTimes(1)
+      expect(failed).not.toContain("adicionado")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+
+      const frame = await expectFrame(setup, "adicionado: 1 x Arroz 5kg — R$ 24,90")
+
+      expect(addSaleItem).toHaveBeenCalledTimes(2)
+      expect(addSaleItem).toHaveBeenLastCalledWith(SALE_ID, { barcode: BARCODE, quantity: 1 })
+      expect(createSale).toHaveBeenCalledTimes(1) // a venda do primeiro bipe é reaproveitada
+      expect(frame).toContain("› 1 x Arroz 5kg — R$ 24,90")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("a rajada do leitor não deixa o código no campo (o primeiro caractere é limpo no bipe)", async () => {
+    const setup = await renderHarness(apiStub())
+
+    try {
+      await scanReader(setup, BARCODE)
+
+      const frame = await expectFrame(setup, "adicionado: 1 x Arroz 5kg — R$ 24,90")
+
+      expect(frame).not.toContain(BARCODE)
+      expect(frame).not.toContain("7891000100")
+      expect(frame).toContain(MANUAL_PLACEHOLDER)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("o bipe aceito toca o bell e o 404 não toca", async () => {
+    const bell = spyOn(process.stdout, "write")
+    const bells = () => bell.mock.calls.filter(([chunk]) => chunk === "\u0007").length
+    const addSaleItem = mock(
+      async (_saleId: string, item: SaleItemIntent): Promise<AddSaleItemOutcome> =>
+        item.barcode === MISSING
+          ? { ok: false, kind: "notFound", barcode: MISSING }
+          : { ok: true, sale: saleOf([ARROZ]) },
+    )
+    const setup = await renderHarness(apiStub({ addSaleItem }))
+
+    try {
+      await scanReader(setup, BARCODE)
+      await expectFrame(setup, "adicionado: 1 x Arroz 5kg — R$ 24,90")
+      expect(bells()).toBe(1)
+
+      await scanReader(setup, MISSING)
+      await expectFrame(setup, `produto não encontrado: ${MISSING}`)
+      expect(bells()).toBe(1) // o aviso não toca o bell
+    } finally {
+      bell.mockRestore()
       setup.renderer.destroy()
     }
   })

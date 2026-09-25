@@ -1089,7 +1089,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes de layout em 80×24 e 120×40 (lista com itens do estado, seleção por setas com clamp, scroll que segue o item selecionado, relógio que anda, totais do estado); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): monta a tela de venda em OpenTUI`
 
-- [ ] **1125b — Bipe e leitura manual**
+- [x] **1125b — Bipe e leitura manual**
   **Objetivo:** vender pelo código na UI nova (F-01). **Depende:** 1125a
   **Implementar:** `<input>` de leitura manual sempre visível + rajada do leitor interceptada globalmente (hook do 1123b) com limpeza do campo no bipe; abertura da venda no primeiro bipe e envio do item (fila, retry no ENTER, feedback e bell); multiplicador `3*`; 404 com aviso (o cadastro rápido é o 1128).
   **Testes/aceite:** bipe adiciona item e abre a venda, digitação manual funciona, `3*` vira quantidade 3, produto não encontrado avisa, falha transitória guarda o bipe e o ENTER refaz; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

@@ -1,21 +1,28 @@
 /** @jsxImportSource @opentui/react */
-import { TextAttributes, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
+import {
+  TextAttributes,
+  type InputRenderable,
+  type KeyEvent,
+  type ScrollBoxRenderable,
+  type SubmitEvent,
+} from "@opentui/core"
 import { useRenderer, useTerminalDimensions } from "@opentui/react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type Dispatch } from "react"
 
-import type { CustomerOption } from "../api/terminalApi"
+import type { CustomerOption, SendFailure, TerminalApi } from "../api/terminalApi"
 import { formatAmount } from "../core/money"
-import { moveSelection, selectionIndex } from "../core/sale"
-import type { SaleItemView, SaleOpenState } from "../core/state"
+import type { Action } from "../core/reducer"
+import { moveSelection, selectionIndex, touchedItem } from "../core/sale"
+import { createScanner, type Scanner, type ScannerEvent } from "../core/scanner"
+import type { SaleItemView, SaleOpenState, SaleView, ScanIntent } from "../core/state"
 import { useGlobalKeyboard } from "./keyboard"
 import { theme } from "./theme"
 
 /**
- * Tela de venda (passos 1108 a 1110, §11.3) montada na UI nova (1125a): o layout do operador —
+ * Tela de venda (passos 1108 a 1110, §11.3) montada na UI nova (1125a/1125b): o layout do operador —
  * cabeçalho com loja, caixa, operador, hora e cliente, lista dos itens com o selecionado destacado,
- * painel de totais e barra de status com conexão e atalhos. O que a tela faz neste passo é o layout
- * e a navegação: o bipe e a leitura manual chegam no 1125b (com a fila de envio e o `api`/`dispatch`
- * que eles exigem), a quantidade do item no 1125c e os modais no 1126.
+ * campo de leitura sempre visível, painel de totais e barra de status — e a operação do F-01: vender
+ * pelo código, bipado ou digitado.
  *
  * A tela não calcula nada (BR-12): subtotal, desconto e total saem de `state.sale`, como o servidor
  * mandou; antes do primeiro bipe a venda é `null` e a tela mostra os zeros de exibição com o convite
@@ -26,6 +33,21 @@ import { theme } from "./theme"
  * para o mesmo `customerId`; o vínculo real é o do servidor. A loja também é rótulo: vem do
  * `GET /auth/me`, uma vez por login, e sem ela o cabeçalho segue.
  *
+ * Teclado (§11.3): a rajada do leitor é interceptada pelo **hook global** (1123b) antes de qualquer
+ * campo focado e chega pelo `onBarcode` com o código **bruto** e a quantidade do multiplicador
+ * (BR-14); desta tela, o `onKey` consome as setas e o ENTER do retry, e o resto segue o caminho
+ * normal do hook. O campo de leitura é a leitura **manual**: o ENTER entrega o texto ao mesmo
+ * `core/scanner` como uma rajada sintética (caracteres + `\r` no mesmo instante, com o `n*` valendo
+ * como multiplicador), então digitar o código vale tanto quanto bipá-lo. O que a rajada do leitor
+ * deixou no campo é limpo no bipe — o primeiro caractere chega antes de o `\r` fechar a leitura.
+ *
+ * O envio é uma fila local (`queueRef`) drenada pelo `pump`, um bipe por vez, na ordem em que
+ * chegaram: sem venda criada, o primeiro bipe abre a venda (`POST /sales`) e o item entra em
+ * seguida; sucesso vira `saleUpdated`, com a confirmação no rodapé e o bell; 404/422 avisam e o bipe
+ * é consumido (`scanDismissed`); falha transitória mantém o bipe no topo e o ENTER refaz; bloqueante
+ * vai para a tela de erro (`apiFailed`). A trava de mutação de item e o cadastro rápido do 404 são
+ * dos passos seguintes (1125c/1126/1128).
+ *
  * A lista é do `<scrollbox>` (F-04): em vez do `slice(-10)` da Ink — onde a seleção podia sair da
  * área visível e `+`/`-`/DEL agiam em item invisível —, a janela rola atrás do item selecionado e o
  * que ficou acima vira a linha "… N itens acima". A seleção é **local da tela** (não vai ao
@@ -33,16 +55,20 @@ import { theme } from "./theme"
  * ciclo, como na Ink. O topo da janela é calculado no `saleWindow` e aplicado com `scrollTo`, então
  * a contagem acima e o que está à vista são o mesmo número.
  *
- * O quadro tem regiões fixas em 80×24 (cabeçalho, lista, totais, rodapé de **uma** linha e barra de
- * status): nada sobe ou desce quando o feedback ou o aviso aparecem — a "tela que dança" do
- * diagnóstico. O aviso do shell (1117) tem linha reservada acima da lista; a barra de status leva a
- * conexão e o caixa/operador/hora, com os atalhos (§11.3) logo abaixo.
+ * O quadro tem regiões fixas em 80×24 (cabeçalho, lista, campo de leitura, totais, rodapé de
+ * **uma** linha e barra de status): nada sobe ou desce quando o feedback ou o aviso aparecem — a
+ * "tela que dança" do diagnóstico. O aviso do shell (1117) tem linha reservada acima da lista; a
+ * barra de status leva a conexão e o caixa/operador/hora, com os atalhos (§11.3) logo abaixo.
  */
 export type SaleScreenProps = {
   /** Estado do reducer: operador, caixa e a venda como o servidor devolveu (1103). */
   state: SaleOpenState
   /** Hora do cabeçalho: `useClock` no shell; data fixa no teste. */
   now: Date
+  /** Camada de API injetada: dublê no teste, instância única no app. */
+  api: TerminalApi
+  /** Despacho do shell; toda transição nasce no reducer. */
+  dispatch: Dispatch<Action>
   /** Cliente vinculado com o nome que a busca local capturou (1112); `null` na venda anônima. */
   customer: CustomerOption | null
   /** Loja do cabeçalho (`GET /auth/me`, 1117); `null` quando não chegou — o cabeçalho segue sem ela. */
@@ -62,8 +88,8 @@ const MIN_ITEM_ROWS = 3
 
 /**
  * Linhas fixas fora da lista em 80×24: cabeçalho 2 (título e operador/hora), aviso 1 (linha
- * reservada: quando o recado chega, nada desce), vazias 2, totais 3, rodapé 1 (feedback), conexão 1
- * e atalhos 3. Cliente e contagem entram como linhas extras.
+ * reservada: quando o recado chega, nada desce), vazia 1, campo de leitura 1, totais 3, rodapé 1
+ * (feedback), conexão 1 e atalhos 3. Cliente e contagem entram como linhas extras.
  */
 const FIXED_ROWS = 13
 
@@ -74,13 +100,56 @@ const SHORTCUT_ROWS = [
   "F11 Autoteste do leitor · F12 Trocar operador · ↑↓ itens · +/- qtd · DEL remove",
 ]
 
-export function SaleScreen({ state, now, customer, store, online }: SaleScreenProps) {
+/** Falha transitória do envio: o bipe fica na fila e o ENTER refaz (§11.3, retry manual). */
+const SEND_FAILURE_NOTICE = "falha ao enviar o bipe — ENTER tenta de novo"
+
+/** Dica do campo de leitura: o bipe não precisa ser digitado, mas o campo é o caminho manual (F-01). */
+const MANUAL_PLACEHOLDER = "bipe ou digite o código e ENTER"
+
+/** `n*` no começo do texto digitado: o multiplicador do próximo bipe (regra do `core/scanner`). */
+const MANUAL_MULTIPLIER = /^(\d+)\*/
+
+/**
+ * Intervalo sintético entre os dígitos e o `*` do multiplicador na leitura manual: é o mesmo limiar
+ * da rajada (`core/scanner`), então o `*` chega "devagar" e vale como multiplicador, não como
+ * conteúdo do código (BR-14).
+ */
+const MANUAL_MULTIPLIER_GAP_MS = 50
+
+/** Estado do rodapé: o desfecho da última operação, em uma linha só para o frame caber nas 24. */
+type Feedback =
+  | { kind: "success"; text: string }
+  | { kind: "notice"; text: string }
+  | { kind: "failure"; text: string }
+
+export function SaleScreen({ state, now, api, dispatch, customer, store, online }: SaleScreenProps) {
   const renderer = useRenderer()
   const { height } = useTerminalDimensions()
   /** Item selecionado: `null` acompanha o último; as setas fixam o índice (1108/1110). */
   const [selected, setSelected] = useState<number | null>(null)
   /** O scrollbox não é focado: quem rola a janela é a seleção desta tela. */
   const scrollRef = useRef<ScrollBoxRenderable | null>(null)
+  /** Campo de leitura manual: o único renderable focado — a rajada do leitor passa por cima dele. */
+  const inputRef = useRef<InputRenderable | null>(null)
+  /** Buffer da leitura manual (o do leitor é do hook global): alimentado no ENTER do campo. */
+  const [manualScanner] = useState(createScanner)
+  /** Bipes fechados aguardando envio, na ordem em que chegaram: nenhum bipe se perde. */
+  const queueRef = useRef<ScanIntent[]>([])
+  /** Um envio por vez; quem já está enviando pega a fila atualizada, não empilha chamadas. */
+  const sendingRef = useRef(false)
+  /** Estado da última render: o `pump` roda fora do render e lê o id da venda daqui. */
+  const latest = useRef(state)
+  /** Texto do campo de leitura manual: o bipe e o ENTER o limpam (o renderable também é zerado). */
+  const [manual, setManual] = useState("")
+  /** Desfecho da última operação no rodapé: verde no sucesso, amarelo no aviso, vermelho na falha. */
+  const [feedback, setFeedback] = useState<Feedback | null>(null)
+
+  useEffect(() => {
+    latest.current = state
+  })
+
+  /** Teclado da tela no hook global: as setas (seleção) e o ENTER do retry; o bipe chega no `onBarcode`. */
+  useGlobalKeyboard({ onBarcode: handleBarcode, onKey: handleKey })
 
   const sale = state.sale
   const items = sale?.items ?? []
@@ -95,8 +164,6 @@ export function SaleScreen({ state, now, customer, store, online }: SaleScreenPr
   const extraRows = customerName === null ? 0 : 1
   const room = Math.max(MIN_ITEM_ROWS, height - FIXED_ROWS - extraRows)
   const { top, rows } = saleWindow(room, items.length, selectedIndex)
-
-  useGlobalKeyboard({ onKey: handleKey })
 
   /**
    * A janela segue a seleção (F-04): rola até o topo calculado — cada item ocupa uma linha, então o
@@ -114,24 +181,173 @@ export function SaleScreen({ state, now, customer, store, online }: SaleScreenPr
   }, [renderer, top])
 
   /**
-   * Teclado da venda (1125a): só as setas, que movem a seleção com clamp nas pontas. O resto
-   * devolve `false` e segue o caminho normal do hook global — o bipe e a leitura manual são do 1125b.
+   * Teclado da venda (1125a/1125b): as setas movem a seleção com clamp nas pontas — consumidas, não
+   * chegam ao campo de leitura — e o ENTER refaz o bipe que ficou na fila depois de uma falha
+   * transitória. O resto devolve `false` e segue o caminho normal do hook global: o texto do campo
+   * (a leitura manual) e a rajada do leitor.
    */
   function handleKey(event: KeyEvent): boolean {
     if (event.eventType === "release") {
       return false
     }
 
-    if (event.name !== "up" && event.name !== "down") {
-      return false
+    if (event.name === "up" || event.name === "down") {
+      if (items.length === 0) {
+        return true // lista vazia: não há seleção a mover (o `moveSelection` do core devolveria -1)
+      }
+
+      setSelected((current) => moveSelection(current, event.name === "up" ? -1 : 1, items.length))
+      return true
     }
 
-    if (items.length === 0) {
-      return true // lista vazia: não há seleção a mover (o `moveSelection` do core devolveria -1)
+    // com uma falha de envio à vista, o ENTER refaz a chamada do bipe que ficou na fila
+    if (event.name === "return" && feedback?.kind === "failure") {
+      void pump()
+      return true
     }
 
-    setSelected((current) => moveSelection(current, event.name === "up" ? -1 : 1, items.length))
-    return true
+    return false
+  }
+
+  /**
+   * Bipe do leitor (1123b): a rajada já foi interceptada antes do campo, então aqui o evento entra
+   * na fila e o envio começa. O primeiro caractere da rajada pode ter entrado no campo antes de o
+   * `\r` fechar a leitura (achado do spike) — por isso o campo é zerado no bipe.
+   */
+  function handleBarcode(scan: ScannerEvent): void {
+    clearManual()
+    enqueue({ barcode: scan.barcode, quantity: scan.quantity })
+  }
+
+  /** Fila + intenção no reducer: o bipe fica pendente até o servidor responder e o envio é o `pump`. */
+  function enqueue(scan: ScanIntent): void {
+    queueRef.current.push(scan)
+    dispatch({ type: "barcodeScanned", barcode: scan.barcode, quantity: scan.quantity })
+    void pump()
+  }
+
+  /** Limpa o campo de leitura: o `value` do renderable (pode ter recebido a rajada) e o estado dele. */
+  function clearManual(): void {
+    if (inputRef.current !== null) {
+      inputRef.current.value = ""
+    }
+
+    setManual("")
+  }
+
+  /**
+   * ENTER do campo de leitura: o texto digitado é uma leitura (F-01) e entra no `core/scanner` como
+   * a rajada do leitor — o `n*` do operador vira o multiplicador, então `3*` funciona digitado como
+   * funciona bipado. O código segue **bruto** (BR-14) e o campo sai limpo para a próxima leitura.
+   */
+  function submitManual(value: string | SubmitEvent): void {
+    const text = typeof value === "string" ? value : ""
+    clearManual()
+
+    if (text === "") {
+      return
+    }
+
+    // um caractere sozinho não é leitura (a mesma regra do `MIN_BURST_LENGTH` do scanner)
+    const scan = feedManualText(manualScanner, text)
+    if (scan === null) {
+      return
+    }
+
+    enqueue({ barcode: scan.barcode, quantity: scan.quantity })
+  }
+
+  /**
+   * Envia a fila de bipes, um por vez, na ordem em que chegaram:
+   *
+   * - sem venda criada, abre a venda primeiro (`POST /sales`, 201) e registra o id no reducer — é o
+   *   item que faz a venda existir de fato; o id fica no estado para o próximo bipe reutilizar
+   *   (inclusive quando a venda nasceu vazia por causa de um 404);
+   * - cada bipe vira `POST /sales/{id}/items` com o código **bruto** e a quantidade do
+   *   multiplicador (BR-14); dois bipes do mesmo produto viram duas chamadas e quem soma é o
+   *   servidor (BR-01);
+   * - sucesso: `saleUpdated` (limpa o pendente), linha de confirmação e bell;
+   * - 404/422: aviso na tela e o bipe é consumido (`scanDismissed`) sem mexer na venda;
+   * - falha transitória (rede, timeout, 5xx): o bipe fica no topo da fila e o ENTER refaz;
+   * - falha bloqueante (403/400/contrato): vai para a tela de erro guardando a venda; o 409 de
+   *   idempotência/concorrência fica na tela e quem relê o estado é o shell (1117).
+   */
+  async function pump(): Promise<void> {
+    if (sendingRef.current) {
+      return // já tem envio em andamento: ele pega o que está na fila
+    }
+
+    sendingRef.current = true
+
+    try {
+      let saleId = latest.current.sale?.id ?? null
+
+      for (;;) {
+        const scan = queueRef.current[0]
+        if (scan === undefined) {
+          return
+        }
+
+        // o bipe que está indo à API é o pendente do reducer
+        dispatch({ type: "barcodeScanned", barcode: scan.barcode, quantity: scan.quantity })
+
+        if (saleId === null) {
+          const created = await api.createSale()
+          if (!created.ok) {
+            sendFailed(created)
+            return
+          }
+
+          saleId = created.sale.id
+          dispatch({ type: "saleUpdated", sale: created.sale })
+        }
+
+        const added = await api.addSaleItem(saleId, scan)
+
+        if (added.ok) {
+          queueRef.current.shift()
+          setFeedback({
+            kind: "success",
+            text: describeAdded(touchedItem(latest.current.sale, added.sale)),
+          })
+          dispatch({ type: "saleUpdated", sale: added.sale })
+          process.stdout.write("\u0007") // bell: o produto entrou na venda
+          continue
+        }
+
+        if (added.kind === "notFound") {
+          queueRef.current.shift()
+          setFeedback({
+            kind: "notice",
+            text: `produto não encontrado: ${added.barcode} — cadastro rápido ainda não disponível`,
+          })
+          dispatch({ type: "scanDismissed" })
+          continue
+        }
+
+        if (added.kind === "rejected") {
+          queueRef.current.shift()
+          setFeedback({ kind: "notice", text: added.message })
+          dispatch({ type: "scanDismissed" })
+          continue
+        }
+
+        sendFailed(added)
+        return
+      }
+    } finally {
+      sendingRef.current = false
+    }
+  }
+
+  /** Falha de envio: transitória segura a operação para o retry; bloqueante vai para a tela de erro. */
+  function sendFailed(failure: SendFailure): void {
+    if (failure.kind === "retryable") {
+      setFeedback({ kind: "failure", text: SEND_FAILURE_NOTICE })
+      return
+    }
+
+    dispatch({ type: "apiFailed", problem: failure.problem })
   }
 
   return (
@@ -160,15 +376,30 @@ export function SaleScreen({ state, now, customer, store, online }: SaleScreenPr
           ))
         )}
       </scrollbox>
-      <text> </text>
+      {/* leitura manual (F-01): o campo fica sempre à vista e focado; a rajada do leitor passa por
+          cima dele (o hook global intercepta antes) e o bipe o limpa */}
+      <box height={1} flexDirection="row">
+        <text fg={theme.muted} wrapMode="none">
+          {"Código: "}
+        </text>
+        <input
+          ref={inputRef}
+          focused
+          flexGrow={1}
+          placeholder={MANUAL_PLACEHOLDER}
+          value={manual}
+          onInput={setManual}
+          onSubmit={submitManual}
+        />
+      </box>
       <text wrapMode="none">{`Subtotal: ${formatAmount(sale?.subtotal ?? 0)}`}</text>
       <text wrapMode="none">{`Desconto: ${formatAmount(sale?.discountAmount ?? 0)}`}</text>
       <text attributes={TextAttributes.BOLD} wrapMode="none">
         {`TOTAL: ${formatAmount(sale?.total ?? 0)}`}
       </text>
-      {/* rodapé de uma linha: o desfecho da última operação (bipe, quantidade, remoção) entra aqui a
-          partir do 1125b; a linha já fica reservada para o quadro não dançar quando ele aparecer */}
-      <text> </text>
+      {/* rodapé de uma linha: o desfecho da última operação (bipe aceito, 404/422, falha de envio);
+          a linha fica reservada mesmo sem feedback para o quadro não dançar quando ele aparece */}
+      {feedback === null ? <text> </text> : <FeedbackRow feedback={feedback} />}
       {/* barra de status base: conexão, caixa/operador/hora (1117) e, abaixo, os atalhos da operação */}
       <text fg={online ? theme.success : theme.danger} wrapMode="none">
         {`Conexão: ${online ? "conectado" : "SEM CONEXÃO"} · ${state.register.name} · ${state.operator.name} · ${formatTime(now)}`}
@@ -180,6 +411,57 @@ export function SaleScreen({ state, now, customer, store, online }: SaleScreenPr
       ))}
     </box>
   )
+}
+
+/** Rodapé: verde no bipe aceito, amarelo no aviso (404/422) e vermelho na falha que pede retry. */
+function FeedbackRow({ feedback }: { feedback: Feedback }) {
+  const color =
+    feedback.kind === "failure" ? theme.danger : feedback.kind === "notice" ? theme.warning : theme.success
+
+  return (
+    <text fg={color} wrapMode="none">
+      {feedback.text}
+    </text>
+  )
+}
+
+/** Confirmação do bipe: o item que o servidor devolveu, com nome, quantidade e valor (BR-12). */
+function describeAdded(item: SaleItemView | null): string {
+  if (item === null) {
+    return "item adicionado"
+  }
+
+  return `adicionado: ${formatQuantity(item.quantity)} x ${item.name} — ${formatAmount(item.lineTotal)}`
+}
+
+/**
+ * Alimenta o scanner com a leitura **digitada** (F-01): os caracteres e o `\r` entram no mesmo
+ * instante, como uma rajada do leitor, e o `n*` do operador vira o multiplicador do bipe.
+ *
+ * O `*` só vale como multiplicador quando chega com o intervalo humano (`>= 50 ms`): na velocidade
+ * da rajada ele é conteúdo do código (BR-14). Por isso o prefixo `n*` é alimentado com o intervalo
+ * sintético de `MANUAL_MULTIPLIER_GAP_MS` e o código fecha a rajada no instante seguinte — o
+ * `core/scanner` continua sendo a única fonte da regra; aqui só se emula o timing da digitação.
+ */
+function feedManualText(scanner: Scanner, text: string): ScannerEvent | null {
+  const at = performance.now()
+  const prefix = MANUAL_MULTIPLIER.exec(text)
+  const code = prefix === null ? text : text.slice(prefix[0].length)
+  const codeAt = prefix === null ? at : at + MANUAL_MULTIPLIER_GAP_MS
+
+  if (prefix !== null) {
+    for (const char of prefix[1] ?? "") {
+      scanner.feed(char, at)
+    }
+
+    scanner.feed("*", codeAt)
+  }
+
+  for (const char of code) {
+    scanner.feed(char, codeAt)
+  }
+
+  return scanner.feed("\r", codeAt)
 }
 
 /** Linha de um item: o selecionado vai destacado — sem seta, o último, como no 1108 da Ink. */

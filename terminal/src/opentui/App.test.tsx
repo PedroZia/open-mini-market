@@ -4,19 +4,22 @@ import { testRender } from "@opentui/react/test-utils"
 import { act } from "react"
 
 import type {
+  AddSaleItemOutcome,
   CashRegisterOption,
   CashRegistersOutcome,
+  CreateSaleOutcome,
   LoginOutcome,
+  SaleReloadOutcome,
   TerminalApi,
 } from "../api/terminalApi"
-import type { ApiProblem } from "../core/state"
+import type { ApiProblem, SaleItemView, SaleView } from "../core/state"
 import { App } from "./App"
 
 /**
- * Shell roteador do 1124a/1124b com o reducer de verdade (não o dublê) e a guarda de problemas
+ * Shell roteador do 1124a/1124b/1125a com o reducer de verdade (não o dublê) e a guarda de problemas
  * (1117) no caminho: o que se testa é a fiação — login → abertura de caixa, erro bloqueante que
- * reconhece e volta, recusa que fica na tela de entrada e 401 que volta ao login com o aviso —,
- * nunca o HTTP (esse é do api-client).
+ * reconhece e volta, recusa que fica na tela de entrada, 401 que volta ao login com o aviso e o 409
+ * de idempotência que relê a venda (1125b) —, nunca o HTTP (esse é do api-client).
  */
 
 const OPERADOR = { id: "u1", name: "Ana Souza" }
@@ -43,6 +46,33 @@ const API_PROBLEM: ApiProblem = { status: 0, code: null, detail: "não usado nes
 /** Falha de envio do contrato (rede/5xx), como o `SendFailure` das telas de venda. */
 function sendFailure(): { ok: false; kind: "retryable"; problem: ApiProblem } {
   return { ok: false, kind: "retryable", problem: API_PROBLEM }
+}
+
+/** Item que o servidor já tinha gravado quando o 409 chegou (a releitura da reconciliação). */
+const ARROZ: SaleItemView = {
+  productId: "p1",
+  name: "Arroz 5kg",
+  unit: "UN",
+  quantity: 1,
+  unitPrice: 24.9,
+  lineTotal: 24.9,
+}
+
+/** Venda como o servidor a devolve: os totais seguem as linhas, que é o que ele mandaria (BR-12). */
+function saleWith(items: SaleItemView[]): SaleView {
+  const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0)
+
+  return {
+    id: "sale-1",
+    items,
+    subtotal,
+    discountAmount: 0,
+    total: subtotal,
+    paidAmount: 0,
+    changeAmount: 0,
+    payments: [],
+    customerId: null,
+  }
 }
 
 /** Leitura que falha: sessão corrente, resumo do fechamento e releitura da venda. */
@@ -273,6 +303,70 @@ describe("App (1124a/1124b/1125a)", () => {
         await new Promise((resolve) => setTimeout(resolve, 50))
       })
       await expectFrame(setup, "PDV minimercado — entrada do operador")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("409 de idempotência relê a venda do servidor e avisa, sem repetir a inclusão", async () => {
+    const createSale = mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleWith([]) }))
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: false,
+        kind: "failed",
+        problem: {
+          status: 409,
+          code: "IDEMPOTENCY_KEY_REUSED",
+          detail: "chave de idempotência já usada com outra requisição",
+        },
+      }),
+    )
+    // a releitura: o item que a inclusão já tinha gravado com a chave antiga
+    const getSale = mock(async (): Promise<SaleReloadOutcome> => ({ ok: true, sale: saleWith([ARROZ]) }))
+    const setup = await renderApp(
+      apiStub({
+        openCashRegister: mock(async () => ({ ok: true as const, sessionId: "s1" })),
+        createSale,
+        addSaleItem,
+        getSale,
+      }),
+    )
+
+    try {
+      await signIn(setup)
+      await expectFrame(setup, "Escolha o caixa")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+      await expectFrame(setup, "Abertura de caixa")
+
+      await act(async () => {
+        await setup.mockInput.typeText("5000")
+      })
+      await expectFrame(setup, "Fundo de troco: R$ 50,00")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+      await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      // o bipe do leitor: a rajada fecha no ENTER e a inclusão esbarra no 409 de idempotência
+      await act(async () => {
+        await setup.mockInput.typeText("7891000100103")
+      })
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+
+      const frame = await expectFrame(
+        setup,
+        "operação já registrada com outros dados — venda conferida no servidor",
+      )
+
+      expect(getSale).toHaveBeenCalledWith("sale-1")
+      expect(addSaleItem).toHaveBeenCalledTimes(1) // a inclusão não foi repetida
+      expect(frame).toContain("› 1 x Arroz 5kg — R$ 24,90") // a venda é a que o servidor tem
     } finally {
       setup.renderer.destroy()
     }
