@@ -1143,7 +1143,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste do fluxo "desconhecido → cadastra → item na venda" e recusa no modal; o E2E com o cadastro rápido entra na reescrita do 1130 (a Ink não recebe recurso novo); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): cadastra produto rapido pelo PDV`
 
-- [ ] **1129a — Diagnóstico do leitor (puro)**
+- [x] **1129a — Diagnóstico do leitor (puro)**
   **Objetivo:** classificar o transporte do leitor a partir das leituras. **Depende:** 1128
   **Implementar:** módulo puro em `src/opentui/` (`core/` fica congelado, §3) com o histórico das 5 últimas leituras e o diagnóstico: rajada lenta (intervalo ≥ 50 ms), sem terminador, suspeita de layout e erro do servidor (`code`); a entrada é a leitura (caracteres + tempos + terminador) e o desfecho da resolução.
   **Testes/aceite:** testes puros de cada diagnóstico e do histórico (5, ordem, leitura nova empurra a antiga); `bun test src/opentui` e `tsc --noEmit` verdes.
