@@ -1113,7 +1113,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** busca e lista com setas no F2; desconto aplicado com o recálculo do servidor, recusa e retry no F5; ESC fecha; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta consulta de preco e desconto`
 
-- [ ] **1126c — Modais: cliente e troca de operador**
+- [x] **1126c — Modais: cliente e troca de operador**
   **Objetivo:** portar F6 e F12. **Depende:** 1126b
   **Implementar:** F6 cliente (busca, vincular e remover vínculo) e F12 trocar operador (bloqueia com venda aberta, confirmação, caixa preferido no login seguinte).
   **Testes/aceite:** vincular/desvincular com o nome no cabeçalho; F12 sem venda confirma, com venda aberta bloqueia e o ENTER decide; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

@@ -8,10 +8,13 @@ import type {
   AddSaleItemOutcome,
   ApplyDiscountOutcome,
   BarcodeLookupOutcome,
+  CancelSaleOutcome,
   CreateSaleOutcome,
   CustomerOption,
+  CustomerSaleOutcome,
   ProductOption,
   ProductStockOutcome,
+  SearchCustomersOutcome,
   SearchProductsOutcome,
   SendFailure,
   SaleItemIntent,
@@ -80,6 +83,10 @@ const BANANA: SaleItemView = {
   unitPrice: 5.99,
   lineTotal: 7.19,
 }
+
+/** Clientes que a busca do F6 devolve (1126c): um com CPF (que a lista mascara) e outro sem. */
+const ANA: CustomerOption = { id: "c1", name: "Ana Souza", taxId: "12345678900" }
+const BRUNO: CustomerOption = { id: "c2", name: "Bruno Lima", taxId: null }
 
 /** Texto do campo de leitura vazio (o placeholder do `<input>`), como o operador o vê. */
 const MANUAL_PLACEHOLDER = "bipe ou digite o código e ENTER"
@@ -183,10 +190,14 @@ type RenderOptions = {
   customer?: CustomerOption | null
   store?: string | null
   online?: boolean
-  /** Dublê da API quando o teste precisa observar as chamadas dele (os modais do 1126b). */
+  /** Dublê da API quando o teste precisa observar as chamadas dele (os modais do 1126b/1126c). */
   api?: TerminalApi
   /** `dispatch` observável: prova o que a tela relatou ao reducer sem trocar de tela. */
   dispatch?: (action: Action) => void
+  /** Anotação local do cliente (F6, 1126c): prova o que a tela devolveu ao shell. */
+  onCustomerChanged?: (customer: CustomerOption | null) => void
+  /** Sessão encerrada pelo F12 (1126c): prova que a tela avisou o shell para voltar ao login. */
+  onOperatorSwitched?: () => void
 }
 
 /** Tela pura do 1125a: o estado entra pronto e o `dispatch` é um dublê sem reducer. */
@@ -200,6 +211,8 @@ function renderSale(state: SaleOpenState, options: RenderOptions = {}) {
       customer={options.customer ?? null}
       store={options.store ?? null}
       online={options.online ?? true}
+      onCustomerChanged={options.onCustomerChanged ?? mock(() => {})}
+      onOperatorSwitched={options.onOperatorSwitched ?? mock(() => {})}
     />,
     { width: options.width ?? 80, height: options.height ?? 24 },
   )
@@ -207,16 +220,21 @@ function renderSale(state: SaleOpenState, options: RenderOptions = {}) {
 
 /**
  * Shell mínimo do teste (como o App faz): o reducer real (1103) por trás da tela. O `onAction` ouve
- * o que a tela despacha — é por ele que o teste prova `saleUpdated` e `scanDismissed`.
+ * o que a tela despacha — é por ele que o teste prova `saleUpdated` e `scanDismissed` — e o
+ * `onCustomerChanged`/`onOperatorSwitched` fazem o papel das anotações locais do `App` (1126c).
  */
 function SaleHarness({
   api,
   initial,
   onAction,
+  onCustomerChanged,
+  onOperatorSwitched,
 }: {
   api: TerminalApi
   initial: SaleOpenState
   onAction?: (action: Action) => void
+  onCustomerChanged?: (customer: CustomerOption | null) => void
+  onOperatorSwitched?: () => void
 }) {
   const [state, dispatch] = useReducer(reduce, initial)
 
@@ -236,6 +254,8 @@ function SaleHarness({
       customer={null}
       store={null}
       online
+      onCustomerChanged={onCustomerChanged ?? mock(() => {})}
+      onOperatorSwitched={onOperatorSwitched ?? mock(() => {})}
     />
   )
 }
@@ -245,11 +265,21 @@ function renderHarness(
   api: TerminalApi,
   initial: SaleOpenState = stateWith(null),
   onAction?: (action: Action) => void,
+  effects: Pick<RenderOptions, "onCustomerChanged" | "onOperatorSwitched"> = {},
 ) {
-  return testRender(<SaleHarness api={api} initial={initial} onAction={onAction} />, {
-    width: 80,
-    height: 24,
-  })
+  return testRender(
+    <SaleHarness
+      api={api}
+      initial={initial}
+      onAction={onAction}
+      onCustomerChanged={effects.onCustomerChanged}
+      onOperatorSwitched={effects.onOperatorSwitched}
+    />,
+    {
+      width: 80,
+      height: 24,
+    },
+  )
 }
 
 /** Espera o frame alcançar o texto (a tela renderiza fora do passo da tecla que o causou). */
@@ -1820,6 +1850,496 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
 
       expect(back).toContain("TOTAL: R$ 24,90")
       expect(applyDiscount).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+})
+
+describe("SaleScreen: modais — cliente e troca de operador (1126c)", () => {
+  test("F6 busca o termo digitado e o ENTER vincula o selecionado, com CPF mascarado na lista", async () => {
+    const searchCustomers = mock(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [ANA, BRUNO] }),
+    )
+    const linked = saleOf([ARROZ], { customerId: BRUNO.id })
+    const linkCustomer = mock(async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: linked }))
+    const actions: Action[] = []
+    const onCustomerChanged = mock((customer: CustomerOption | null) => {
+      void customer
+    })
+    const setup = await renderHarness(
+      apiStub({ searchCustomers, linkCustomer }),
+      stateWith(saleOf([ARROZ])),
+      (action) => actions.push(action),
+      { onCustomerChanged },
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F6)
+
+      const opened = await expectFrame(setup, "Cliente na venda (F6)")
+
+      expect(opened).toContain("digite o nome ou o CPF e ENTER busca")
+      expect(opened).toContain("ENTER busca · DEL remove o vínculo · ESC fecha")
+
+      // ENTER com o campo vazio: a dica fica no modal e nada vai à API
+      await pressEnter(setup)
+      await expectFrame(setup, "informe o nome ou o CPF do cliente")
+      expect(searchCustomers).not.toHaveBeenCalled()
+
+      await typeHuman(setup, "ana")
+      await expectFrame(setup, "Busca: ana")
+      await pressEnter(setup)
+
+      const list = await expectFrame(setup, "› Ana Souza — 123.456.789-00")
+
+      expect(list).toContain("Bruno Lima") // sem CPF no cadastro a linha fica só com o nome
+      expect(list).toContain("↑↓ escolhe · ENTER vincula · DEL remove · ESC fecha")
+      expect(searchCustomers).toHaveBeenCalledWith("ana") // o termo vai como o operador digitou (BR-12)
+
+      await pressArrow(setup, "down")
+      await expectFrame(setup, "› Bruno Lima")
+
+      await pressArrow(setup, "down") // clamp na ponta: a seleção não sai da lista
+      await expectFrame(setup, "› Bruno Lima")
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "cliente: Bruno Lima")
+
+      expect(linkCustomer).toHaveBeenCalledWith(SALE_ID, "c2")
+      expect(onCustomerChanged).toHaveBeenCalledWith(BRUNO)
+      expect(actions).toContainEqual({ type: "saleUpdated", sale: linked })
+      expect(frame).not.toContain("Cliente na venda (F6)") // o modal saiu de cena
+      expect(frame).toContain("› 1 x Arroz 5kg — R$ 24,90")
+      expectLayout(frame, 80, 24)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F6: o DEL remove o vínculo e a venda volta anônima", async () => {
+    const anonymous = saleOf([ARROZ])
+    const unlinkCustomer = mock(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: anonymous }),
+    )
+    const onCustomerChanged = mock((customer: CustomerOption | null) => {
+      void customer
+    })
+    const setup = await renderSale(stateWith(saleOf([ARROZ], { customerId: ANA.id })), {
+      api: apiStub({ unlinkCustomer }),
+      customer: ANA,
+      onCustomerChanged,
+    })
+
+    try {
+      const before = await expectFrame(setup, "Cliente: Ana Souza")
+
+      expect(before).not.toContain("Cliente na venda (F6)")
+
+      await pressNamed(setup, KeyCodes.F6)
+
+      const opened = await expectFrame(setup, "Cliente atual: Ana Souza")
+
+      expect(opened).toContain("ENTER busca · DEL remove o vínculo · ESC fecha")
+
+      await pressNamed(setup, KeyCodes.DELETE)
+
+      const frame = await expectFrame(setup, "cliente removido da venda")
+
+      expect(unlinkCustomer).toHaveBeenCalledWith(SALE_ID)
+      expect(onCustomerChanged).toHaveBeenCalledWith(null)
+      expect(frame).not.toContain("Cliente na venda (F6)")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F6 sem vínculo: o DEL só avisa e nada vai à API", async () => {
+    const unlinkCustomer = mock(async (): Promise<CustomerSaleOutcome> => sendFailure())
+    const setup = await renderHarness(apiStub({ unlinkCustomer }), stateWith(saleOf([ARROZ])))
+
+    try {
+      await pressNamed(setup, KeyCodes.F6)
+      await expectFrame(setup, "Cliente na venda (F6)")
+
+      await pressNamed(setup, KeyCodes.DELETE)
+
+      const frame = await expectFrame(setup, "nenhum cliente vinculado para remover")
+
+      expect(frame).toContain("Cliente na venda (F6)") // o modal fica à vista
+      expect(unlinkCustomer).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F6: a recusa do servidor fica no modal e a falha transitória pede o ENTER de novo", async () => {
+    const searchCustomers = mock(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [ANA] }),
+    )
+    const linkCustomer = mock(
+      async (): Promise<CustomerSaleOutcome> => ({
+        ok: false,
+        kind: "rejected",
+        message: "cliente inativo",
+      }),
+    )
+    const setup = await renderHarness(
+      apiStub({ searchCustomers, linkCustomer }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F6)
+      await typeHuman(setup, "ana")
+      await pressEnter(setup)
+      await expectFrame(setup, "› Ana Souza — 123.456.789-00")
+
+      await pressEnter(setup)
+
+      const refused = await expectFrame(setup, "cliente inativo")
+
+      expect(refused).toContain("Cliente na venda (F6)") // a recusa não fecha o modal
+      expect(refused).toContain("Busca: ana") // nem perde o termo e a lista
+      expect(refused).toContain("› Ana Souza — 123.456.789-00")
+      expect(linkCustomer).toHaveBeenCalledTimes(1)
+
+      await pressEnter(setup) // a mesma tecla continua tentando: quem recusou foi o servidor
+      await until(() => linkCustomer.mock.calls.length === 2)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F6: falha transitória do vínculo e da remoção ficam no modal com o retry na mesma tecla", async () => {
+    const searchCustomers = mock(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [ANA] }),
+    )
+    const linkCustomer = mock(async (): Promise<CustomerSaleOutcome> => sendFailure())
+    const unlinkCustomer = mock(async (): Promise<CustomerSaleOutcome> => sendFailure())
+    const setup = await renderSale(stateWith(saleOf([ARROZ], { customerId: ANA.id })), {
+      api: apiStub({ searchCustomers, linkCustomer, unlinkCustomer }),
+      customer: ANA,
+    })
+
+    try {
+      await pressNamed(setup, KeyCodes.F6)
+      await typeHuman(setup, "ana")
+      await pressEnter(setup)
+      await expectFrame(setup, "› Ana Souza — 123.456.789-00")
+
+      await pressEnter(setup)
+
+      const linked = await expectFrame(setup, "falha ao vincular — ENTER tenta de novo")
+
+      expect(linked).toContain("Cliente na venda (F6)")
+      expect(linkCustomer).toHaveBeenCalledTimes(1)
+
+      await pressEnter(setup)
+      await until(() => linkCustomer.mock.calls.length === 2)
+
+      await pressNamed(setup, KeyCodes.DELETE)
+
+      const removed = await expectFrame(setup, "falha ao remover — DEL tenta de novo")
+
+      expect(removed).toContain("Cliente atual: Ana Souza")
+      expect(unlinkCustomer).toHaveBeenCalledTimes(1)
+
+      await pressNamed(setup, KeyCodes.DELETE)
+      await until(() => unlinkCustomer.mock.calls.length === 2)
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).not.toContain("Cliente na venda (F6)") // ESC fecha sem chamar mais nada
+      expect(linkCustomer).toHaveBeenCalledTimes(2)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F6: a rajada do leitor não vira termo nem vincula (o terminador não é o ENTER)", async () => {
+    const searchCustomers = mock(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [ANA] }),
+    )
+    const linkCustomer = mock(async (): Promise<CustomerSaleOutcome> => sendFailure())
+    const setup = await renderHarness(
+      apiStub({ searchCustomers, linkCustomer }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F6)
+      await expectFrame(setup, "Cliente na venda (F6)")
+      await waitMs(60) // o operador parou de digitar: o primeiro caractere do bipe não é rajada
+
+      await act(async () => {
+        await setup.mockInput.typeText(BARCODE) // os caracteres, todos em rajada
+        setup.mockInput.pressEnter() // e o terminador colado neles
+      })
+
+      const frame = await expectFrame(setup, "Cliente na venda (F6)")
+
+      expect(frame).toContain("Busca: ") // o bipe não preencheu o campo
+      expect(frame).not.toContain(BARCODE)
+      expect(searchCustomers).not.toHaveBeenCalled()
+      expect(linkCustomer).not.toHaveBeenCalled()
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).toContain("Subtotal: R$ 24,90") // a venda ficou como estava
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F12 sem venda: o F6 não abre e a troca confirma direto, sem cancelar nada", async () => {
+    const cancelSale = mock(async (): Promise<CancelSaleOutcome> => ({ ok: true }))
+    const logout = mock(async () => undefined)
+    const onOperatorSwitched = mock(() => {})
+    const setup = await renderHarness(apiStub({ cancelSale, logout }), stateWith(null), undefined, {
+      onOperatorSwitched,
+    })
+
+    try {
+      await pressNamed(setup, KeyCodes.F6)
+
+      const frame = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(frame).not.toContain("Cliente na venda (F6)") // sem venda não há onde vincular (como o F5)
+
+      await pressNamed(setup, KeyCodes.F12)
+
+      const opened = await expectFrame(setup, "Trocar operador (F12)")
+
+      expect(opened).toContain("a sessão de login termina; o caixa continua aberto")
+      expect(opened).toContain("ENTER troca de operador · ESC volta")
+      expect(opened).not.toContain("há venda aberta")
+
+      await pressEnter(setup)
+
+      await until(() => onOperatorSwitched.mock.calls.length > 0)
+
+      expect(cancelSale).not.toHaveBeenCalled()
+      expect(logout).toHaveBeenCalledTimes(1)
+      expect(onOperatorSwitched).toHaveBeenCalledTimes(1)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F12 com venda aberta: bloqueia o ENTER e o ESC volta sem chamar nada", async () => {
+    const order: string[] = []
+    const cancelSale = mock(async (): Promise<CancelSaleOutcome> => {
+      order.push("cancelSale")
+      return { ok: true }
+    })
+    const logout = mock(async () => {
+      order.push("logout")
+    })
+    const onOperatorSwitched = mock(() => {
+      order.push("switched")
+    })
+    const setup = await renderSale(stateWith(saleOf([ARROZ])), {
+      api: apiStub({ cancelSale, logout }),
+      onOperatorSwitched,
+    })
+
+    try {
+      await pressNamed(setup, KeyCodes.F12)
+
+      const opened = await expectFrame(setup, "Trocar operador (F12)")
+
+      expect(opened).toContain("há venda aberta com 1 item — a venda será cancelada")
+      expect(opened).toContain("ENTER cancela a venda e troca de operador · ESC volta")
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(back).not.toContain("Trocar operador (F12)")
+      expect(cancelSale).not.toHaveBeenCalled()
+      expect(logout).not.toHaveBeenCalled()
+      expect(onOperatorSwitched).not.toHaveBeenCalled()
+
+      await pressNamed(setup, KeyCodes.F12)
+      await expectFrame(setup, "Trocar operador (F12)")
+      await pressEnter(setup)
+
+      await until(() => onOperatorSwitched.mock.calls.length > 0)
+
+      // a venda é cancelada antes de a sessão terminar; o motivo é fixo (BR-04)
+      expect(order).toEqual(["cancelSale", "logout", "switched"])
+      expect(cancelSale).toHaveBeenCalledWith(SALE_ID, "troca de operador", expect.any(String))
+      expect(await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")).not.toContain(
+        "Trocar operador (F12)",
+      )
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F12: a recusa do cancelamento fica no modal com a venda intacta e nada de logout", async () => {
+    const cancelSale = mock(
+      async (): Promise<CancelSaleOutcome> => ({
+        ok: false,
+        kind: "rejected",
+        message: "sem permissão para cancelar a venda",
+      }),
+    )
+    const logout = mock(async () => undefined)
+    const onOperatorSwitched = mock(() => {})
+    const setup = await renderHarness(
+      apiStub({ cancelSale, logout }),
+      stateWith(saleOf([ARROZ])),
+      undefined,
+      { onOperatorSwitched },
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F12)
+      await expectFrame(setup, "Trocar operador (F12)")
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "sem permissão para cancelar a venda")
+
+      expect(frame).toContain("Trocar operador (F12)") // a recusa não fecha o modal
+      expect(logout).not.toHaveBeenCalled()
+      expect(onOperatorSwitched).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F12: falha transitória do cancelamento pede o ENTER de novo com a mesma chave", async () => {
+    const attempts: Array<[string, string, string]> = []
+    const cancelSale = mock(
+      async (saleId: string, reason: string, key: string): Promise<CancelSaleOutcome> => {
+        attempts.push([saleId, reason, key])
+        return sendFailure()
+      },
+    )
+    const logout = mock(async () => undefined)
+    const onOperatorSwitched = mock(() => {})
+    const setup = await renderHarness(
+      apiStub({ cancelSale, logout }),
+      stateWith(saleOf([ARROZ])),
+      undefined,
+      { onOperatorSwitched },
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F12)
+      await expectFrame(setup, "Trocar operador (F12)")
+
+      await pressEnter(setup)
+      await expectFrame(setup, "falha ao cancelar a venda — ENTER tenta de novo")
+
+      await pressEnter(setup)
+      await until(() => attempts.length === 2)
+
+      // a tentativa é a mesma: a chave reusada faz uma resposta perdida virar replay, não um 2º cancelamento
+      expect(attempts[0]?.[2]).toBeString()
+      expect(attempts[1]?.[2]).toBe(attempts[0]?.[2])
+      expect(attempts[1]?.[1]).toBe("troca de operador")
+      expect(logout).not.toHaveBeenCalled()
+      expect(onOperatorSwitched).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F6: falha bloqueante do vínculo vai para a tela de erro com o modal fechado", async () => {
+    const problem: ApiProblem = {
+      status: 404,
+      code: "SALE_NOT_FOUND",
+      detail: "venda não encontrada",
+    }
+    const dispatch = dispatchSpy()
+    const searchCustomers = mock(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [ANA] }),
+    )
+    const linkCustomer = mock(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: false, kind: "failed", problem }),
+    )
+    const setup = await renderSale(stateWith(saleOf([ARROZ])), {
+      api: apiStub({ searchCustomers, linkCustomer }),
+      dispatch,
+    })
+
+    try {
+      await pressNamed(setup, KeyCodes.F6)
+      await typeHuman(setup, "ana")
+      await pressEnter(setup)
+      await expectFrame(setup, "› Ana Souza — 123.456.789-00")
+      await pressEnter(setup)
+
+      await until(() => dispatch.mock.calls.length > 0)
+
+      expect(dispatch).toHaveBeenCalledWith({ type: "apiFailed", problem })
+      expect(await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")).not.toContain(
+        "Cliente na venda (F6)",
+      )
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F12 com venda aberta: falha bloqueante do cancelamento vai para a tela de erro", async () => {
+    const problem: ApiProblem = {
+      status: 409,
+      code: "SALE_NOT_OPEN",
+      detail: "venda já não está aberta",
+    }
+    const dispatch = dispatchSpy()
+    const cancelSale = mock(
+      async (): Promise<CancelSaleOutcome> => ({ ok: false, kind: "failed", problem }),
+    )
+    const setup = await renderSale(stateWith(saleOf([ARROZ])), {
+      api: apiStub({ cancelSale }),
+      dispatch,
+    })
+
+    try {
+      await pressNamed(setup, KeyCodes.F12)
+      await pressEnter(setup)
+
+      await until(() => dispatch.mock.calls.length > 0)
+
+      expect(dispatch).toHaveBeenCalledWith({ type: "apiFailed", problem })
+      expect(await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")).not.toContain(
+        "Trocar operador (F12)",
+      )
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F12: a rajada do leitor não decide a troca (o terminador não é o ENTER)", async () => {
+    const cancelSale = mock(async (): Promise<CancelSaleOutcome> => ({ ok: true }))
+    const logout = mock(async () => undefined)
+    const setup = await renderHarness(apiStub({ cancelSale, logout }), stateWith(saleOf([ARROZ])))
+
+    try {
+      await pressNamed(setup, KeyCodes.F12)
+      await expectFrame(setup, "Trocar operador (F12)")
+      await waitMs(60)
+
+      await act(async () => {
+        await setup.mockInput.typeText(BARCODE)
+        setup.mockInput.pressEnter()
+      })
+
+      const frame = await expectFrame(setup, "Trocar operador (F12)")
+
+      expect(frame).toContain("há venda aberta com 1 item — a venda será cancelada")
+      expect(cancelSale).not.toHaveBeenCalled()
+      expect(logout).not.toHaveBeenCalled()
     } finally {
       setup.renderer.destroy()
     }

@@ -1,15 +1,20 @@
 /** @jsxImportSource @opentui/react */
 import { describe, expect, mock, test } from "bun:test"
+import { KeyCodes } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
 import { act } from "react"
 
 import type {
   AddSaleItemOutcome,
+  CancelSaleOutcome,
   CashRegisterOption,
   CashRegistersOutcome,
   CreateSaleOutcome,
+  CustomerOption,
+  CustomerSaleOutcome,
   LoginOutcome,
   SaleReloadOutcome,
+  SearchCustomersOutcome,
   TerminalApi,
 } from "../api/terminalApi"
 import type { ApiProblem, SaleItemView, SaleView } from "../core/state"
@@ -59,7 +64,7 @@ const ARROZ: SaleItemView = {
 }
 
 /** Venda como o servidor a devolve: os totais seguem as linhas, que é o que ele mandaria (BR-12). */
-function saleWith(items: SaleItemView[]): SaleView {
+function saleWith(items: SaleItemView[], customerId: string | null = null): SaleView {
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0)
 
   return {
@@ -71,9 +76,12 @@ function saleWith(items: SaleItemView[]): SaleView {
     paidAmount: 0,
     changeAmount: 0,
     payments: [],
-    customerId: null,
+    customerId,
   }
 }
+
+/** Cliente que a busca do F6 devolve (1126c): o nome do cabeçalho é esta seleção local. */
+const ANA: CustomerOption = { id: "c1", name: "Ana Souza", taxId: "12345678900" }
 
 /** Leitura que falha: sessão corrente, resumo do fechamento e releitura da venda. */
 function failure(): { ok: false; problem: ApiProblem } {
@@ -149,6 +157,45 @@ async function signIn(setup: Setup): Promise<void> {
   await act(async () => {
     setup.mockInput.pressEnter()
   })
+}
+
+/** ENTER do operador (formulários, escolhas e confirmações). */
+async function pressEnter(setup: Setup): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressEnter()
+  })
+}
+
+/** Tecla nomeada (F6, F12, DEL): o `mockInput` emite a sequência do terminal. */
+async function pressNamed(setup: Setup, key: string): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressKey(key)
+  })
+}
+
+/** Bipe do leitor: a rajada fecha no ENTER, como no spike (1121). */
+async function bip(setup: Setup, code: string): Promise<void> {
+  await act(async () => {
+    await setup.mockInput.typeText(code)
+  })
+  await pressEnter(setup)
+}
+
+/** Operação de pé: login, caixa escolhido, fundo de troco e a venda aberta no primeiro bipe. */
+async function enterSale(setup: Setup): Promise<void> {
+  await signIn(setup)
+  await expectFrame(setup, "Escolha o caixa")
+
+  await pressEnter(setup)
+  await expectFrame(setup, "Abertura de caixa")
+
+  await act(async () => {
+    await setup.mockInput.typeText("5000")
+  })
+  await expectFrame(setup, "Fundo de troco: R$ 50,00")
+
+  await pressEnter(setup)
+  await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
 }
 
 describe("App (1124a/1124b/1125a)", () => {
@@ -367,6 +414,149 @@ describe("App (1124a/1124b/1125a)", () => {
       expect(getSale).toHaveBeenCalledWith("sale-1")
       expect(addSaleItem).toHaveBeenCalledTimes(1) // a inclusão não foi repetida
       expect(frame).toContain("› 1 x Arroz 5kg — R$ 24,90") // a venda é a que o servidor tem
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+})
+
+describe("App: cliente e troca de operador (1126c)", () => {
+  /** Abertura de caixa e venda pelo bipe, como o 1125b; o resto do dublê fica por conta do teste. */
+  function saleStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
+    return apiStub({
+      openCashRegister: mock(async () => ({ ok: true as const, sessionId: "s1" })),
+      createSale: mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleWith([]) })),
+      addSaleItem: mock(
+        async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleWith([ARROZ]) }),
+      ),
+      ...overrides,
+    })
+  }
+
+  test("F6 vincula o cliente e o nome aparece no cabeçalho; o DEL o remove", async () => {
+    const searchCustomers = mock(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [ANA] }),
+    )
+    const linkCustomer = mock(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: saleWith([ARROZ], ANA.id) }),
+    )
+    const unlinkCustomer = mock(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: saleWith([ARROZ]) }),
+    )
+    const setup = await renderApp(saleStub({ searchCustomers, linkCustomer, unlinkCustomer }))
+
+    try {
+      await enterSale(setup)
+      await bip(setup, "7891000100103")
+
+      const anonymous = await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      expect(anonymous).not.toContain("Cliente:")
+
+      await pressNamed(setup, KeyCodes.F6)
+
+      const opened = await expectFrame(setup, "Cliente na venda (F6)")
+
+      expect(opened).not.toContain("bipar o primeiro item para iniciar a venda") // o corpo saiu de cena
+
+      await act(async () => {
+        await setup.mockInput.typeText("ana", 60) // digitação humana: a rajada seria descartada
+      })
+      await expectFrame(setup, "Busca: ana")
+      await pressEnter(setup)
+      await expectFrame(setup, "› Ana Souza — 123.456.789-00")
+
+      await pressEnter(setup)
+
+      const linked = await expectFrame(setup, "Cliente: Ana Souza")
+
+      expect(linkCustomer).toHaveBeenCalledWith("sale-1", "c1")
+      expect(linked).not.toContain("Cliente na venda (F6)") // o modal saiu de cena
+
+      // o DEL do modal tira o vínculo: a venda volta anônima e o nome sai do cabeçalho
+      await pressNamed(setup, KeyCodes.F6)
+      await expectFrame(setup, "Cliente atual: Ana Souza")
+      await pressNamed(setup, KeyCodes.DELETE)
+
+      const unlinked = await expectFrame(setup, "cliente removido da venda")
+
+      expect(unlinkCustomer).toHaveBeenCalledWith("sale-1")
+      expect(unlinked).not.toContain("Cliente: Ana Souza")
+      expect(unlinked).toContain("› 1 x Arroz 5kg — R$ 24,90")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F12 sem venda encerra a sessão e o login nasce com o caixa atual selecionado", async () => {
+    const logout = mock(async () => undefined)
+    const setup = await renderApp(saleStub({ logout }))
+
+    try {
+      await enterSale(setup)
+
+      // o login vinculado já revogou a sessão provisória (1107): o F12 revoga a de verdade
+      const provisional = logout.mock.calls.length
+
+      await pressNamed(setup, KeyCodes.F12)
+
+      const opened = await expectFrame(setup, "Trocar operador (F12)")
+
+      expect(opened).toContain("a sessão de login termina; o caixa continua aberto")
+      expect(opened).not.toContain("há venda aberta")
+
+      await pressEnter(setup)
+
+      const login = await expectFrame(setup, "PDV minimercado — entrada do operador")
+
+      expect(logout.mock.calls.length).toBe(provisional + 1)
+      expect(login).not.toContain("TOTAL:") // a venda saiu de cena
+
+      // o próximo operador entra no **mesmo** caixa: a lista nasce com o Caixa 01 selecionado
+      await typeCredentials(setup)
+      await pressEnter(setup)
+
+      const registers = await expectFrame(setup, "› 01 Caixa principal — livre")
+
+      expect(registers).not.toContain("› 02")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F12 com venda aberta bloqueia e o ENTER cancela a venda antes de encerrar a sessão", async () => {
+    const order: string[] = []
+    const cancelSale = mock(async (): Promise<CancelSaleOutcome> => {
+      order.push("cancelSale")
+      return { ok: true }
+    })
+    const logout = mock(async () => {
+      order.push("logout")
+    })
+    const setup = await renderApp(saleStub({ cancelSale, logout }))
+
+    try {
+      await enterSale(setup)
+      await bip(setup, "7891000100103")
+      await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
+
+      await pressNamed(setup, KeyCodes.F12)
+
+      const blocked = await expectFrame(
+        setup,
+        "há venda aberta com 1 item — a venda será cancelada",
+      )
+
+      expect(blocked).toContain("ENTER cancela a venda e troca de operador · ESC volta")
+
+      await pressEnter(setup)
+
+      const login = await expectFrame(setup, "PDV minimercado — entrada do operador")
+
+      // a venda é cancelada antes de a sessão terminar: o motivo é fixo e a chave é desta tentativa
+      expect(order.slice(-2)).toEqual(["cancelSale", "logout"])
+      expect(cancelSale).toHaveBeenCalledWith("sale-1", "troca de operador", expect.any(String))
+      expect(login).not.toContain("TOTAL:")
     } finally {
       setup.renderer.destroy()
     }

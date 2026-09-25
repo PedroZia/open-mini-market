@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react"
 
 import { withProblemGuard } from "../api/problemGuard"
-import type { TerminalApi } from "../api/terminalApi"
+import type { CustomerOption, TerminalApi } from "../api/terminalApi"
 import { reduce } from "../core/reducer"
 import { initialState, type State } from "../core/state"
 import { useClock } from "./clock"
@@ -30,6 +30,11 @@ import { theme } from "./theme"
  *
  * O relógio do cabeçalho é **deste** shell (`useClock`, um tique por segundo): a tela recebe a hora
  * por prop, então o desenho dela é determinístico no teste e a hora não congela como na Ink.
+ *
+ * O shell também guarda as anotações locais dos modais do 1126c: o cliente do F6 (o nome do
+ * cabeçalho é a seleção da busca, não a resposta do servidor) e o caixa preferido do F12 (a sessão
+ * de caixa continua aberta — o próximo operador entra no mesmo caixa). Nenhum dos dois vira estado
+ * do reducer: são rótulos de tela, esquecidos quando a venda ou o login saem de cena.
  */
 export function App({ api: rawApi }: { api: TerminalApi }) {
   const [state, dispatch] = useReducer(reduce, initialState)
@@ -43,6 +48,14 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
   const latest = useRef(state)
   /** Hora do cabeçalho da venda: o timer vive no shell e a tela só desenha o que recebe. */
   const now = useClock()
+  /** Cliente que esta sessão vinculou, com o nome da busca (F6, 1126c); `null` na venda anônima. */
+  const [customer, setCustomer] = useState<CustomerOption | null>(null)
+  /**
+   * Caixa em uso quando o F12 confirmou (1126c): o login seguinte nasce com ele selecionado — a
+   * sessão de caixa continua aberta e o próximo operador entra no **mesmo** caixa. É anotação de
+   * tela, não estado da operação: morre quando o login sai de cena.
+   */
+  const [preferredRegister, setPreferredRegister] = useState<string | null>(null)
 
   useEffect(() => {
     latest.current = state
@@ -60,15 +73,20 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
 
   /**
    * Loja do cabeçalho (1117): uma vez por login, na entrada da operação. A falha não bloqueia a
-   * venda — o cabeçalho fica sem loja e o operador segue.
+   * venda — o cabeçalho fica sem loja e o operador segue. O cliente anotado pertence à venda que
+   * acabou de sair de cena, então o login novo nasce sem ele (F6, 1126c).
    */
   useEffect(() => {
     if (state.kind === "login") {
       // login novo (troca de operador ou queda de sessão): a loja é perguntada de novo
       storeAsked.current = false
       setStore(null)
+      setCustomer(null)
       return
     }
+
+    // saiu do login: o "mesmo caixa" da troca (F12, 1126c) já foi escolhido — ou descartado
+    setPreferredRegister(null)
 
     if (state.kind !== "saleOpen" || storeAsked.current) {
       return
@@ -77,6 +95,16 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
     storeAsked.current = true
     void loadStore()
   }, [state.kind])
+
+  /**
+   * A venda que sai de cena leva o nome do cliente junto (F6, 1126c): cancelada (F4, 1126d) ou
+   * concluída (1127), a anotação local era daquela venda e não vale para a próxima.
+   */
+  useEffect(() => {
+    if (state.kind === "saleOpen" && state.sale === null) {
+      setCustomer(null)
+    }
+  }, [state])
 
   /** Lê a loja da sessão e guarda o rótulo do cabeçalho; falha ou loja ausente deixam `store` nulo. */
   async function loadStore(): Promise<void> {
@@ -111,10 +139,26 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
     dispatch({ type: "apiFailed", problem: outcome.problem })
   }
 
+  /**
+   * F12 confirmado (1126c): a sessão de login terminou e o caixa continua aberto. O shell esquece o
+   * cliente anotado (a venda dele foi cancelada antes de chegar aqui) e lembra o caixa em uso para o
+   * login nascer com ele selecionado ("mesmo caixa"). A transição é do reducer (`sessionEnded`):
+   * volta ao login sem passar pelo `cashClosed`, que significa caixa fechado.
+   */
+  function operatorSwitched(registerId: string): void {
+    setCustomer(null)
+    setPreferredRegister(registerId)
+    dispatch({ type: "sessionEnded" })
+  }
+
   if (state.kind === "login") {
     return (
-      // o F12 (1118) ainda não existe na UI nova: o login nasce sem caixa preferido
-      <LoginScreen state={state} api={api} dispatch={dispatch} preferredRegisterId={null} />
+      <LoginScreen
+        state={state}
+        api={api}
+        dispatch={dispatch}
+        preferredRegisterId={preferredRegister}
+      />
     )
   }
 
@@ -129,9 +173,11 @@ export function App({ api: rawApi }: { api: TerminalApi }) {
         api={api}
         dispatch={dispatch}
         now={now}
-        customer={null}
+        customer={customer}
         store={store}
         online={online}
+        onCustomerChanged={setCustomer}
+        onOperatorSwitched={() => operatorSwitched(state.register.id)}
       />
     )
   }

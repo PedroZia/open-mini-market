@@ -22,11 +22,13 @@ import { moveSelection, nextQuantity, selectionIndex, touchedItem } from "../cor
 import { createScanner, type Scanner, type ScannerEvent } from "../core/scanner"
 import type { ApiProblem, SaleItemView, SaleOpenState, SaleView, ScanIntent } from "../core/state"
 import { keyEventToKeyName } from "./adapters/keys"
+import { CustomerModal, type CustomerApplyResult } from "./CustomerModal"
 import { DiscountModal, type DiscountApplyResult } from "./DiscountModal"
 import { HelpModal } from "./HelpModal"
 import { useGlobalKeyboard } from "./keyboard"
 import { PriceLookupModal } from "./PriceLookupModal"
 import { RemoveItemConfirmModal } from "./RemoveItemConfirmModal"
+import { SwitchOperatorModal } from "./SwitchOperatorModal"
 import { theme } from "./theme"
 
 /**
@@ -54,12 +56,17 @@ import { theme } from "./theme"
  * do leitor deixou no campo é limpo no bipe — o primeiro caractere chega antes de o `\r` fechar a
  * leitura.
  *
- * Modais (1126a/1126b): a ajuda do F1, a confirmação do DEL/F3, a consulta de preço do F2 e o
- * desconto do F5 são estado **desta** tela (`modal`) e saem no `ModalFrame` no lugar do corpo da
- * venda — o leitor fica desligado (`barcodeEnabled: modal === null`, §11.3) e o `handleKey` daqui
- * devolve `false`: quem trata a tecla é o handler do próprio modal, que o hook global chama
- * **antes** deste listener (o `prependListener` põe o mais novo na frente) e que consome o que é
- * dele. Sem modal, a tela age como sempre.
+ * Modais (1126a/1126b/1126c): a ajuda do F1, a confirmação do DEL/F3, a consulta de preço do F2, o
+ * desconto do F5, o cliente do F6 e a troca de operador do F12 são estado **desta** tela (`modal`) e
+ * saem no `ModalFrame` no lugar do corpo da venda — o leitor fica desligado (`barcodeEnabled: modal
+ * === null`, §11.3) e o `handleKey` daqui devolve `false`: quem trata a tecla é o handler do próprio
+ * modal, que o hook global chama **antes** deste listener (o `prependListener` põe o mais novo na
+ * frente) e que consome o que é dele. Sem modal, a tela age como sempre.
+ *
+ * O F6 (cliente) e o F12 (troca de operador) são anotações do **shell**: os dois modais devolvem o
+ * fato por `onCustomerChanged` (o nome do cabeçalho é a seleção local da busca, não a resposta do
+ * servidor) e `onOperatorSwitched` (o caixa em uso vira o preferido do login seguinte); a venda
+ * recalculada continua vindo do `saleUpdated` da `runMutation`, como nas demais mutações.
  *
  * O envio é uma fila local (`queueRef`) drenada pelo `pump`, um bipe por vez, na ordem em que
  * chegaram: sem venda criada, o primeiro bipe abre a venda (`POST /sales`) e o item entra em
@@ -103,6 +110,16 @@ export type SaleScreenProps = {
   store: string | null
   /** Conexão com o servidor (1117): `false` mostra SEM CONEXÃO na barra de status. */
   online: boolean
+  /**
+   * Cliente vinculado mudou (F6, 1126c): o `App` guarda a anotação local do nome no cabeçalho —
+   * `null` quando o vínculo foi removido. A venda em si já foi para o reducer pelo `saleUpdated`.
+   */
+  onCustomerChanged: (customer: CustomerOption | null) => void
+  /**
+   * Sessão encerrada pelo F12 (1126c): o `App` esquece as anotações locais, lembra o caixa em uso
+   * para o login seguinte e volta ao login pelo reducer (`sessionEnded`).
+   */
+  onOperatorSwitched: () => void
 }
 
 /**
@@ -140,6 +157,12 @@ const REMOVE_FAILURE_NOTICE = "falha ao remover o item — ENTER tenta de novo"
 /** Falha transitória do desconto (1126b): o formulário fica à vista e o ENTER refaz o `PUT`. */
 const DISCOUNT_FAILURE_NOTICE = "falha ao aplicar o desconto — ENTER tenta de novo"
 
+/** Falha transitória do vínculo do cliente (F6, 1126c): o modal fica à vista e o ENTER refaz o `PUT`. */
+const LINK_FAILURE_NOTICE = "falha ao vincular o cliente — ENTER tenta de novo"
+
+/** Falha transitória da remoção do vínculo (F6, 1126c): o modal fica à vista e o DEL refaz o `DELETE`. */
+const UNLINK_FAILURE_NOTICE = "falha ao remover o cliente — DEL tenta de novo"
+
 /** `-` que zeraria a quantidade não vai à API: quem remove o item é o DEL (com confirmação, 1126). */
 const REMOVE_HINT = "use DEL para remover o item"
 
@@ -166,15 +189,18 @@ type Feedback =
   | { kind: "failure"; text: string }
 
 /**
- * Modal bloqueante aberto sobre a venda (1126a/1126b): a ajuda do F1, a confirmação do DEL/F3, a
- * consulta de preço do F2 e o desconto do F5. O item guardado na confirmação é o alvo fixo do
- * `DELETE` — com o modal à vista a seleção não se move.
+ * Modal bloqueante aberto sobre a venda (1126a/1126b/1126c): a ajuda do F1, a confirmação do
+ * DEL/F3, a consulta de preço do F2, o desconto do F5, o cliente do F6 e a troca de operador do F12.
+ * O item guardado na confirmação é o alvo fixo do `DELETE` — com o modal à vista a seleção não se
+ * move.
  */
 type SaleModal =
   | { kind: "help" }
   | { kind: "removeItemConfirm"; item: SaleItemView }
   | { kind: "priceLookup" }
   | { kind: "discount" }
+  | { kind: "customer" }
+  | { kind: "switchOperator" }
 
 /**
  * Desfecho de uma mutação da venda (1125c/1126a/1126b) para quem a pediu decidir o que fica à
@@ -196,7 +222,17 @@ type SaleMutationOutcome =
   | { ok: false; kind: "rejected"; message: string }
   | SendFailure
 
-export function SaleScreen({ state, now, api, dispatch, customer, store, online }: SaleScreenProps) {
+export function SaleScreen({
+  state,
+  now,
+  api,
+  dispatch,
+  customer,
+  store,
+  online,
+  onCustomerChanged,
+  onOperatorSwitched,
+}: SaleScreenProps) {
   const renderer = useRenderer()
   const { height } = useTerminalDimensions()
   /** Item selecionado: `null` acompanha o último; as setas fixam o índice (1108/1110). */
@@ -274,14 +310,16 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
    * Teclado da venda resolvido pelo contexto do `core/keys` (§11.3, como o `useRawShortcuts` da
    * Ink): as setas movem a seleção com clamp nas pontas, `+`/`-` mexem na quantidade do item
    * selecionado, DEL e F3 abrem a **mesma** confirmação de remoção, o F1 abre a ajuda, o F2 a
-   * consulta de preço (sem venda criada inclusive) e o F5 o desconto (só com venda criada) — tudo
-   * consumido, não chega ao campo de leitura —, e o ENTER refaz o bipe que ficou na fila depois de
-   * uma falha transitória. As intenções dos passos seguintes (1126c/d, 1127) não agem aqui: a tecla
-   * devolve `false` e o hook global a engole pelo mapa.
+   * consulta de preço (sem venda criada inclusive), o F5 o desconto (só com venda criada), o F6 o
+   * cliente (também só com venda criada) e o F12 a troca de operador (sempre: sem venda é confirmação
+   * direta) — tudo consumido, não chega ao campo de leitura —, e o ENTER refaz o bipe que ficou na
+   * fila depois de uma falha transitória. As intenções dos passos seguintes (1126d, 1127) não agem
+   * aqui: a tecla devolve `false` e o hook global a engole pelo mapa.
    *
-   * Com um modal à vista (1126a/1126b) a tela **não** age: o handler devolve `false` e quem trata a
-   * tecla é o handler do próprio modal, que roda antes deste (o `prependListener` do hook global põe
-   * o listener mais novo na frente) e consome o que é dele — nenhuma tecla vaza entre os dois.
+   * Com um modal à vista (1126a/1126b/1126c) a tela **não** age: o handler devolve `false` e quem
+   * trata a tecla é o handler do próprio modal, que roda antes deste (o `prependListener` do hook
+   * global põe o listener mais novo na frente) e consome o que é dele — nenhuma tecla vaza entre os
+   * dois.
    */
   function handleKey(event: KeyEvent): boolean {
     if (modal !== null) {
@@ -335,8 +373,22 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
 
           return true
 
+        case "customer":
+          // F6 só com venda criada (como o desconto): sem venda não há onde vincular cliente
+          if (sale !== null) {
+            setModal({ kind: "customer" })
+          }
+
+          return true
+
+        case "switchOperator":
+          // F12 abre sempre (F12 sem venda é confirmação direta): a troca nunca é silenciosa — o
+          // modal mostra a venda aberta que será cancelada antes de encerrar a sessão
+          setModal({ kind: "switchOperator" })
+          return true
+
         default:
-          return false // F4/F6/F7/F8/F9/F10/F11/F12 são dos passos seguintes (1126c/d, 1127)
+          return false // F4/F7/F8/F9/F10/F11 são dos passos seguintes (1126d, 1127)
       }
     }
 
@@ -521,6 +573,72 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
   }
 
   /**
+   * ENTER do cliente (F6, 1126c): o `PUT /sales/{id}/customer` vai pela **mesma** `runMutation` da
+   * quantidade, da remoção e do desconto — uma mutação por vez, com a venda recalculada pelo
+   * servidor virando `saleUpdated` — e o desfecho é traduzido para o modal como no desconto. O nome
+   * do cabeçalho é a anotação local da busca: o `onCustomerChanged` a leva ao shell.
+   */
+  async function linkCustomerFromModal(option: CustomerOption): Promise<CustomerApplyResult> {
+    const result = await runMutation(
+      (saleId) => api.linkCustomer(saleId, option.id),
+      null,
+      () => `cliente: ${option.name}`,
+      LINK_FAILURE_NOTICE,
+    )
+
+    return customerResult(result, () => onCustomerChanged(option))
+  }
+
+  /**
+   * DEL do modal (F6, 1126c): o `DELETE` do vínculo pela mesma `runMutation`; a venda volta anônima
+   * e o shell esquece o nome junto (`onCustomerChanged(null)`) — o vínculo real é o do servidor.
+   */
+  async function unlinkCustomerFromModal(): Promise<CustomerApplyResult> {
+    const result = await runMutation(
+      (saleId) => api.unlinkCustomer(saleId),
+      null,
+      () => "cliente removido da venda",
+      UNLINK_FAILURE_NOTICE,
+    )
+
+    return customerResult(result, () => onCustomerChanged(null))
+  }
+
+  /**
+   * Desfecho da `runMutation` como o modal do cliente o espera (o mesmo contrato do desconto,
+   * 1126b): o sucesso aplica o que só o shell sabe (a anotação do nome) e fecha o modal; a recusa e
+   * a falha transitória voltam para ele; o resto (404 do item, que não há no cliente, ou falha
+   * bloqueante) sai de cena — o problema bloqueante já foi para a tela de erro.
+   */
+  function customerResult(result: MutationResult, applied: () => void): CustomerApplyResult {
+    if (result.kind === "applied") {
+      applied()
+      closeModal()
+      return { kind: "applied" }
+    }
+
+    if (result.kind === "rejected") {
+      return { kind: "rejected", message: result.message }
+    }
+
+    if (result.kind === "retryable") {
+      return { kind: "retryable" }
+    }
+
+    closeModal()
+    return { kind: "failed" }
+  }
+
+  /**
+   * F12 confirmado (1126c): a sessão de login terminou e o caixa continua aberto — o modal sai de
+   * cena e o shell lembra o caixa em uso para o login seguinte nascer com ele selecionado.
+   */
+  function switchedOperator(): void {
+    closeModal()
+    onOperatorSwitched()
+  }
+
+  /**
    * Uma mutação de venda por vez: marca o "enviando…", chama a API e traduz o desfecho para quem a
    * pediu — sucesso vira `saleUpdated` com a venda que o servidor recalculou; o 404 do item que
    * sumiu avisa e a venda fica como está; a recusa do servidor (o desconto do F5) volta como
@@ -669,8 +787,8 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
     dispatch({ type: "apiFailed", problem: failure.problem })
   }
 
-  // modal bloqueante (1126a/1126b): o corpo da venda sai de cena e o quadro do modal ocupa o lugar
-  // — o leitor já está desligado (`barcodeEnabled`) e o `handleKey` daqui não age enquanto ele existe
+  // modal bloqueante (1126a/1126b/1126c): o corpo da venda sai de cena e o quadro do modal ocupa o
+  // lugar — o leitor já está desligado (`barcodeEnabled`) e o `handleKey` daqui não age enquanto ele existe
   if (modal !== null) {
     return (
       <box width="100%" height="100%" flexDirection="column" alignItems="center" justifyContent="center">
@@ -686,6 +804,24 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
           />
         ) : modal.kind === "priceLookup" ? (
           <PriceLookupModal api={api} onCancel={closeModal} onFailed={failModal} />
+        ) : modal.kind === "customer" ? (
+          <CustomerModal
+            customer={customer}
+            api={api}
+            onLink={linkCustomerFromModal}
+            onUnlink={unlinkCustomerFromModal}
+            onCancel={closeModal}
+            onFailed={failModal}
+          />
+        ) : modal.kind === "switchOperator" ? (
+          <SwitchOperatorModal
+            saleId={sale?.id ?? null}
+            itemCount={items.length}
+            api={api}
+            onSwitched={switchedOperator}
+            onCancel={closeModal}
+            onFailed={failModal}
+          />
         ) : (
           <DiscountModal onApply={applyDiscountFromModal} onCancel={closeModal} />
         )}
