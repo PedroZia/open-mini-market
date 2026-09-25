@@ -40,7 +40,17 @@ const BANANA: SaleItemView = {
 function sale(items: SaleItemView[], id = 'sale-1'): SaleView {
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
   // fixture reproduz a conta do servidor; a TUI nunca soma nada
-  return { id, items, subtotal, discountAmount: 0, total: subtotal, customerId: null };
+  return {
+    id,
+    items,
+    subtotal,
+    discountAmount: 0,
+    total: subtotal,
+    paidAmount: 0,
+    changeAmount: 0,
+    payments: [],
+    customerId: null,
+  };
 }
 
 describe('touchedItem', () => {

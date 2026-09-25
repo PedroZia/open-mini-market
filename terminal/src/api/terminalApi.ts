@@ -1,6 +1,12 @@
 import { ApiError, type ApiClient, type components } from '@minimarket/api-client';
 
-import type { ApiProblem, Operator, SaleView } from '../core/state';
+import type {
+  ApiProblem,
+  Operator,
+  PaymentMethod,
+  ReceiptView,
+  SaleView,
+} from '../core/state';
 import { clearToken, setToken } from './session';
 
 /**
@@ -170,6 +176,46 @@ export type CustomerSaleOutcome =
   | { ok: false; kind: 'rejected'; message: string }
   | SendFailure;
 
+/** O que o pagamento manda ao servidor (`SalePaymentRequest`, passo 905): forma, valor e o recebido do dinheiro. */
+export type SalePaymentIntent = {
+  method: PaymentMethod;
+  /** Valor que este pagamento cobre, em reais — o máximo é o restante que o servidor calcula (BR-12). */
+  amount: number;
+  /**
+   * Valor entregue pelo cliente no dinheiro (`CASH`); nas demais formas o contrato o recusa com 422
+   * `INVALID_TENDERED_AMOUNT`. Quem calcula o troco é o servidor (BR-05).
+   */
+  tenderedAmount?: number;
+};
+
+/**
+ * Resultado de registrar o pagamento (passo 905, 201 com a venda inteira):
+ * - `ok`: a venda como o servidor a devolveu, com `paidAmount`/`changeAmount`/`payments` recalculados
+ *   (BR-05, BR-12);
+ * - `rejected`: a recusa que **a própria tela de pagamento** mostra — 400 da forma/valor, 403 sem
+ *   `payment.add` e 422 `PAYMENT_EXCEEDS_TOTAL`/`INVALID_TENDERED_AMOUNT` —, sem sair do pagamento;
+ * - `SendFailure`: rede/5xx (retry manual com a **mesma** chave) ou 404/409, também na tela, com o
+ *   `detail` do servidor na frente do operador.
+ */
+export type AddPaymentOutcome =
+  | { ok: true; sale: SaleView }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
+/**
+ * Resultado de concluir a venda (passo 907, 200 com a venda inteira):
+ * - `ok`: o resumo do corpo do `complete` — número, total e troco do servidor — para a tela de
+ *   sucesso (BR-12);
+ * - `rejected`: 422 `PAYMENT_INSUFFICIENT` (o mais comum: falta pagamento, BR-05), 400 do contrato e
+ *   403 sem `sale.complete` — mensagem clara e o operador continua no pagamento;
+ * - `SendFailure`: rede/5xx (retry manual com a **mesma** `Idempotency-Key`) ou 404/409, também na
+ *   tela de pagamento.
+ */
+export type CompleteSaleOutcome =
+  | { ok: true; receipt: ReceiptView }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -249,6 +295,27 @@ export type TerminalApi = {
    * anônima. Repetir a remoção é inofensivo no servidor (no-op com 200).
    */
   unlinkCustomer(saleId: string): Promise<CustomerSaleOutcome>;
+  /**
+   * Registra o pagamento na venda aberta (`POST /sales/{id}/payments`, 201, passo 905): a forma e o
+   * valor vão no corpo e quem recalcula o pago, o troco e o restante é o servidor (BR-05/BR-12).
+   * A `Idempotency-Key` é do chamador (1113): repetir a **mesma** tentativa (rede caiu depois de o
+   * servidor gravar) com a mesma chave devolve o replay, sem um segundo pagamento.
+   */
+  addPayment(
+    saleId: string,
+    payment: SalePaymentIntent,
+    idempotencyKey: string,
+  ): Promise<AddPaymentOutcome>;
+  /**
+   * Conclui a venda aberta e paga (`POST /sales/{id}/complete`, 200, passo 907): a baixa de estoque
+   * e o dinheiro no caixa são efeitos do caso de uso, na mesma transação da auditoria. A resposta é
+   * a venda inteira e dela sai o resumo da tela de sucesso (BR-12).
+   *
+   * A `Idempotency-Key` é do chamador (1113) pelo mesmo motivo do pagamento — e mais forte: repetir
+   * a conclusão com a mesma chave **não** dá uma segunda baixa de estoque nem um segundo movimento
+   * de caixa; o servidor devolve o `Idempotency-Replayed` gravado.
+   */
+  completeSale(saleId: string, idempotencyKey: string): Promise<CompleteSaleOutcome>;
 };
 
 /** Monta a camada de API sobre um client já configurado (base URL + token da sessão). */
@@ -398,6 +465,10 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
             subtotal: response.subtotal ?? 0,
             discountAmount: response.discountAmount ?? 0,
             total: response.total ?? 0,
+            // venda recém-criada nasce sem pagamento: o `SaleResponse` não traz o bloco (1113)
+            paidAmount: 0,
+            changeAmount: 0,
+            payments: [],
             // a venda nasce anônima: cliente é o F6 (1112)
             customerId: null,
           },
@@ -520,6 +591,77 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
           `/api/v1/sales/${saleId}/customer`,
         ),
       );
+    },
+
+    async addPayment(saleId, payment, idempotencyKey) {
+      const body: components['schemas']['SalePaymentRequest'] = {
+        method: payment.method,
+        amount: payment.amount,
+      };
+      // o recebido só existe no dinheiro (BR-05): nas demais formas o campo nem vai no corpo
+      if (payment.tenderedAmount !== undefined) {
+        body.tenderedAmount = payment.tenderedAmount;
+      }
+
+      try {
+        const response = await client.post<components['schemas']['SaleDetailResponse']>(
+          `/api/v1/sales/${saleId}/payments`,
+          body,
+          { idempotencyKey },
+        );
+        const sale = toSaleView(response);
+
+        if (sale === null) {
+          return failed({ status: 0, code: null, detail: 'pagamento sem venda na resposta' });
+        }
+
+        return { ok: true, sale };
+      } catch (error) {
+        if (error instanceof ApiError && isPaymentRejection(error.status)) {
+          // a recusa fica na tela de pagamento: o operador corrige o valor ali mesmo (1113)
+          return {
+            ok: false,
+            kind: 'rejected',
+            message: moneyRejectionMessage(error, 'sem permissão para registrar o pagamento'),
+          };
+        }
+
+        return sendFailure(error);
+      }
+    },
+
+    async completeSale(saleId, idempotencyKey) {
+      try {
+        const response = await client.post<components['schemas']['SaleDetailResponse']>(
+          `/api/v1/sales/${saleId}/complete`,
+          undefined,
+          { idempotencyKey },
+        );
+
+        if (response.id === undefined) {
+          return failed({ status: 0, code: null, detail: 'conclusão sem venda na resposta' });
+        }
+
+        // o resumo vem do corpo tipado do complete: a tela de sucesso não calcula nada (BR-12)
+        return {
+          ok: true,
+          receipt: {
+            number: response.number ?? 0,
+            total: response.total ?? 0,
+            changeAmount: response.changeAmount ?? 0,
+          },
+        };
+      } catch (error) {
+        if (error instanceof ApiError && isPaymentRejection(error.status)) {
+          return {
+            ok: false,
+            kind: 'rejected',
+            message: moneyRejectionMessage(error, 'sem permissão para concluir a venda'),
+          };
+        }
+
+        return sendFailure(error);
+      }
     },
   };
 }
@@ -660,6 +802,32 @@ function customerRejectionMessage(error: ApiError): string {
   return error.detail;
 }
 
+/**
+ * Recusa de pagamento/conclusão que fica na própria tela (1113): 400 da forma/valor, 403 da
+ * permissão (`payment.add`/`sale.complete`) e 422 do servidor. Rede/5xx e 404/409 não entram aqui —
+ * são `SendFailure`, e a tela também os mostra com retry.
+ */
+function isPaymentRejection(status: number): boolean {
+  return status === 400 || status === 403 || status === 422;
+}
+
+/** Mensagens dos 422 de dinheiro: o operador precisa saber o que corrigir, sem ver o código do erro. */
+const PAYMENT_REJECTIONS: Readonly<Record<string, string>> = {
+  PAYMENT_INSUFFICIENT: 'pagamento insuficiente — registre o valor que falta',
+  PAYMENT_EXCEEDS_TOTAL: 'valor acima do que falta na venda — ajuste o valor',
+  INVALID_TENDERED_AMOUNT: 'valor recebido inválido — o dinheiro precisa cobrir o valor do pagamento',
+};
+
+/**
+ * Recusa de dinheiro (1113): o 403 ganha o texto fixo de quem chamou (sem expor o código da
+ * permissão) e os 422 do servidor têm mensagem própria; o resto mostra o `detail` dele.
+ */
+function moneyRejectionMessage(error: ApiError, forbidden: string): string {
+  return error.status === 403
+    ? forbidden
+    : (PAYMENT_REJECTIONS[error.code ?? ''] ?? error.detail);
+}
+
 /** Normaliza a página de clientes para a lista do modal; registro sem `id` não é vinculável. */
 function toCustomerOptions(
   customers: readonly components['schemas']['CustomerResponse'][],
@@ -699,6 +867,16 @@ function toSaleView(response: components['schemas']['SaleDetailResponse']): Sale
     subtotal: response.subtotal ?? 0,
     discountAmount: response.discountAmount ?? 0,
     total: response.total ?? 0,
+    paidAmount: response.paidAmount ?? 0,
+    changeAmount: response.changeAmount ?? 0,
+    payments: (response.payments ?? []).map((payment) => ({
+      id: payment.id ?? '',
+      // forma fora do contrato cai no dinheiro (a primeira do enum): é rótulo, não cálculo
+      method: payment.method ?? 'CASH',
+      amount: payment.amount ?? 0,
+      changeAmount: payment.changeAmount ?? 0,
+      status: payment.status ?? '',
+    })),
     customerId: response.customerId ?? null,
   };
 }

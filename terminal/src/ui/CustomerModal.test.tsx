@@ -2,10 +2,12 @@ import { render } from 'ink-testing-library';
 import { describe, expect, test, vi } from 'vitest';
 
 import type {
+  AddPaymentOutcome,
   AddSaleItemOutcome,
   ApplyDiscountOutcome,
   BarcodeLookupOutcome,
   CashRegistersOutcome,
+  CompleteSaleOutcome,
   CreateSaleOutcome,
   CurrentCashSessionOutcome,
   CustomerOption,
@@ -41,7 +43,17 @@ const JOAO: CustomerOption = { id: 'c9', name: 'João Pereira', taxId: null };
 
 /** Venda como o servidor a devolve depois do vínculo: o `customerId` é dele (BR-12). */
 function saleWith(customerId: string | null): SaleView {
-  return { id: SALE_ID, items: [], subtotal: 0, discountAmount: 0, total: 0, customerId };
+  return {
+    id: SALE_ID,
+    items: [],
+    subtotal: 0,
+    discountAmount: 0,
+    total: 0,
+    paidAmount: 0,
+    changeAmount: 0,
+    payments: [],
+    customerId,
+  };
 }
 
 /** Dublê da camada de API: só o cliente entra aqui; o resto existe para satisfazer o tipo. */
@@ -88,6 +100,13 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     unlinkCustomer: vi.fn(
       async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: saleWith(null) }),
+    ),
+    // o pagamento (1113) é de outra tela: aqui só fecha o contrato
+    addPayment: vi.fn(
+      async (): Promise<AddPaymentOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    completeSale: vi.fn(
+      async (): Promise<CompleteSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
     ),
     ...overrides,
   };

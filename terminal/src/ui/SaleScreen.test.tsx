@@ -3,10 +3,12 @@ import { useReducer } from 'react';
 import { describe, expect, test, vi } from 'vitest';
 
 import type {
+  AddPaymentOutcome,
   AddSaleItemOutcome,
   ApplyDiscountOutcome,
   BarcodeLookupOutcome,
   CashRegistersOutcome,
+  CompleteSaleOutcome,
   CreateSaleOutcome,
   CurrentCashSessionOutcome,
   CustomerOption,
@@ -96,7 +98,17 @@ const BANANA: SaleItemView = {
 /** Venda como o servidor devolveu: o fixture repete a conta dele; a tela só exibe (BR-12). */
 function saleWithItems(items: SaleItemView[]): SaleView {
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
-  return { id: SALE_ID, items, subtotal, discountAmount: 0, total: subtotal, customerId: null };
+  return {
+    id: SALE_ID,
+    items,
+    subtotal,
+    discountAmount: 0,
+    total: subtotal,
+    paidAmount: 0,
+    changeAmount: 0,
+    payments: [],
+    customerId: null,
+  };
 }
 
 /** Estado em que o shell entrega a tela: caixa aberto e venda ainda não criada. */
@@ -108,6 +120,7 @@ function saleOpen(): SaleOpenState {
     sessionId: 's1',
     sale: null,
     pendingScan: null,
+    receipt: null,
   };
 }
 
@@ -185,6 +198,13 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     unlinkCustomer: vi.fn(
       async (): Promise<CustomerSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    // o pagamento (1113) é da tela de pagamento: aqui só fecha o contrato
+    addPayment: vi.fn(
+      async (): Promise<AddPaymentOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    completeSale: vi.fn(
+      async (): Promise<CompleteSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
     ),
     ...overrides,
   };

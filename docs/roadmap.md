@@ -985,7 +985,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** busca retorna resultados; vínculo aparece no cabeçalho; remover limpa.
   **Commit:** `feat(tui): vincula cliente a venda`
 
-- [ ] **1113 — Fluxo: pagamento e conclusão (F9)** ⭐
+- [x] **1113 — Fluxo: pagamento e conclusão (F9)** ⭐
   **Objetivo:** fechar a venda. **Depende:** 1112, 907
   **Implementar:** modal de pagamento com método (dinheiro/PIX/débito/crédito/voucher), valor e valor recebido; mostra troco em destaque; múltiplos pagamentos; conclusão → tela de sucesso com número, total e troco; `ENTER` inicia próxima venda.
   **Testes/aceite:** pagamento parcial, múltiplos pagamentos, troco correto, pagamento insuficiente bloqueia conclusão, replay idempotente não duplica venda.

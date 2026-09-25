@@ -1,4 +1,4 @@
-import { ApiError, type ApiClient } from '@minimarket/api-client';
+import { ApiError, type ApiClient, type RequestOptions } from '@minimarket/api-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { clearToken, getToken } from './session';
@@ -13,30 +13,45 @@ import { createTerminalApi } from './terminalApi';
 
 type Handlers = {
   get?: (path: string) => Promise<unknown>;
-  post?: (path: string, body?: unknown) => Promise<unknown>;
-  put?: (path: string, body?: unknown) => Promise<unknown>;
-  patch?: (path: string, body?: unknown) => Promise<unknown>;
-  delete?: (path: string) => Promise<unknown>;
+  post?: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
+  put?: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
+  patch?: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
+  delete?: (path: string, options?: RequestOptions) => Promise<unknown>;
 };
 
 /** Client dublê: só as rotas da entrada do PDV entram; o resto é erro de teste. */
 function stubClient(handlers: Handlers): ApiClient {
   return {
-    get: <T>(path: string) =>
-      (handlers.get?.(path) ?? Promise.reject(new Error(`GET inesperado: ${path}`))) as Promise<T>,
-    post: <T>(path: string, body?: unknown) =>
-      (handlers.post?.(path, body) ?? Promise.reject(new Error(`POST inesperado: ${path}`))) as
-        Promise<T>,
-    put: <T>(path: string, body?: unknown) =>
-      (handlers.put?.(path, body) ?? Promise.reject(new Error(`PUT inesperado: ${path}`))) as
-        Promise<T>,
-    patch: <T>(path: string, body?: unknown) =>
-      (handlers.patch?.(path, body) ?? Promise.reject(new Error(`PATCH inesperado: ${path}`))) as
-        Promise<T>,
-    delete: <T>(path: string) =>
-      (handlers.delete?.(path) ?? Promise.reject(new Error(`DELETE inesperado: ${path}`))) as
-        Promise<T>,
+    get: <T>(path: string) => orFail(handlers.get?.(path), `GET inesperado: ${path}`) as Promise<T>,
+    post: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+      orFail(
+        options === undefined ? handlers.post?.(path, body) : handlers.post?.(path, body, options),
+        `POST inesperado: ${path}`,
+      ) as Promise<T>,
+    put: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+      orFail(
+        options === undefined ? handlers.put?.(path, body) : handlers.put?.(path, body, options),
+        `PUT inesperado: ${path}`,
+      ) as Promise<T>,
+    patch: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+      orFail(
+        options === undefined ? handlers.patch?.(path, body) : handlers.patch?.(path, body, options),
+        `PATCH inesperado: ${path}`,
+      ) as Promise<T>,
+    delete: <T>(path: string, options?: RequestOptions) =>
+      orFail(
+        options === undefined ? handlers.delete?.(path) : handlers.delete?.(path, options),
+        `DELETE inesperado: ${path}`,
+      ) as Promise<T>,
   };
+}
+
+/**
+ * Handler ausente é erro de teste; a chamada vai com os argumentos que a rota mandou — sem
+ * `options` o espião não recebe um `undefined` a mais e as asserções continuam exatas.
+ */
+function orFail(call: Promise<unknown> | undefined, message: string): Promise<unknown> {
+  return call ?? Promise.reject(new Error(message));
 }
 
 const LOGIN_RESPONSE = {
@@ -385,7 +400,17 @@ describe('createTerminalApi', () => {
 
     expect(await api.createSale()).toEqual({
       ok: true,
-      sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0, customerId: null },
+      sale: {
+        id: 'sale-1',
+        items: [],
+        subtotal: 0,
+        discountAmount: 0,
+        total: 0,
+        paidAmount: 0,
+        changeAmount: 0,
+        payments: [],
+        customerId: null,
+      },
     });
     expect(post).toHaveBeenCalledWith('/api/v1/sales', undefined);
   });
@@ -439,6 +464,9 @@ describe('createTerminalApi', () => {
         subtotal: 49.8,
         discountAmount: 0,
         total: 49.8,
+        paidAmount: 0,
+        changeAmount: 0,
+        payments: [],
         customerId: null,
       },
     });
@@ -574,6 +602,9 @@ describe('createTerminalApi', () => {
         subtotal: 49.8,
         discountAmount: 0,
         total: 49.8,
+        paidAmount: 0,
+        changeAmount: 0,
+        payments: [],
         customerId: null,
       },
     });
@@ -622,6 +653,9 @@ describe('createTerminalApi', () => {
         subtotal: 8.9,
         discountAmount: 0,
         total: 8.9,
+        paidAmount: 0,
+        changeAmount: 0,
+        payments: [],
         customerId: null,
       },
     });
@@ -693,6 +727,9 @@ describe('createTerminalApi', () => {
         subtotal: 24.9,
         discountAmount: 2.49,
         total: 22.41,
+        paidAmount: 0,
+        changeAmount: 0,
+        payments: [],
         customerId: null,
       },
     });
@@ -867,6 +904,9 @@ describe('createTerminalApi: cliente na venda (1112)', () => {
         subtotal: 24.9,
         discountAmount: 0,
         total: 24.9,
+        paidAmount: 0,
+        changeAmount: 0,
+        payments: [],
         customerId: 'c1',
       },
     });
@@ -948,6 +988,9 @@ describe('createTerminalApi: cliente na venda (1112)', () => {
         subtotal: 24.9,
         discountAmount: 0,
         total: 24.9,
+        paidAmount: 0,
+        changeAmount: 0,
+        payments: [],
         customerId: null,
       },
     });
@@ -956,6 +999,232 @@ describe('createTerminalApi: cliente na venda (1112)', () => {
       ok: false,
       kind: 'failed',
       problem: { status: 0, code: null, detail: 'cliente alterado sem venda na resposta' },
+    });
+  });
+});
+
+describe('createTerminalApi: pagamento e conclusão (1113)', () => {
+  /** Venda com o pagamento em dinheiro que o servidor registrou: troco de 50 − 24,90 (BR-05). */
+  const PAID_CASH = {
+    id: 'sale-1',
+    status: 'OPEN',
+    subtotal: 24.9,
+    discountAmount: 0,
+    total: 24.9,
+    paidAmount: 24.9,
+    changeAmount: 25.1,
+    payments: [
+      {
+        id: 'pay-1',
+        method: 'CASH',
+        amount: 24.9,
+        tenderedAmount: 50,
+        changeAmount: 25.1,
+        status: 'APPROVED',
+      },
+    ],
+  };
+
+  test('registrar o pagamento manda forma, valor e recebido no POST e devolve a venda recalculada', async () => {
+    const post = vi.fn(async () => PAID_CASH);
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(
+      await api.addPayment('sale-1', { method: 'CASH', amount: 24.9, tenderedAmount: 50 }, 'key-1'),
+    ).toEqual({
+      ok: true,
+      sale: {
+        id: 'sale-1',
+        items: [],
+        subtotal: 24.9,
+        discountAmount: 0,
+        total: 24.9,
+        paidAmount: 24.9,
+        changeAmount: 25.1,
+        payments: [
+          { id: 'pay-1', method: 'CASH', amount: 24.9, changeAmount: 25.1, status: 'APPROVED' },
+        ],
+        customerId: null,
+      },
+    });
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/sales/sale-1/payments',
+      { method: 'CASH', amount: 24.9, tenderedAmount: 50 },
+      { idempotencyKey: 'key-1' },
+    );
+  });
+
+  test('nas demais formas o recebido não vai no corpo (o servidor recusaria com 422)', async () => {
+    const post = vi.fn(async () => ({ ...PAID_CASH, paidAmount: 24.9, changeAmount: 0, payments: [] }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    await api.addPayment('sale-1', { method: 'PIX', amount: 24.9 }, 'key-2');
+
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/sales/sale-1/payments',
+      { method: 'PIX', amount: 24.9 },
+      { idempotencyKey: 'key-2' },
+    );
+  });
+
+  test('422 PAYMENT_EXCEEDS_TOTAL e INVALID_TENDERED_AMOUNT viram recusa com mensagem clara', async () => {
+    const exceeds = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(422, {
+            code: 'PAYMENT_EXCEEDS_TOTAL',
+            detail: 'pagamento de 30 excede o restante 24,90 da venda',
+          });
+        },
+      }),
+    );
+    const tendered = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(422, {
+            code: 'INVALID_TENDERED_AMOUNT',
+            detail: 'valor entregue não cobre o pagamento em dinheiro',
+          });
+        },
+      }),
+    );
+
+    expect(await exceeds.addPayment('sale-1', { method: 'CASH', amount: 30 }, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'valor acima do que falta na venda — ajuste o valor',
+    });
+    expect(await tendered.addPayment('sale-1', { method: 'CASH', amount: 24.9 }, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'valor recebido inválido — o dinheiro precisa cobrir o valor do pagamento',
+    });
+  });
+
+  test('403 sem `payment.add` vira recusa fixa; 409 é falha bloqueante e rede é transitória', async () => {
+    const denied = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão payment.add' });
+        },
+      }),
+    );
+    const closed = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(409, { code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' });
+        },
+      }),
+    );
+    const offline = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+
+    expect(await denied.addPayment('sale-1', { method: 'PIX', amount: 10 }, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para registrar o pagamento',
+    });
+    expect(await closed.addPayment('sale-1', { method: 'PIX', amount: 10 }, 'k')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 409, code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' },
+    });
+    expect(await offline.addPayment('sale-1', { method: 'PIX', amount: 10 }, 'k')).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+  });
+
+  test('201 sem venda na resposta é falha bloqueante', async () => {
+    const api = createTerminalApi(stubClient({ post: async () => ({ status: 'OPEN' }) }));
+
+    expect(await api.addPayment('sale-1', { method: 'PIX', amount: 10 }, 'k')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'pagamento sem venda na resposta' },
+    });
+  });
+
+  test('concluir manda a chave do chamador e devolve o resumo do corpo do complete', async () => {
+    const post = vi.fn(async () => ({
+      ...PAID_CASH,
+      status: 'COMPLETED',
+      number: 42,
+      completedAt: '2026-09-24T12:00:00Z',
+    }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(await api.completeSale('sale-1', 'key-9')).toEqual({
+      ok: true,
+      receipt: { number: 42, total: 24.9, changeAmount: 25.1 },
+    });
+    expect(post).toHaveBeenCalledWith('/api/v1/sales/sale-1/complete', undefined, {
+      idempotencyKey: 'key-9',
+    });
+  });
+
+  test('422 PAYMENT_INSUFFICIENT vira recusa com a mensagem que a tela mostra', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(422, {
+            code: 'PAYMENT_INSUFFICIENT',
+            detail: 'venda exige 24,90 e tem 10,00 pagos',
+          });
+        },
+      }),
+    );
+
+    expect(await api.completeSale('sale-1', 'key-9')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'pagamento insuficiente — registre o valor que falta',
+    });
+  });
+
+  test('403 sem `sale.complete` vira recusa fixa; rede é transitória (a chave volta no retry)', async () => {
+    const denied = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão sale.complete' });
+        },
+      }),
+    );
+    const offline = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+
+    expect(await denied.completeSale('sale-1', 'key-9')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para concluir a venda',
+    });
+    expect(await offline.completeSale('sale-1', 'key-9')).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+  });
+
+  test('200 sem venda na resposta é falha bloqueante: a tela de sucesso não teria resumo', async () => {
+    const api = createTerminalApi(
+      stubClient({ post: async () => ({ number: 42, total: 24.9, changeAmount: 0 }) }),
+    );
+
+    expect(await api.completeSale('sale-1', 'key-9')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'conclusão sem venda na resposta' },
     });
   });
 });

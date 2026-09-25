@@ -9,6 +9,7 @@ import type {
   OperatingState,
   Operator,
   PayingState,
+  ReceiptView,
   SaleOpenState,
   SaleView,
   State,
@@ -32,7 +33,10 @@ export type Action =
   /** Bipe consumido sem mexer na venda (produto não encontrado ou recusado): só limpa o pendente. */
   | { type: 'scanDismissed' }
   | { type: 'paymentStarted' }
-  | { type: 'saleCompleted' }
+  /** Venda concluída no servidor: leva o resumo do corpo do `complete` para a tela de sucesso (1113). */
+  | { type: 'saleCompleted'; receipt: ReceiptView }
+  /** ENTER na tela de sucesso: a próxima venda começa limpa, pronta para o primeiro bipe (1113). */
+  | { type: 'receiptDismissed' }
   | { type: 'cashClosingStarted' }
   | { type: 'cashClosed' }
   | { type: 'apiFailed'; problem: ApiProblem };
@@ -88,6 +92,7 @@ function reduceOpeningCash(state: OpeningCashState, action: Action): State {
         sessionId: action.sessionId,
         sale: null,
         pendingScan: null,
+        receipt: null,
       };
     case 'apiFailed':
       return blocked(state, action.problem);
@@ -106,9 +111,12 @@ function reduceSaleOpen(state: SaleOpenState, action: Action): State {
     case 'scanDismissed':
       // o bipe não virou item (404/422): não há venda nova, só o pendente a limpar
       return state.pendingScan === null ? state : { ...state, pendingScan: null };
+    case 'receiptDismissed':
+      // ENTER na tela de sucesso: sem resumo não há o que dispensar
+      return state.receipt === null ? state : { ...state, receipt: null };
     case 'paymentStarted':
-      // sem venda criada não há o que pagar
-      return state.sale === null
+      // sem venda criada nem itens não há o que pagar (BR-05: venda vazia não conclui)
+      return state.sale === null || state.sale.items.length === 0
         ? state
         : { kind: 'paying', ...cashContext(state), sale: state.sale };
     case 'cashClosingStarted':
@@ -126,9 +134,22 @@ function reducePaying(state: PayingState, action: Action): State {
       // desconto ou adição de pagamento: o servidor manda a venda atualizada
       return { ...state, sale: action.sale };
     case 'saleCompleted':
-      return { kind: 'saleOpen', ...cashContext(state), sale: null, pendingScan: null };
+      // a venda fechou: o resumo do servidor vai para a tela de sucesso da próxima venda (1113)
+      return {
+        kind: 'saleOpen',
+        ...cashContext(state),
+        sale: null,
+        pendingScan: null,
+        receipt: action.receipt,
+      };
     case 'cancel':
-      return { kind: 'saleOpen', ...cashContext(state), sale: state.sale, pendingScan: null };
+      return {
+        kind: 'saleOpen',
+        ...cashContext(state),
+        sale: state.sale,
+        pendingScan: null,
+        receipt: null,
+      };
     case 'apiFailed':
       return blocked(state, action.problem);
     default:
@@ -142,7 +163,13 @@ function reduceClosingCash(state: ClosingCashState, action: Action): State {
       // a sessão terminou: o próximo operador entra pelo login
       return { kind: 'login', failure: null };
     case 'cancel':
-      return { kind: 'saleOpen', ...cashContext(state), sale: state.sale, pendingScan: null };
+      return {
+        kind: 'saleOpen',
+        ...cashContext(state),
+        sale: state.sale,
+        pendingScan: null,
+        receipt: null,
+      };
     case 'apiFailed':
       return blocked(state, action.problem);
     default:
@@ -166,7 +193,7 @@ function blocked(state: OperatingState, problem: ApiProblem): ErrorState {
   return { kind: 'error', problem, returnTo: state };
 }
 
-/** Só o contexto do caixa: a tela seguinte não herda campos da anterior (`sale`, `pendingScan`). */
+/** Só o contexto do caixa: a tela seguinte não herda os demais campos de quem a chamou. */
 function cashContext(state: CashContext): CashContext {
   return { operator: state.operator, register: state.register, sessionId: state.sessionId };
 }

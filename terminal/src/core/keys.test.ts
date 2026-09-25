@@ -277,6 +277,11 @@ describe('resolveShortcut: atalho por contexto', () => {
     expect(resolveShortcut(keyName, ctx)).toBeNull();
   });
 
+  test('no pagamento, F9 conclui a venda (o único atalho da tela além do ESC)', () => {
+    expect(resolveShortcut('F9', context('paying'))).toEqual({ type: 'intent', name: 'checkout' });
+    expect(resolveShortcut('F9', sale)).toEqual({ type: 'intent', name: 'checkout' });
+  });
+
   test('ESC só age no pagamento, no fechamento e no erro', () => {
     expect(resolveShortcut('ESC', context('paying'))).toEqual({ type: 'cancel' });
     expect(resolveShortcut('ESC', context('closingCash'))).toEqual({ type: 'cancel' });

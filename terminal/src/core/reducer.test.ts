@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { reduce, type Action } from './reducer';
-import { initialState, type SaleView, type State } from './state';
+import { initialState, type ReceiptView, type SaleView, type State } from './state';
 
 const operator = { id: 'u-1', name: 'Ana' };
 const register = { id: 'r-1', name: 'Caixa 1' };
@@ -14,8 +14,14 @@ const sale: SaleView = {
   subtotal: 5.5,
   discountAmount: 0,
   total: 5.5,
+  paidAmount: 0,
+  changeAmount: 0,
+  payments: [],
   customerId: null,
 };
+
+/** Resumo que o `complete` devolveu: a tela de sucesso mostra estes números, não uma conta (1113). */
+const receipt: ReceiptView = { number: 42, total: 5.5, changeAmount: 0.5 };
 
 const problem = { status: 503, code: null, detail: 'Serviço indisponível.' };
 
@@ -70,6 +76,7 @@ describe('reducer da operação', () => {
       sessionId: 'session-1',
       sale: null,
       pendingScan: null,
+      receipt: null,
     });
   });
 
@@ -110,6 +117,7 @@ describe('reducer da operação', () => {
       sessionId: 'session-1',
       sale,
       pendingScan: null,
+      receipt: null,
     });
   });
 
@@ -128,6 +136,7 @@ describe('reducer da operação', () => {
       sessionId: 'session-1',
       sale,
       pendingScan: null,
+      receipt: null,
     });
   });
 
@@ -153,6 +162,15 @@ describe('reducer da operação', () => {
     expect(reduce(state, { type: 'paymentStarted' })).toBe(state);
   });
 
+  test('F9 com a venda sem itens não abre o pagamento: venda vazia não conclui (BR-05)', () => {
+    const empty = reduce(selling(), {
+      type: 'saleUpdated',
+      sale: { ...sale, items: [], subtotal: 0, total: 0 },
+    });
+
+    expect(reduce(empty, { type: 'paymentStarted' })).toBe(empty);
+  });
+
   test('ESC no pagamento volta para a venda sem perder os itens', () => {
     const paying = reduce(selling(), { type: 'paymentStarted' });
 
@@ -163,6 +181,7 @@ describe('reducer da operação', () => {
       sessionId: 'session-1',
       sale,
       pendingScan: null,
+      receipt: null,
     });
   });
 
@@ -176,17 +195,41 @@ describe('reducer da operação', () => {
     });
   });
 
-  test('concluir o pagamento inicia a próxima venda na mesma sessão', () => {
+  test('concluir guarda o resumo do servidor e volta para a venda, pronta para a próxima', () => {
     const paying = reduce(selling(), { type: 'paymentStarted' });
 
-    expect(reduce(paying, { type: 'saleCompleted' })).toEqual({
+    expect(reduce(paying, { type: 'saleCompleted', receipt })).toEqual({
       kind: 'saleOpen',
       operator,
       register,
       sessionId: 'session-1',
       sale: null,
       pendingScan: null,
+      receipt,
     });
+  });
+
+  test('ENTER na tela de sucesso limpa o resumo e deixa a próxima venda vazia', () => {
+    const completed = reduce(reduce(selling(), { type: 'paymentStarted' }), {
+      type: 'saleCompleted',
+      receipt,
+    });
+
+    expect(reduce(completed, { type: 'receiptDismissed' })).toEqual({
+      kind: 'saleOpen',
+      operator,
+      register,
+      sessionId: 'session-1',
+      sale: null,
+      pendingScan: null,
+      receipt: null,
+    });
+  });
+
+  test('resumo dispensado sem resumo à vista é ignorado e devolve o mesmo estado', () => {
+    const state = selling();
+
+    expect(reduce(state, { type: 'receiptDismissed' })).toBe(state);
   });
 
   test('F10 entra no fechamento levando a venda aberta', () => {
@@ -209,6 +252,7 @@ describe('reducer da operação', () => {
       sessionId: 'session-1',
       sale,
       pendingScan: null,
+      receipt: null,
     });
   });
 
@@ -268,11 +312,11 @@ describe('reducer da operação', () => {
       [initialState, { type: 'confirm' }],
       [initialState, { type: 'barcodeScanned', barcode: '7891000100103', quantity: 1 }],
       [initialState, { type: 'cashClosed' }],
-      [initialState, { type: 'saleCompleted' }],
+      [initialState, { type: 'saleCompleted', receipt }],
       [loggedIn(), { type: 'paymentStarted' }],
       [loggedIn(), { type: 'cancel' }],
       [cashOpened(), { type: 'cashOpened', sessionId: 'session-2' }],
-      [cashOpened(), { type: 'saleCompleted' }],
+      [cashOpened(), { type: 'saleCompleted', receipt }],
       [selling(), { type: 'cancel' }],
       [selling(), { type: 'cashClosed' }],
     ];
@@ -282,7 +326,7 @@ describe('reducer da operação', () => {
     }
   });
 
-  test('fluxo completo: login → abertura → venda → pagamento → fechamento → login', () => {
+  test('fluxo completo: login → abertura → venda → pagamento → sucesso → fechamento → login', () => {
     let state: State = initialState;
 
     state = reduce(state, { type: 'loginSucceeded', operator, register });
@@ -295,7 +339,7 @@ describe('reducer da operação', () => {
     state = reduce(state, { type: 'saleUpdated', sale });
     state = reduce(state, { type: 'paymentStarted' });
     state = reduce(state, { type: 'saleUpdated', sale: { ...sale, total: 5 } });
-    state = reduce(state, { type: 'saleCompleted' });
+    state = reduce(state, { type: 'saleCompleted', receipt });
 
     expect(state).toEqual({
       kind: 'saleOpen',
@@ -304,8 +348,10 @@ describe('reducer da operação', () => {
       sessionId: 'session-1',
       sale: null,
       pendingScan: null,
+      receipt,
     });
 
+    state = reduce(state, { type: 'receiptDismissed' });
     state = reduce(state, { type: 'cashClosingStarted' });
     state = reduce(state, { type: 'cashClosed' });
 

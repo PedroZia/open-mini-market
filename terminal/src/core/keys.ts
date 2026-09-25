@@ -277,7 +277,10 @@ export function resolveRawKeys(chunk: string): KeyName[] {
  * - modal aberto vence a tela: só ESC resolve (`closeModal`); ENTER, setas e `+`/`-` do modal são
  *   do próprio formulário/lista, que os trata localmente;
  * - `error` é falha bloqueante: só reconhecer, com ENTER (`confirm`) ou ESC (`cancel`);
- * - `paying`/`closingCash`: ESC volta para a venda com ela intacta (`cancel`);
+ * - `paying`: o F9 conclui a venda (a barra de status da tela mostra a tecla) e ESC volta para a
+ *   venda com ela intacta (`cancel`); ENTER, setas e `+`/`-` são do formulário de pagamento, que os
+ *   trata localmente;
+ * - `closingCash`: ESC volta para a venda com ela intacta (`cancel`);
  * - `login`/`openingCash`: formulários — nada resolve, texto e navegação são dos campos.
  */
 export function resolveShortcut(keyName: KeyName, context: KeyContext): Shortcut | null {
@@ -292,6 +295,10 @@ export function resolveShortcut(keyName: KeyName, context: KeyContext): Shortcut
       }
       return keyName === 'ESC' ? { type: 'cancel' } : null;
     case 'paying':
+      if (keyName === 'F9') {
+        return { type: 'intent', name: 'checkout' };
+      }
+      return keyName === 'ESC' ? { type: 'cancel' } : null;
     case 'closingCash':
       return keyName === 'ESC' ? { type: 'cancel' } : null;
     case 'saleOpen': {

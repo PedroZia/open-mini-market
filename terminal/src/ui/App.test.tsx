@@ -2,11 +2,13 @@ import { render } from 'ink-testing-library';
 import { describe, expect, test, vi } from 'vitest';
 
 import type {
+  AddPaymentOutcome,
   AddSaleItemOutcome,
   ApplyDiscountOutcome,
   BarcodeLookupOutcome,
   CashRegisterOption,
   CashRegistersOutcome,
+  CompleteSaleOutcome,
   CreateSaleOutcome,
   CurrentCashSessionOutcome,
   CustomerOption,
@@ -17,7 +19,7 @@ import type {
   SearchCustomersOutcome,
   TerminalApi,
 } from '../api/terminalApi';
-import type { SaleView } from '../core/state';
+import type { PaymentMethod, PaymentView, SaleView } from '../core/state';
 import { App } from './App';
 
 /**
@@ -57,6 +59,9 @@ function saleDiscounted(discountAmount: number): SaleView {
     subtotal: 24.9,
     discountAmount,
     total: 24.9 - discountAmount,
+    paidAmount: 0,
+    changeAmount: 0,
+    payments: [],
     customerId: null,
   };
 }
@@ -83,7 +88,17 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     createSale: vi.fn(
       async (): Promise<CreateSaleOutcome> => ({
         ok: true,
-        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0, customerId: null },
+        sale: {
+          id: 'sale-1',
+          items: [],
+          subtotal: 0,
+          discountAmount: 0,
+          total: 0,
+          paidAmount: 0,
+          changeAmount: 0,
+          payments: [],
+          customerId: null,
+        },
       }),
     ),
     addSaleItem: vi.fn(
@@ -97,6 +112,9 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
           subtotal: 24.9,
           discountAmount: 0,
           total: 24.9,
+          paidAmount: 0,
+          changeAmount: 0,
+          payments: [],
           customerId: null,
         },
       }),
@@ -128,6 +146,21 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
         ok: false,
         kind: 'retryable',
         problem: { status: 0, code: null, detail: 'cliente não usado neste teste' },
+      }),
+    ),
+    // pagamento e conclusão (1113): o fluxo do F9 tem o seu próprio describe; aqui só fecha o contrato
+    addPayment: vi.fn(
+      async (): Promise<AddPaymentOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'pagamento não usado neste teste' },
+      }),
+    ),
+    completeSale: vi.fn(
+      async (): Promise<CompleteSaleOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'conclusão não usada neste teste' },
       }),
     ),
     ...overrides,
@@ -502,7 +535,17 @@ describe('App: bipe adiciona item (1109)', () => {
     const createSale = vi.fn(
       async (): Promise<CreateSaleOutcome> => ({
         ok: true,
-        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0, customerId: null },
+        sale: {
+          id: 'sale-1',
+          items: [],
+          subtotal: 0,
+          discountAmount: 0,
+          total: 0,
+          paidAmount: 0,
+          changeAmount: 0,
+          payments: [],
+          customerId: null,
+        },
       }),
     );
     const addSaleItem = vi.fn(
@@ -516,6 +559,9 @@ describe('App: bipe adiciona item (1109)', () => {
           subtotal: 24.9,
           discountAmount: 0,
           total: 24.9,
+          paidAmount: 0,
+          changeAmount: 0,
+          payments: [],
           customerId: null,
         },
       }),
@@ -658,6 +704,9 @@ describe('App: desconto (1111)', () => {
           subtotal: 24.9,
           discountAmount: 0,
           total: 24.9,
+          paidAmount: 0,
+          changeAmount: 0,
+          payments: [],
           customerId: null,
         },
       }),
@@ -693,6 +742,9 @@ describe('App: cliente na venda (1112)', () => {
       subtotal: 24.9,
       discountAmount: 0,
       total: 24.9,
+      paidAmount: 0,
+      changeAmount: 0,
+      payments: [],
       customerId,
     };
   }
@@ -886,5 +938,247 @@ describe('App: cliente na venda (1112)', () => {
 
     await expectFrame(ui.lastFrame, 'Cliente na venda (F6)');
     expect(ui.lastFrame()).not.toContain('Desconto na venda (F5)');
+  });
+});
+
+describe('App: pagamento e conclusão (1113)', () => {
+  /** Venda com o item do bipe e o pagamento como o servidor o devolveu (BR-05/BR-12). */
+  function salePaid(paidAmount: number, changeAmount: number, payments: PaymentView[]): SaleView {
+    return {
+      id: 'sale-1',
+      items: [
+        { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+      ],
+      subtotal: 24.9,
+      discountAmount: 0,
+      total: 24.9,
+      paidAmount,
+      changeAmount,
+      payments,
+      customerId: null,
+    };
+  }
+
+  function payment(
+    id: string,
+    method: PaymentMethod,
+    amount: number,
+    changeAmount = 0,
+  ): PaymentView {
+    return { id, method, amount, changeAmount, status: 'APPROVED' };
+  }
+
+  /** Venda com um item e o pagamento aberto pelo F9 do canal cru: o ponto de partida dos testes. */
+  async function reachPayment(api: TerminalApi) {
+    const ui = render(<App api={api} />);
+    await reachSale(ui);
+    ui.stdin.write('7891000100103\r');
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+
+    ui.stdin.write('\u001b[20~'); // F9: o `useInput` do Ink não entrega as teclas F
+    await expectFrame(ui.lastFrame, 'Pagamento (F9)');
+
+    return ui;
+  }
+
+  test('F9 sem venda criada não abre o pagamento: venda vazia não tem o que pagar', async () => {
+    const addPayment = vi.fn();
+    const ui = render(<App api={apiStub({ addPayment })} />);
+    await reachSale(ui);
+
+    ui.stdin.write('\u001b[20~');
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(ui.lastFrame()).not.toContain('Pagamento (F9)');
+    expect(addPayment).not.toHaveBeenCalled();
+  });
+
+  test('F9 abre o pagamento com as cinco formas e o pago/total do servidor', async () => {
+    const ui = await reachPayment(apiStub());
+
+    expect(ui.lastFrame()).toContain('Método: [DINHEIRO] · PIX · DÉBITO · CRÉDITO · VOUCHER');
+    expect(ui.lastFrame()).toContain('Valor: R$ 0,00');
+    expect(ui.lastFrame()).toContain('Recebido: R$ 0,00');
+    expect(ui.lastFrame()).toContain('nenhum pagamento registrado');
+    expect(ui.lastFrame()).toContain('Pago: R$ 0,00 de R$ 24,90');
+    expect(ui.lastFrame()).not.toContain('Subtotal:'); // a venda sai de cena com o pagamento à vista
+  });
+
+  test('a máscara é em centavos e o recebido só existe no dinheiro', async () => {
+    const ui = await reachPayment(apiStub());
+
+    ui.stdin.write('1000');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 10,00');
+
+    ui.stdin.write('\u001b[C'); // seta para a direita troca a forma
+    await expectFrame(ui.lastFrame, '[PIX]');
+
+    expect(ui.lastFrame()).toContain('Valor: R$ 10,00');
+    expect(ui.lastFrame()).not.toContain('Recebido:');
+  });
+
+  test('dinheiro com o valor recebido mostra o troco do servidor e o pagamento registrado', async () => {
+    const addPayment = vi.fn(
+      async (): Promise<AddPaymentOutcome> => ({
+        ok: true,
+        sale: salePaid(24.9, 25.1, [payment('pay-1', 'CASH', 24.9, 25.1)]),
+      }),
+    );
+    const ui = await reachPayment(apiStub({ addPayment }));
+
+    ui.stdin.write('2490');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 24,90');
+    ui.stdin.write('\t');
+    await expectFrame(ui.lastFrame, '› Recebido:');
+    ui.stdin.write('5000');
+    await expectFrame(ui.lastFrame, 'Recebido: R$ 50,00');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, '1. DINHEIRO — R$ 24,90 · troco R$ 25,10');
+    expect(ui.lastFrame()).toContain('Pago: R$ 24,90 de R$ 24,90');
+    expect(ui.lastFrame()).toContain('TROCO: R$ 25,10'); // troco do servidor, em destaque
+    expect(addPayment).toHaveBeenCalledWith(
+      'sale-1',
+      { method: 'CASH', amount: 24.9, tenderedAmount: 50 },
+      expect.any(String),
+    );
+  });
+
+  test('dois pagamentos acumulam o pago e a lista: a tela continua no pagamento', async () => {
+    let registered = 0;
+    const addPayment = vi.fn(async (): Promise<AddPaymentOutcome> => {
+      registered += 1;
+
+      return registered === 1
+        ? { ok: true, sale: salePaid(10, 0, [payment('pay-1', 'CASH', 10)]) }
+        : {
+            ok: true,
+            sale: salePaid(15, 0, [payment('pay-1', 'CASH', 10), payment('pay-2', 'PIX', 5)]),
+          };
+    });
+    const ui = await reachPayment(apiStub({ addPayment }));
+
+    // primeiro pagamento em dinheiro: 10,00 com 10,00 recebidos (sem troco)
+    ui.stdin.write('1000');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 10,00');
+    ui.stdin.write('\t');
+    await expectFrame(ui.lastFrame, '› Recebido:');
+    ui.stdin.write('1000');
+    await expectFrame(ui.lastFrame, 'Recebido: R$ 10,00');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'Pago: R$ 10,00 de R$ 24,90');
+
+    // segundo em PIX: a máscara e o campo voltam limpos para o próximo
+    ui.stdin.write('\u001b[C');
+    await expectFrame(ui.lastFrame, '[PIX]');
+    ui.stdin.write('500');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 5,00');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, '2. PIX — R$ 5,00');
+    expect(ui.lastFrame()).toContain('1. DINHEIRO — R$ 10,00');
+    expect(ui.lastFrame()).toContain('Pago: R$ 15,00 de R$ 24,90');
+    expect(ui.lastFrame()).toContain('Pagamento (F9)'); // a venda só fecha no F9
+    expect(addPayment).toHaveBeenCalledTimes(2);
+  });
+
+  test('F9 conclui e o ENTER inicia a próxima venda com o resumo do servidor', async () => {
+    const completeSale = vi.fn(
+      async (): Promise<CompleteSaleOutcome> => ({
+        ok: true,
+        receipt: { number: 42, total: 24.9, changeAmount: 25.1 },
+      }),
+    );
+    const ui = await reachPayment(apiStub({ completeSale }));
+
+    ui.stdin.write('\u001b[20~');
+
+    await expectFrame(ui.lastFrame, 'Venda 42 concluída');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90');
+    expect(ui.lastFrame()).toContain('TROCO: R$ 25,10');
+    expect(ui.lastFrame()).toContain('ENTER inicia a próxima venda');
+    expect(completeSale).toHaveBeenCalledWith('sale-1', expect.any(String));
+
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(ui.lastFrame()).not.toContain('Venda 42 concluída');
+    expect(ui.lastFrame()).not.toContain('TROCO:');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 0,00');
+  });
+
+  test('falha transitória ao concluir não avança nem cria venda nova, e o F9 reusa a chave', async () => {
+    const createSale = vi.fn(
+      async (): Promise<CreateSaleOutcome> => ({
+        ok: true,
+        sale: {
+          id: 'sale-1',
+          items: [],
+          subtotal: 0,
+          discountAmount: 0,
+          total: 0,
+          paidAmount: 0,
+          changeAmount: 0,
+          payments: [],
+          customerId: null,
+        },
+      }),
+    );
+    let attempt = 0;
+    // tipado pelo contrato: o teste confere a chave das duas tentativas em `mock.calls`
+    const completeSale = vi.fn<TerminalApi['completeSale']>(async () => {
+      attempt += 1;
+
+      return attempt === 1
+        ? {
+            ok: false,
+            kind: 'retryable',
+            problem: { status: 0, code: null, detail: 'fetch failed' },
+          }
+        : { ok: true, receipt: { number: 42, total: 24.9, changeAmount: 0 } };
+    });
+    const ui = await reachPayment(apiStub({ createSale, completeSale }));
+
+    ui.stdin.write('\u001b[20~');
+
+    await expectFrame(ui.lastFrame, 'falha ao concluir — F9 tenta de novo');
+    expect(ui.lastFrame()).toContain('Pagamento (F9)'); // a venda não avançou
+    expect(ui.lastFrame()).not.toContain('Venda 42 concluída');
+
+    ui.stdin.write('\u001b[20~');
+
+    await expectFrame(ui.lastFrame, 'Venda 42 concluída');
+    expect(completeSale).toHaveBeenCalledTimes(2);
+    expect(completeSale.mock.calls[0]?.[1]).toBe(completeSale.mock.calls[1]?.[1]);
+    // o retry é da mesma venda: nada de criar outra (a chave é o que evita a baixa dupla no servidor)
+    expect(createSale).toHaveBeenCalledTimes(1);
+  });
+
+  test('422 PAYMENT_INSUFFICIENT mostra a mensagem e continua no pagamento', async () => {
+    const completeSale = vi.fn(
+      async (): Promise<CompleteSaleOutcome> => ({
+        ok: false,
+        kind: 'rejected',
+        message: 'pagamento insuficiente — registre o valor que falta',
+      }),
+    );
+    const ui = await reachPayment(apiStub({ completeSale }));
+
+    ui.stdin.write('\u001b[20~');
+
+    await expectFrame(ui.lastFrame, 'pagamento insuficiente — registre o valor que falta');
+    expect(ui.lastFrame()).toContain('Pagamento (F9)');
+    expect(ui.lastFrame()).toContain('Pago: R$ 0,00 de R$ 24,90');
+    expect(ui.lastFrame()).not.toContain('Venda 42 concluída');
+  });
+
+  test('ESC no pagamento volta para a venda com os itens preservados', async () => {
+    const ui = await reachPayment(apiStub());
+
+    ui.stdin.write('\u001b'); // ESC pelo canal do `useInput`, como nas demais telas
+
+    await expectFrame(ui.lastFrame, 'TOTAL: R$ 24,90');
+    expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).not.toContain('Pagamento (F9)');
   });
 });

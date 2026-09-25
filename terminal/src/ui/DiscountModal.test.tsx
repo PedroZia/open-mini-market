@@ -2,10 +2,12 @@ import { render } from 'ink-testing-library';
 import { describe, expect, test, vi } from 'vitest';
 
 import type {
+  AddPaymentOutcome,
   AddSaleItemOutcome,
   ApplyDiscountOutcome,
   BarcodeLookupOutcome,
   CashRegistersOutcome,
+  CompleteSaleOutcome,
   CreateSaleOutcome,
   CurrentCashSessionOutcome,
   CustomerSaleOutcome,
@@ -48,6 +50,9 @@ function discounted(total: number): SaleView {
     subtotal: 24.9,
     discountAmount: 24.9 - total,
     total,
+    paidAmount: 0,
+    changeAmount: 0,
+    payments: [],
     customerId: null,
   };
 }
@@ -97,6 +102,13 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     unlinkCustomer: vi.fn(
       async (): Promise<CustomerSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    // o pagamento (1113) é de outra tela: aqui só fecha o contrato
+    addPayment: vi.fn(
+      async (): Promise<AddPaymentOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    completeSale: vi.fn(
+      async (): Promise<CompleteSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
     ),
     ...overrides,
   };

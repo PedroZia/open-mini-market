@@ -30,6 +30,20 @@ export type SaleItemView = {
   lineTotal: number;
 };
 
+/** Forma de pagamento do contrato (`PaymentMethod`): as cinco do PDV, escolhidas pelo operador. */
+export type PaymentMethod = 'CASH' | 'PIX' | 'DEBIT' | 'CREDIT' | 'VOUCHER';
+
+/** Pagamento registrado na venda, como o servidor devolveu — nada é calculado aqui (BR-05, BR-12). */
+export type PaymentView = {
+  id: string;
+  method: PaymentMethod;
+  amount: number;
+  /** Troco do dinheiro (`tendered − amount`, BR-05); `0` nas demais formas. */
+  changeAmount: number;
+  /** `APPROVED`/`CANCELLED` do `PaymentStatus` (1113 não cancela: tudo chega aprovado). */
+  status: string;
+};
+
 /** Venda em andamento — valores do servidor, nunca recalculados na TUI. */
 export type SaleView = {
   id: string;
@@ -37,12 +51,28 @@ export type SaleView = {
   subtotal: number;
   discountAmount: number;
   total: number;
+  /** Pago até agora, somado pelo servidor a cada pagamento aprovado (BR-05). */
+  paidAmount: number;
+  /** Troco acumulado do dinheiro; `0` enquanto não houver (BR-05). */
+  changeAmount: number;
+  /** Pagamentos registrados, na ordem em que o servidor os devolveu. */
+  payments: PaymentView[];
   /**
    * Cliente vinculado como o servidor o tem (`customerId` do `SaleDetailResponse`, 1112); `null` na
    * venda anônima. O **nome** exibido no cabeçalho não vem daqui: é a anotação local que o shell
    * guarda quando o próprio operador vincula (o reducer não tem o nome).
    */
   customerId: string | null;
+};
+
+/**
+ * Resumo da venda concluída, lido do corpo do `complete` (1113): número, total e troco como o
+ * servidor os devolveu — a tela de sucesso só exibe (BR-12).
+ */
+export type ReceiptView = {
+  number: number;
+  total: number;
+  changeAmount: number;
 };
 
 /** Bipe do leitor aguardando a chamada da API; o código segue **bruto** (BR-14). */
@@ -83,6 +113,11 @@ export type SaleOpenState = CashContext & {
   sale: SaleView | null;
   /** último bipe ainda não enviado à API. */
   pendingScan: ScanIntent | null;
+  /**
+   * Resumo da venda que acabou de ser concluída (1113): enquanto não for `null` a tela de sucesso
+   * está no lugar da venda e o ENTER inicia a próxima.
+   */
+  receipt: ReceiptView | null;
 };
 
 export type PayingState = CashContext & {
