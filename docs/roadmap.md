@@ -1143,11 +1143,17 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** teste do fluxo "desconhecido → cadastra → item na venda" e recusa no modal; o E2E com o cadastro rápido entra na reescrita do 1130 (a Ink não recebe recurso novo); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): cadastra produto rapido pelo PDV`
 
-- [ ] **1129 — Autoteste do leitor 2.0 (opcional)**
-  **Objetivo:** diagnosticar o leitor com mais contexto. **Depende:** 1125
-  **Implementar:** histórico das 5 últimas leituras + diagnóstico do transporte (lento, sem terminador, layout, erro do servidor).
-  **Testes/aceite:** testes puros do diagnóstico + tela; gate do 1121 verde.
-  **Commit:** `feat(tui): diagnostica o leitor no autoteste`
+- [ ] **1129a — Diagnóstico do leitor (puro)**
+  **Objetivo:** classificar o transporte do leitor a partir das leituras. **Depende:** 1128
+  **Implementar:** módulo puro em `src/opentui/` (`core/` fica congelado, §3) com o histórico das 5 últimas leituras e o diagnóstico: rajada lenta (intervalo ≥ 50 ms), sem terminador, suspeita de layout e erro do servidor (`code`); a entrada é a leitura (caracteres + tempos + terminador) e o desfecho da resolução.
+  **Testes/aceite:** testes puros de cada diagnóstico e do histórico (5, ordem, leitura nova empurra a antiga); `bun test src/opentui` e `tsc --noEmit` verdes.
+  **Commit:** `feat(tui): diagnostica o transporte do leitor`
+
+- [ ] **1129b — Tela do autoteste (F11 2.0)**
+  **Objetivo:** portar o F11 com o histórico e o diagnóstico. **Depende:** 1129a
+  **Implementar:** tela do autoteste (overlay) com a última leitura bruta, intervalo entre caracteres, interpretação do servidor, o histórico das 5 e os avisos do diagnóstico + as instruções de configuração do guia; F11 abre pelo `resolveShortcut` (contexto `saleOpen`) e ESC fecha.
+  **Testes/aceite:** tela renderiza última leitura/intervalo/histórico/diagnóstico; F11 abre e ESC fecha; testes de tela equivalentes aos da Ink; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): porta o autoteste do leitor para OpenTUI`
 
 - [ ] **1130 — Cut-over e limpeza**
   **Objetivo:** aposentar a Ink e operar só a UI nova. **Depende:** 1121–1129
