@@ -110,6 +110,30 @@ describe('reducer da operação', () => {
     });
   });
 
+  test('bipe recusado é consumido sem mexer na venda: scanDismissed só limpa o pendente', () => {
+    const scanned = reduce(selling(), {
+      type: 'barcodeScanned',
+      barcode: '7891000100103',
+      quantity: 1,
+    });
+    const dismissed = reduce(scanned, { type: 'scanDismissed' });
+
+    expect(dismissed).toEqual({
+      kind: 'saleOpen',
+      operator,
+      register,
+      sessionId: 'session-1',
+      sale,
+      pendingScan: null,
+    });
+  });
+
+  test('scanDismissed sem bipe pendente é ignorado e devolve o mesmo estado', () => {
+    const state = selling();
+
+    expect(reduce(state, { type: 'scanDismissed' })).toBe(state);
+  });
+
   test('F9 abre o pagamento da venda em andamento', () => {
     expect(reduce(selling(), { type: 'paymentStarted' })).toEqual({
       kind: 'paying',

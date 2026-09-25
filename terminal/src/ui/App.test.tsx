@@ -2,9 +2,11 @@ import { render } from 'ink-testing-library';
 import { describe, expect, test, vi } from 'vitest';
 
 import type {
+  AddSaleItemOutcome,
   BarcodeLookupOutcome,
   CashRegisterOption,
   CashRegistersOutcome,
+  CreateSaleOutcome,
   CurrentCashSessionOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
@@ -53,6 +55,26 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
       async (): Promise<BarcodeLookupOutcome> => ({
         ok: true,
         product: { name: 'Arroz 5kg', price: 24.9, quantity: null },
+      }),
+    ),
+    createSale: vi.fn(
+      async (): Promise<CreateSaleOutcome> => ({
+        ok: true,
+        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0 },
+      }),
+    ),
+    addSaleItem: vi.fn(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: true,
+        sale: {
+          id: 'sale-1',
+          items: [
+            { productId: 'p1', name: 'Arroz 5kg', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+          ],
+          subtotal: 24.9,
+          discountAmount: 0,
+          total: 24.9,
+        },
       }),
     ),
     ...overrides,
@@ -419,5 +441,59 @@ describe('App: venda e canal cru do teclado (1108)', () => {
 
     await expectFrame(ui.lastFrame, 'Autoteste do leitor (F11)');
     expect(ui.lastFrame()).not.toContain('Fechamento de caixa');
+  });
+});
+
+describe('App: bipe adiciona item (1109)', () => {
+  test('o shell liga o bipe da venda à API: cria a venda e inclui o item', async () => {
+    const createSale = vi.fn(
+      async (): Promise<CreateSaleOutcome> => ({
+        ok: true,
+        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0 },
+      }),
+    );
+    const addSaleItem = vi.fn(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: true,
+        sale: {
+          id: 'sale-1',
+          items: [
+            { productId: 'p1', name: 'Arroz 5kg', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+          ],
+          subtotal: 24.9,
+          discountAmount: 0,
+          total: 24.9,
+        },
+      }),
+    );
+    const ui = render(<App api={apiStub({ createSale, addSaleItem })} />);
+    await reachSale(ui);
+
+    ui.stdin.write('7891000100103\r');
+
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+    expect(createSale).toHaveBeenCalledTimes(1);
+    expect(addSaleItem).toHaveBeenCalledWith('sale-1', { barcode: '7891000100103', quantity: 1 });
+  });
+
+  test('falha bloqueante ao incluir o item vai para a tela de erro e o ENTER volta para a venda', async () => {
+    const addSaleItem = vi.fn(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: false,
+        kind: 'failed',
+        problem: { status: 403, code: 'ACCESS_DENIED', detail: 'permissão sale.create' },
+      }),
+    );
+    const ui = render(<App api={apiStub({ addSaleItem })} />);
+    await reachSale(ui);
+
+    ui.stdin.write('7891000100103\r');
+
+    await expectFrame(ui.lastFrame, '403 — ACCESS_DENIED — permissão sale.create');
+
+    ui.stdin.write('\r'); // reconhece o erro e volta para a venda
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 0,00');
   });
 });

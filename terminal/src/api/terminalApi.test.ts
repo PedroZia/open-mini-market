@@ -363,4 +363,183 @@ describe('createTerminalApi', () => {
       },
     });
   });
+
+  test('abrir a venda (201) sai como SaleView vazia com os totais do servidor', async () => {
+    const post = vi.fn(async () => ({
+      id: 'sale-1',
+      number: 42,
+      status: 'OPEN',
+      subtotal: 0,
+      discountAmount: 0,
+      total: 0,
+      itemCount: 0,
+    }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(await api.createSale()).toEqual({
+      ok: true,
+      sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0 },
+    });
+    expect(post).toHaveBeenCalledWith('/api/v1/sales', undefined);
+  });
+
+  test('201 sem id de venda é falha bloqueante: sem venda não há onde incluir item', async () => {
+    const api = createTerminalApi(stubClient({ post: async () => ({ status: 'OPEN' }) }));
+
+    expect(await api.createSale()).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'venda aberta sem id na resposta' },
+    });
+  });
+
+  test('falha de rede ao abrir a venda é transitória: o bipe fica para o retry', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+
+    expect(await api.createSale()).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+  });
+
+  test('adicionar item manda o código bruto e devolve a venda inteira do servidor', async () => {
+    const post = vi.fn(async () => ({
+      id: 'sale-1',
+      status: 'OPEN',
+      subtotal: 49.8,
+      discountAmount: 0,
+      total: 49.8,
+      items: [
+        { productId: 'p1', barcode: '7891000100103', name: 'Arroz 5kg', unit: 'UN', unitPrice: 24.9, quantity: 2, lineTotal: 49.8 },
+      ],
+    }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(await api.addSaleItem('sale-1', { barcode: '7891000100103', quantity: 2 })).toEqual({
+      ok: true,
+      sale: {
+        id: 'sale-1',
+        items: [
+          { productId: 'p1', name: 'Arroz 5kg', quantity: 2, unitPrice: 24.9, lineTotal: 49.8 },
+        ],
+        subtotal: 49.8,
+        discountAmount: 0,
+        total: 49.8,
+      },
+    });
+    expect(post).toHaveBeenCalledWith('/api/v1/sales/sale-1/items', {
+      barcode: '7891000100103',
+      quantity: 2,
+    });
+  });
+
+  test('404 PRODUCT_NOT_FOUND é desfecho próprio: a venda continua, a tela avisa', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(404, {
+            code: 'PRODUCT_NOT_FOUND',
+            detail: 'produto com código de barras 789 não encontrado',
+          });
+        },
+      }),
+    );
+
+    expect(await api.addSaleItem('sale-1', { barcode: '789', quantity: 1 })).toEqual({
+      ok: false,
+      kind: 'notFound',
+      barcode: '789',
+    });
+  });
+
+  test('404 SALE_NOT_FOUND não é desfecho de produto: segue como falha bloqueante', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(404, { code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' });
+        },
+      }),
+    );
+
+    expect(await api.addSaleItem('sale-1', { barcode: '789', quantity: 1 })).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 404, code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' },
+    });
+  });
+
+  test('422 PRODUCT_INACTIVE vira recusa com mensagem clara e o código bipado', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(422, {
+            code: 'PRODUCT_INACTIVE',
+            detail: 'produto 01924d2c está inativo',
+          });
+        },
+      }),
+    );
+
+    expect(await api.addSaleItem('sale-1', { barcode: '789', quantity: 1 })).toEqual({
+      ok: false,
+      kind: 'rejected',
+      barcode: '789',
+      message: 'produto desativado no cadastro: 789 — fale com o gerente',
+    });
+  });
+
+  test('422 INVALID_INTERNAL_BARCODE vira recusa com o detail do servidor', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(422, {
+            code: 'INVALID_INTERNAL_BARCODE',
+            detail: 'etiqueta de balança 2000420000000 embute valor zero',
+          });
+        },
+      }),
+    );
+
+    expect(await api.addSaleItem('sale-1', { barcode: '2000420000000', quantity: 1 })).toEqual({
+      ok: false,
+      kind: 'rejected',
+      barcode: '2000420000000',
+      message: 'código recusado: etiqueta de balança 2000420000000 embute valor zero',
+    });
+  });
+
+  test('403 no item é falha bloqueante; rede e 5xx são transitórias (retry manual)', async () => {
+    const forbidden = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão sale.create' });
+        },
+      }),
+    );
+    const offline = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(503, { code: 'UNAVAILABLE', detail: 'servidor fora do ar' });
+        },
+      }),
+    );
+
+    expect(await forbidden.addSaleItem('sale-1', { barcode: '789', quantity: 1 })).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 403, code: 'ACCESS_DENIED', detail: 'permissão sale.create' },
+    });
+    expect(await offline.addSaleItem('sale-1', { barcode: '789', quantity: 1 })).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 503, code: 'UNAVAILABLE', detail: 'servidor fora do ar' },
+    });
+  });
 });

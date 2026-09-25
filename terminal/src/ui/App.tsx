@@ -13,7 +13,7 @@ import { useRawShortcuts } from './useRawShortcuts';
 
 /**
  * Shell da TUI (§11.2): guarda o estado da operação no reducer puro (1103) e desenha uma tela por
- * `kind`. Login (1106), abertura de caixa (1107) e venda (1108) são as telas implementadas; os
+ * `kind`. Login (1106), abertura de caixa (1107) e venda (1108/1109) são as telas implementadas; os
  * estados seguintes aparecem como placeholder explícito até o passo que os implementa — a troca de
  * tela é sempre do reducer, nunca da tela.
  *
@@ -61,7 +61,7 @@ export function App({ api }: { api: TerminalApi }) {
       return readerSelfTest ? (
         <ReaderSelfTestScreen resolve={resolveBarcode} />
       ) : (
-        <SaleScreen state={state} now={new Date()} />
+        <SaleScreen state={state} now={new Date()} api={api} dispatch={dispatch} />
       );
     case 'paying':
       return <PlaceholderScreen title="Pagamento" step="1113" />;

@@ -961,7 +961,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** snapshot de render com 0, 1 e 20 itens; largura mínima 80×24 sem quebrar.
   **Commit:** `feat(tui): monta tela de venda`
 
-- [ ] **1109 — Fluxo: bipe adiciona item**
+- [x] **1109 — Fluxo: bipe adiciona item**
   **Objetivo:** operação principal funcionando. **Depende:** 1108, 1104, 809
   **Implementar:** bipe → `POST /sales/{id}/items`; cria a venda na primeira leitura; item não encontrado mostra aviso e oferece cadastro rápido (se tiver permissão — cadastro rápido é SHOULD, aqui só o aviso); feedback visual + som (bell).
   **Testes/aceite:** bipe adiciona e soma quantidade; não encontrado mostra aviso e não quebra a venda; erro de rede mantém estado e permite retry.

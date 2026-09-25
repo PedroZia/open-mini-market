@@ -29,6 +29,8 @@ export type Action =
   | { type: 'loginRejected'; message: string }
   | { type: 'cashOpened'; sessionId: string }
   | { type: 'saleUpdated'; sale: SaleView }
+  /** Bipe consumido sem mexer na venda (produto não encontrado ou recusado): só limpa o pendente. */
+  | { type: 'scanDismissed' }
   | { type: 'paymentStarted' }
   | { type: 'saleCompleted' }
   | { type: 'cashClosingStarted' }
@@ -101,6 +103,9 @@ function reduceSaleOpen(state: SaleOpenState, action: Action): State {
       return { ...state, pendingScan: { barcode: action.barcode, quantity: action.quantity } };
     case 'saleUpdated':
       return { ...state, sale: action.sale, pendingScan: null };
+    case 'scanDismissed':
+      // o bipe não virou item (404/422): não há venda nova, só o pendente a limpar
+      return state.pendingScan === null ? state : { ...state, pendingScan: null };
     case 'paymentStarted':
       // sem venda criada não há o que pagar
       return state.sale === null

@@ -1,6 +1,6 @@
 import { ApiError, type ApiClient, type components } from '@minimarket/api-client';
 
-import type { ApiProblem, Operator } from '../core/state';
+import type { ApiProblem, Operator, SaleView } from '../core/state';
 import { clearToken, setToken } from './session';
 
 /**
@@ -63,6 +63,37 @@ export type BarcodeLookupOutcome =
   | { ok: true; product: BarcodeProduct }
   | { ok: false; problem: ApiProblem };
 
+/** O que o bipe manda ao servidor (`SaleItemRequest` do contrato): código **bruto** e quantidade (BR-14). */
+export type SaleItemIntent = {
+  barcode: string;
+  quantity: number;
+};
+
+/**
+ * Falha de envio (abrir a venda ou incluir o item): `retryable` é a que não completou no servidor —
+ * rede, timeout e 5xx —, com o bipe guardado para o retry manual da tela (1109); `failed` (403, 409,
+ * 400, contrato) bloqueia a operação na tela de erro (§11.4).
+ */
+export type SendFailure =
+  | { ok: false; kind: 'retryable'; problem: ApiProblem }
+  | { ok: false; kind: 'failed'; problem: ApiProblem };
+
+/** Resultado de abrir a venda no primeiro bipe (`POST /sales`, 201): a venda vazia ou a falha. */
+export type CreateSaleOutcome = { ok: true; sale: SaleView } | SendFailure;
+
+/**
+ * Resultado do bipe na venda:
+ * - `ok`: a venda inteira como o servidor devolveu (itens e totais dele, BR-12);
+ * - `notFound`: 404 `PRODUCT_NOT_FOUND` — a tela avisa e a venda continua;
+ * - `rejected`: 422 `PRODUCT_INACTIVE`/`INVALID_INTERNAL_BARCODE` — aviso com mensagem clara;
+ * - `SendFailure`: retry manual (rede/5xx) ou tela de erro (403/409/400/contrato).
+ */
+export type AddSaleItemOutcome =
+  | { ok: true; sale: SaleView }
+  | { ok: false; kind: 'notFound'; barcode: string }
+  | { ok: false; kind: 'rejected'; barcode: string; message: string }
+  | SendFailure;
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -92,6 +123,17 @@ export type TerminalApi = {
    * decide o que fazer com ela é a tela (o autoteste do F11 mostra, o bipe da venda 1109 avisa).
    */
   resolveBarcode(barcode: string): Promise<BarcodeLookupOutcome>;
+  /**
+   * Abre a venda (`POST /sales`, 201, sem corpo) no primeiro bipe: a resposta só traz os totais
+   * zerados (ainda sem itens), e é o id dela que o `addSaleItem` usa. A `Idempotency-Key` é do
+   * client (1102), uma por chamada.
+   */
+  createSale(): Promise<CreateSaleOutcome>;
+  /**
+   * Inclui o item pelo código **bruto** do bipe (BR-14): o servidor resolve GTIN, código interno ou
+   * etiqueta de balança e soma na linha do produto que já está na venda (BR-01).
+   */
+  addSaleItem(saleId: string, item: SaleItemIntent): Promise<AddSaleItemOutcome>;
 };
 
 /** Monta a camada de API sobre um client já configurado (base URL + token da sessão). */
@@ -222,6 +264,67 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         return { ok: false, problem: problemOf(error) };
       }
     },
+
+    async createSale() {
+      try {
+        const response = await client.post<components['schemas']['SaleResponse']>('/api/v1/sales');
+
+        if (response.id === undefined) {
+          // 201 fora do contrato: sem id de venda não há onde incluir item
+          return failed({ status: 0, code: null, detail: 'venda aberta sem id na resposta' });
+        }
+
+        // a 201 ainda não tem itens: os totais zerados são os do servidor, não uma conta da TUI
+        return {
+          ok: true,
+          sale: {
+            id: response.id,
+            items: [],
+            subtotal: response.subtotal ?? 0,
+            discountAmount: response.discountAmount ?? 0,
+            total: response.total ?? 0,
+          },
+        };
+      } catch (error) {
+        return sendFailure(error);
+      }
+    },
+
+    async addSaleItem(saleId, intent) {
+      try {
+        const response = await client.post<components['schemas']['SaleDetailResponse']>(
+          `/api/v1/sales/${saleId}/items`,
+          { barcode: intent.barcode, quantity: intent.quantity },
+        );
+        const sale = toSaleView(response);
+
+        if (sale === null) {
+          return failed({ status: 0, code: null, detail: 'item sem venda na resposta' });
+        }
+
+        return { ok: true, sale };
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          error.status === 404 &&
+          error.code === 'PRODUCT_NOT_FOUND'
+        ) {
+          // desfecho da operação, não falha: a tela avisa e a venda continua (1109)
+          return { ok: false, kind: 'notFound', barcode: intent.barcode };
+        }
+
+        if (error instanceof ApiError && error.status === 422) {
+          return {
+            ok: false,
+            kind: 'rejected',
+            barcode: intent.barcode,
+            message: rejectionMessage(error, intent.barcode),
+          };
+        }
+
+        return sendFailure(error);
+      }
+    },
   };
 }
 
@@ -244,6 +347,46 @@ function loginFailure(error: unknown): LoginOutcome {
 
 function failed(problem: ApiProblem): { ok: false; kind: 'failed'; problem: ApiProblem } {
   return { ok: false, kind: 'failed', problem };
+}
+
+/**
+ * Falha de envio: 4xx (403, 409, 400...) e contrato fora do esperado bloqueiam na tela de erro;
+ * rede, timeout e 5xx são transitórias — o bipe fica guardado e o ENTER da venda refaz (1109).
+ */
+function sendFailure(error: unknown): SendFailure {
+  if (error instanceof ApiError && error.status < 500) {
+    return failed(problemOf(error));
+  }
+
+  return { ok: false, kind: 'retryable', problem: problemOf(error) };
+}
+
+/** Mensagem do 422 para a tela: o operador precisa saber o que fazer, sem ver o UUID do produto. */
+function rejectionMessage(error: ApiError, barcode: string): string {
+  return error.code === 'PRODUCT_INACTIVE'
+    ? `produto desativado no cadastro: ${barcode} — fale com o gerente`
+    : `código recusado: ${error.detail}`;
+}
+
+/** `SaleDetailResponse` → `SaleView` da tela; `null` quando a resposta não trouxe a venda. */
+function toSaleView(response: components['schemas']['SaleDetailResponse']): SaleView | null {
+  if (response.id === undefined) {
+    return null;
+  }
+
+  return {
+    id: response.id,
+    items: (response.items ?? []).map((item) => ({
+      productId: item.productId ?? '',
+      name: item.name ?? '',
+      quantity: item.quantity ?? 0,
+      unitPrice: item.unitPrice ?? 0,
+      lineTotal: item.lineTotal ?? 0,
+    })),
+    subtotal: response.subtotal ?? 0,
+    discountAmount: response.discountAmount ?? 0,
+    total: response.total ?? 0,
+  };
 }
 
 /** Estado da API → estado da TUI: as telas só conhecem `ApiProblem` (§9.2). */

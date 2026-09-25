@@ -1,8 +1,9 @@
-import { Box, Text, useInput, type Key } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
 
 import { createScanner, type Scanner, type ScannerEvent } from '../core/scanner';
 import type { ApiProblem } from '../core/state';
+import { inputChars } from './scannerInput';
 
 /**
  * Autoteste do leitor (F11, passo 1104c): mostra o que o leitor mandou e o que o servidor
@@ -155,25 +156,10 @@ export function ReaderSelfTestScreen({ resolve }: ReaderSelfTestScreenProps) {
 }
 
 /**
- * Traduz o chunk do Ink no que o scanner come, caractere a caractere — o `\r`/`\n` do ENTER vem
- * dentro do próprio `input`, mas o TAB chega só na flag (`input` vazio), e controles (ESC, setas,
- * DEL) não têm texto e são ignorados.
+ * Traduz o chunk do Ink no que o scanner come: helper compartilhado com a tela de venda (1109),
+ * em `scannerInput.ts` — o `\r`/`\n` do ENTER vem dentro do próprio `input`, mas o TAB chega só na
+ * flag (`input` vazio), e controles (ESC, setas, DEL) não têm texto e são ignorados.
  */
-function inputChars(input: string, key: Key): string[] {
-  if (key.ctrl || key.meta) {
-    return [];
-  }
-
-  if (input !== '') {
-    return [...input];
-  }
-
-  if (key.tab) {
-    return ['\t'];
-  }
-
-  return key.return ? ['\r'] : [];
-}
 
 /** Monta a leitura com o timing da rajada: os `barcode.length` caracteres e o terminador que a fechou. */
 function readBurst(event: ScannerEvent, times: readonly number[]): Reading {

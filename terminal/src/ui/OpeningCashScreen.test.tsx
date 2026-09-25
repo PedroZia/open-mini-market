@@ -2,8 +2,10 @@ import { render } from 'ink-testing-library';
 import { describe, expect, test, vi } from 'vitest';
 
 import type {
+  AddSaleItemOutcome,
   BarcodeLookupOutcome,
   CashRegistersOutcome,
+  CreateSaleOutcome,
   CurrentCashSessionOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
@@ -38,11 +40,24 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     currentCashSession: vi.fn(
       async (): Promise<CurrentCashSessionOutcome> => ({ ok: true, sessionId: 'session-9' }),
     ),
-    // a abertura não bipa: o bipe (1108) entra na camada tipada só para fechar o contrato
+    // a abertura não bipa: o bipe (1109) entra na camada tipada só para fechar o contrato
     resolveBarcode: vi.fn(
       async (): Promise<BarcodeLookupOutcome> => ({
         ok: true,
         product: { name: 'Arroz 5kg', price: 24.9, quantity: null },
+      }),
+    ),
+    createSale: vi.fn(
+      async (): Promise<CreateSaleOutcome> => ({
+        ok: true,
+        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0 },
+      }),
+    ),
+    addSaleItem: vi.fn(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: false,
+        kind: 'notFound',
+        barcode: '7891000100103',
       }),
     ),
     ...overrides,
