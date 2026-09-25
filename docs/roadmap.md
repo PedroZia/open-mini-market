@@ -1083,7 +1083,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes de tela equivalentes aos da Ink (valor inválido, abrindo, 409 com/sem sessão legível, retry ENTER/ESC na tela de erro); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta abertura de caixa e erro para OpenTUI`
 
-- [ ] **1125a — Tela de venda: layout e lista**
+- [x] **1125a — Tela de venda: layout e lista**
   **Objetivo:** abrir a venda na UI nova com a lista rolante e o relógio vivo. **Depende:** 1124b
   **Implementar:** rota `saleOpen` no shell com `SaleScreen` (cabeçalho com caixa/operador/loja/cliente, **relógio vivo** por timer — a Ink passava `new Date()` congelado), lista com `<scrollbox>` que segue a seleção (F-04) e janela de 10 itens, totais do servidor (BR-12), barra de status base (conexão, atalhos, caixa/operador/hora), estado vazio e feedback de uma linha. Passo dividido do 1125 original; bipe/leitura manual é o 1125b e quantidade é o 1125c.
   **Testes/aceite:** testes de layout em 80×24 e 120×40 (lista com itens do estado, seleção por setas com clamp, scroll que segue o item selecionado, relógio que anda, totais do estado); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

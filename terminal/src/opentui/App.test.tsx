@@ -121,7 +121,7 @@ async function signIn(setup: Setup): Promise<void> {
   })
 }
 
-describe("App (1124a/1124b)", () => {
+describe("App (1124a/1124b/1125a)", () => {
   test("login e escolha do caixa roteiam para a abertura de caixa", async () => {
     const login = mock(
       async (): Promise<LoginOutcome> => ({
@@ -141,6 +141,43 @@ describe("App (1124a/1124b)", () => {
       await expectFrame(setup, "Abertura de caixa")
 
       expect(login).toHaveBeenLastCalledWith("ana", SENHA, "r1")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("abrir o caixa roteia para a tela de venda com a loja do cabeçalho", async () => {
+    const openCashRegister = mock(async () => ({ ok: true as const, sessionId: "s1" }))
+    const currentSession = mock(async () => ({
+      ok: true as const,
+      store: { code: "MATRIZ", name: "Matriz" },
+    }))
+    const setup = await renderApp(apiStub({ openCashRegister, currentSession }))
+
+    try {
+      await signIn(setup)
+      await expectFrame(setup, "Escolha o caixa")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+      await expectFrame(setup, "Abertura de caixa")
+
+      await act(async () => {
+        await setup.mockInput.typeText("5000")
+      })
+      await expectFrame(setup, "Fundo de troco: R$ 50,00")
+
+      await act(async () => {
+        setup.mockInput.pressEnter()
+      })
+
+      // a venda abre vazia (o primeiro bipe é do 1125b) e a loja vem do `GET /auth/me` do shell
+      const frame = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(frame).toContain("PDV minimercado · Matriz · Caixa principal")
+      expect(frame).toContain("Operador: Ana Souza")
+      expect(frame).toContain("TOTAL: R$ 0,00")
     } finally {
       setup.renderer.destroy()
     }
