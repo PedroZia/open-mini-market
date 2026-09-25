@@ -216,6 +216,47 @@ export type CompleteSaleOutcome =
   | { ok: false; kind: 'rejected'; message: string }
   | SendFailure;
 
+/** Movimento da gaveta (F7/F8, passo 1114): sangria retira e suprimento coloca dinheiro no caixa. */
+export type CashMovementKind = 'withdrawal' | 'supply';
+
+/**
+ * O que o modal da gaveta manda (`CashMovementRequest`, passo 610): o valor informado pelo operador
+ * — sempre positivo, o sinal do tipo é do ledger (609/610) — e o motivo obrigatório (BR-10).
+ */
+export type CashMovementIntent = {
+  /** Em reais (`10` = R$ 10,00). Quem soma ao saldo é o servidor (BR-12). */
+  amount: number;
+  reason: string;
+};
+
+/** Movimento gravado, como o servidor o devolveu no 201 (`CashMovementResponse`, passos 609/610). */
+export type CashMovementView = {
+  sessionId: string;
+  type: string;
+  amount: number;
+  reason: string;
+  /** Esperado da sessão antes do movimento — do servidor, da mesma transação (BR-12). */
+  expectedBefore: number;
+  /** Esperado depois do movimento: é este saldo atualizado que o modal mostra (BR-12). */
+  expectedAfter: number;
+  /** Sangria acima do esperado: o servidor **não** bloqueia, devolve o alerta (609). */
+  aboveExpected: boolean;
+};
+
+/**
+ * Resultado de sangrar/suprir (passo 1114):
+ * - `ok`: o movimento gravado com o esperado antes/depois que o servidor calculou (BR-12);
+ * - `rejected`: a recusa que **o próprio modal** mostra — 403 sem `cash.withdrawal`/`cash.supply`
+ *   (BR-10), 400 do valor/motivo (forma), 404 `CASH_SESSION_NOT_OPEN`/`CASH_REGISTER_NOT_FOUND` e 409
+ *   `CASH_SESSION_REQUIRED` da sessão do caixa que mudou por fora —, sem fechar o formulário;
+ * - `SendFailure`: retry manual no modal (rede/5xx) ou tela de erro (contrato), como nos demais
+ *   envios.
+ */
+export type CashMovementOutcome =
+  | { ok: true; movement: CashMovementView }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -316,6 +357,30 @@ export type TerminalApi = {
    * de caixa; o servidor devolve o `Idempotency-Replayed` gravado.
    */
   completeSale(saleId: string, idempotencyKey: string): Promise<CompleteSaleOutcome>;
+  /**
+   * Sangria (F7, `POST /api/v1/cash-registers/{id}/withdrawals`, 201, passo 609): retira dinheiro da
+   * sessão aberta do caixa — o `{id}` é o **caixa**, não a sessão — e devolve o movimento com o
+   * esperado antes/depois da mesma transação (BR-10/BR-12). Quem exige a permissão `cash.withdrawal`
+   * e recusa caixa sem sessão é o servidor.
+   *
+   * A `Idempotency-Key` é do chamador (1114), como no pagamento: repetir a mesma tentativa (a
+   * resposta se perdeu) com a mesma chave devolve o replay, sem sangrar duas vezes.
+   */
+  withdrawCash(
+    registerId: string,
+    withdrawal: CashMovementIntent,
+    idempotencyKey: string,
+  ): Promise<CashMovementOutcome>;
+  /**
+   * Suprimento (F8, `POST /api/v1/cash-registers/{id}/supplies`, 201, passo 610): coloca dinheiro na
+   * sessão aberta do caixa, no mesmo contrato da sangria — o `aboveExpected` do suprimento é sempre
+   * `false`, porque suprir só aumenta o esperado.
+   */
+  supplyCash(
+    registerId: string,
+    supply: CashMovementIntent,
+    idempotencyKey: string,
+  ): Promise<CashMovementOutcome>;
 };
 
 /** Monta a camada de API sobre um client já configurado (base URL + token da sessão). */
@@ -663,6 +728,26 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         return sendFailure(error);
       }
     },
+
+    async withdrawCash(registerId, withdrawal, idempotencyKey) {
+      return cashMovement('withdrawal', () =>
+        client.post<components['schemas']['CashMovementResponse']>(
+          `/api/v1/cash-registers/${registerId}/withdrawals`,
+          { amount: withdrawal.amount, reason: withdrawal.reason },
+          { idempotencyKey },
+        ),
+      );
+    },
+
+    async supplyCash(registerId, supply, idempotencyKey) {
+      return cashMovement('supply', () =>
+        client.post<components['schemas']['CashMovementResponse']>(
+          `/api/v1/cash-registers/${registerId}/supplies`,
+          { amount: supply.amount, reason: supply.reason },
+          { idempotencyKey },
+        ),
+      );
+    },
   };
 }
 
@@ -826,6 +911,76 @@ function moneyRejectionMessage(error: ApiError, forbidden: string): string {
   return error.status === 403
     ? forbidden
     : (PAYMENT_REJECTIONS[error.code ?? ''] ?? error.detail);
+}
+
+/** Rótulo pt-BR do movimento, nas mensagens do modal (F7/F8). */
+const MOVEMENT_LABELS: Readonly<Record<CashMovementKind, string>> = {
+  withdrawal: 'sangria',
+  supply: 'suprimento',
+};
+
+/**
+ * Sangria/suprimento (F7/F8, passo 1114) traduzidos para a tela: o movimento gravado quando deu
+ * certo e **qualquer** 4xx como recusa do próprio modal — 403 da permissão (BR-10), 400 do
+ * valor/motivo e 404/409 da sessão do caixa, que mudou por fora —, com o resto em `SendFailure`
+ * (rede/5xx pedem o retry manual; contrato bloqueia na tela de erro).
+ */
+async function cashMovement(
+  kind: CashMovementKind,
+  send: () => Promise<components['schemas']['CashMovementResponse']>,
+): Promise<CashMovementOutcome> {
+  try {
+    const response = await send();
+
+    if (response.sessionId === undefined) {
+      // 201 fora do contrato: sem o movimento não há saldo esperado para a tela
+      return failed({
+        status: 0,
+        code: null,
+        detail: `${MOVEMENT_LABELS[kind]} sem movimento na resposta`,
+      });
+    }
+
+    return {
+      ok: true,
+      movement: {
+        sessionId: response.sessionId,
+        type: response.type ?? '',
+        amount: response.amount ?? 0,
+        reason: response.reason ?? '',
+        expectedBefore: response.expectedBefore ?? 0,
+        expectedAfter: response.expectedAfter ?? 0,
+        aboveExpected: response.aboveExpected ?? false,
+      },
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.status < 500) {
+      return { ok: false, kind: 'rejected', message: cashMovementRejectionMessage(error, kind) };
+    }
+
+    return sendFailure(error);
+  }
+}
+
+/**
+ * Mensagem da recusa que fica no modal da gaveta: o 403 ganha texto fixo (o OPERADOR não tem
+ * `cash.withdrawal`/`cash.supply`, BR-10) sem expor o código da permissão; a sessão de caixa que
+ * mudou por fora tem texto próprio e o 400 do valor/motivo vem com o `detail` do servidor.
+ */
+function cashMovementRejectionMessage(error: ApiError, kind: CashMovementKind): string {
+  if (error.status === 403) {
+    return `sem permissão para registrar ${MOVEMENT_LABELS[kind]}`;
+  }
+
+  if (error.code === 'CASH_SESSION_NOT_OPEN' || error.code === 'CASH_SESSION_REQUIRED') {
+    return 'caixa sem sessão aberta — fale com o gerente';
+  }
+
+  if (error.code === 'CASH_REGISTER_NOT_FOUND') {
+    return 'caixa não encontrado — verifique o cadastro';
+  }
+
+  return error.detail;
 }
 
 /** Normaliza a página de clientes para a lista do modal; registro sem `id` não é vinculável. */

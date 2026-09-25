@@ -991,7 +991,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** pagamento parcial, múltiplos pagamentos, troco correto, pagamento insuficiente bloqueia conclusão, replay idempotente não duplica venda.
   **Commit:** `feat(tui): implementa pagamento e conclusao de venda`
 
-- [ ] **1114 — Fluxo: sangria e suprimento (F7/F8)**
+- [x] **1114 — Fluxo: sangria e suprimento (F7/F8)**
   **Objetivo:** movimentar dinheiro do caixa. **Depende:** 1113, 610
   **Implementar:** modais com valor e motivo; confirmação; exibe saldo esperado atualizado.
   **Testes/aceite:** sangria reduz e suprimento aumenta o esperado; motivo obrigatório; sem permissão mostra erro claro.

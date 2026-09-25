@@ -1,8 +1,9 @@
 import { useReducer, useRef, useState } from 'react';
 
-import type { CustomerOption, TerminalApi } from '../api/terminalApi';
+import type { CashMovementKind, CustomerOption, TerminalApi } from '../api/terminalApi';
 import { reduce } from '../core/reducer';
 import { initialState, type ApiProblem, type SaleView } from '../core/state';
+import { CashMovementModal } from './CashMovementModal';
 import { CustomerModal } from './CustomerModal';
 import { DiscountModal } from './DiscountModal';
 import { ErrorScreen } from './ErrorScreen';
@@ -23,11 +24,13 @@ import { useRawShortcuts } from './useRawShortcuts';
  *
  * O canal cru do teclado (F1–F12, que o `useInput` do Ink não entrega) é do shell: o hook resolve o
  * atalho no contexto da tela e aqui só se age nas **intenções** com comportamento — o autoteste do
- * leitor no F11 (1108), o desconto no F5 (1111), o cliente no F6 (1112) e o pagamento no F9 (1113),
- * os três primeiros abertos **como overlay da venda**: o corpo da venda sai de cena, então a rajada
- * do leitor não vira item, e com o modal aberto o mapa só resolve ESC (`closeModal`, §11.3). O F5/F6
- * sem venda criada não abre nada: não há desconto nem cliente a vincular antes do primeiro bipe
- * (1109) — e o F9 depende do reducer, que só abre o pagamento com venda e itens (1113).
+ * leitor no F11 (1108), o desconto no F5 (1111), o cliente no F6 (1112), a sangria no F7 e o
+ * suprimento no F8 (1114) e o pagamento no F9 (1113), os quatro primeiros abertos **como overlay da
+ * venda**: o corpo da venda sai de cena, então a rajada do leitor não vira item, e com o modal
+ * aberto o mapa só resolve ESC (`closeModal`, §11.3). O F5/F6 sem venda criada não abre nada: não há
+ * desconto nem cliente a vincular antes do primeiro bipe (1109) — e o F9 depende do reducer, que só
+ * abre o pagamento com venda e itens (1113). O F7/F8, ao contrário, abre com o caixa da sessão
+ * mesmo sem venda: sangrar e suprir são operações da gaveta, não da venda (1114).
  *
  * O pagamento é uma tela, não um overlay: o F9 do shell abre (`paymentStarted`) e, já no pagamento,
  * o mesmo F9 **conclui** — a tecla chega pelo canal cru e o shell chama o `complete()` da tela pelo
@@ -47,6 +50,8 @@ export function App({ api }: { api: TerminalApi }) {
   const [discountOpen, setDiscountOpen] = useState(false);
   /** Modal de cliente aberto sobre a venda (1112): estado de UI, fora do reducer. */
   const [customerOpen, setCustomerOpen] = useState(false);
+  /** Modal da gaveta aberto sobre a venda (1114): sangria (F7) ou suprimento (F8), fora do reducer. */
+  const [cashMovement, setCashMovement] = useState<CashMovementKind | null>(null);
   /** Cliente que esta sessão vinculou, com o nome da busca; `null` na venda anônima (1112). */
   const [customer, setCustomer] = useState<CustomerOption | null>(null);
   /** Handle da tela de pagamento: é por ele que o F9 do canal cru conclui a venda (1113). */
@@ -70,6 +75,12 @@ export function App({ api }: { api: TerminalApi }) {
         if (state.kind === 'saleOpen' && state.sale !== null) {
           setCustomerOpen(true);
         }
+      } else if (shortcut.name === 'withdrawal' || shortcut.name === 'supply') {
+        // a gaveta é do caixa aberto, não da venda: o F7/F8 vale também antes do primeiro bipe.
+        // Com a tela de sucesso à vista o ENTER é dela — a gaveta se mexe depois de dispensá-la.
+        if (state.kind === 'saleOpen' && state.receipt === null) {
+          setCashMovement(shortcut.name === 'withdrawal' ? 'withdrawal' : 'supply');
+        }
       } else if (shortcut.name === 'checkout') {
         if (state.kind === 'paying') {
           // já no pagamento o F9 conclui a venda; o reducer registra o resumo (1113)
@@ -82,17 +93,20 @@ export function App({ api }: { api: TerminalApi }) {
         setReaderSelfTest(false);
         setDiscountOpen(false);
         setCustomerOpen(false);
+        setCashMovement(null);
       }
     },
     {
       screen: state.kind,
-      modal: discountOpen
-        ? 'discount'
-        : customerOpen
-          ? 'customer'
-          : readerSelfTest
-            ? 'readerSelfTest'
-            : null,
+      modal:
+        cashMovement ??
+        (discountOpen
+          ? 'discount'
+          : customerOpen
+            ? 'customer'
+            : readerSelfTest
+              ? 'readerSelfTest'
+              : null),
     },
   );
 
@@ -126,6 +140,17 @@ export function App({ api }: { api: TerminalApi }) {
     dispatch({ type: 'apiFailed', problem });
   }
 
+  /** Sangria/suprimento registrado: o ENTER do operador tira o modal de cena (1114). */
+  function cashMovementClosed(): void {
+    setCashMovement(null);
+  }
+
+  /** Falha bloqueante da gaveta (contrato): fecha o modal e manda o problema para a tela de erro (§11.4). */
+  function cashMovementFailed(problem: ApiProblem): void {
+    setCashMovement(null);
+    dispatch({ type: 'apiFailed', problem });
+  }
+
   /** Bipe do autoteste: a camada de API traduzida para o contrato da tela (BR-14, sem interpretar). */
   const resolveBarcode: BarcodeResolver = async (barcode) => {
     const outcome = await api.resolveBarcode(barcode);
@@ -144,6 +169,19 @@ export function App({ api }: { api: TerminalApi }) {
       // venda concluída (1113): a tela de sucesso fica no lugar da venda até o ENTER
       if (state.receipt !== null) {
         return <SaleSuccessScreen receipt={state.receipt} dispatch={dispatch} />;
+      }
+
+      // gaveta (1114): sangria (F7) ou suprimento (F8) sobre a venda — ou antes dela, sem venda
+      if (cashMovement !== null) {
+        return (
+          <CashMovementModal
+            registerId={state.register.id}
+            kind={cashMovement}
+            api={api}
+            onClosed={cashMovementClosed}
+            onFailed={cashMovementFailed}
+          />
+        );
       }
 
       if (discountOpen && state.sale !== null) {

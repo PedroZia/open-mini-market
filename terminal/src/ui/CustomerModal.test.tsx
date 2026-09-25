@@ -6,6 +6,7 @@ import type {
   AddSaleItemOutcome,
   ApplyDiscountOutcome,
   BarcodeLookupOutcome,
+  CashMovementOutcome,
   CashRegistersOutcome,
   CompleteSaleOutcome,
   CreateSaleOutcome,
@@ -107,6 +108,13 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     completeSale: vi.fn(
       async (): Promise<CompleteSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    // a gaveta (1114) é de outro modal: aqui só fecha o contrato
+    withdrawCash: vi.fn(
+      async (): Promise<CashMovementOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    supplyCash: vi.fn(
+      async (): Promise<CashMovementOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
     ),
     ...overrides,
   };

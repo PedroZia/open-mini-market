@@ -6,6 +6,8 @@ import type {
   AddSaleItemOutcome,
   ApplyDiscountOutcome,
   BarcodeLookupOutcome,
+  CashMovementOutcome,
+  CashMovementView,
   CashRegisterOption,
   CashRegistersOutcome,
   CompleteSaleOutcome,
@@ -161,6 +163,21 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
         ok: false,
         kind: 'retryable',
         problem: { status: 0, code: null, detail: 'conclusão não usada neste teste' },
+      }),
+    ),
+    // a gaveta (1114) tem o próprio fluxo: aqui só fecha o contrato
+    withdrawCash: vi.fn(
+      async (): Promise<CashMovementOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'sangria não usada neste teste' },
+      }),
+    ),
+    supplyCash: vi.fn(
+      async (): Promise<CashMovementOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'suprimento não usado neste teste' },
       }),
     ),
     ...overrides,
@@ -1180,5 +1197,245 @@ describe('App: pagamento e conclusão (1113)', () => {
     await expectFrame(ui.lastFrame, 'TOTAL: R$ 24,90');
     expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90');
     expect(ui.lastFrame()).not.toContain('Pagamento (F9)');
+  });
+});
+
+describe('App: sangria e suprimento (1114)', () => {
+  /** F7/F8 no canal cru: o `useInput` do Ink não entrega as teclas F. */
+  const F7 = '\u001b[18~';
+  const F8 = '\u001b[19~';
+
+  /** Movimento como o servidor o devolveu: esperado antes/depois da mesma transação (BR-12). */
+  function movement(
+    amount: number,
+    before: number,
+    after: number,
+    aboveExpected = false,
+  ): CashMovementView {
+    return {
+      sessionId: 'session-1',
+      type: 'WITHDRAWAL',
+      amount,
+      reason: 'troco para o banco',
+      expectedBefore: before,
+      expectedAfter: after,
+      aboveExpected,
+    };
+  }
+
+  /** Digita valor e motivo: o operador ainda está no formulário (nada foi à API). */
+  async function fillForm(
+    ui: { stdin: { write: (data: string) => void }; lastFrame: () => string | undefined },
+  ): Promise<void> {
+    ui.stdin.write('1000');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 10,00');
+    ui.stdin.write('\t');
+    await expectFrame(ui.lastFrame, '› Motivo:');
+    ui.stdin.write('troco para o banco');
+    await expectFrame(ui.lastFrame, 'Motivo: troco para o banco');
+  }
+
+  /** Preenche e leva até a confirmação: o ENTER que chama a API é o de baixo. */
+  async function sendMovement(
+    ui: { stdin: { write: (data: string) => void }; lastFrame: () => string | undefined },
+    label: string,
+  ): Promise<void> {
+    await fillForm(ui);
+    ui.stdin.write('\r'); // formulário: só confirma
+    await expectFrame(ui.lastFrame, `confirmar ${label} de R$ 10,00?`);
+    ui.stdin.write('\r'); // confirmação: esta chama a API
+  }
+
+  test('F7 abre a sangria e F8 o suprimento sobre a venda: o corpo da venda sai de cena', async () => {
+    const ui = render(<App api={apiStub()} />);
+    await reachSale(ui);
+
+    ui.stdin.write(F7);
+
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+    expect(ui.lastFrame()).not.toContain('Subtotal:'); // a venda fica escondida com o modal à vista
+
+    ui.stdin.write('\u001b'); // ESC pelo canal cru fecha o modal (§11.3)
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Sangria (F7)');
+    });
+
+    ui.stdin.write(F8);
+
+    await expectFrame(ui.lastFrame, 'Suprimento (F8)');
+  });
+
+  test('F7 antes do primeiro bipe abre: a sangria é do caixa, não da venda', async () => {
+    const withdrawCash = vi.fn(
+      async (): Promise<CashMovementOutcome> => ({ ok: true, movement: movement(10, 150, 140) }),
+    );
+    const ui = render(<App api={apiStub({ withdrawCash })} />);
+    await reachSale(ui); // sem venda criada: o F5/F6 não abririam nada, o F7 abre
+
+    ui.stdin.write(F7);
+
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+    expect(ui.lastFrame()).toContain('› Valor: R$ 0,00');
+  });
+
+  test('ESC no formulário e na confirmação não chama a API', async () => {
+    const withdrawCash = vi.fn(
+      async (): Promise<CashMovementOutcome> => ({ ok: true, movement: movement(10, 150, 140) }),
+    );
+    const ui = render(<App api={apiStub({ withdrawCash })} />);
+    await reachSale(ui);
+
+    // ESC no formulário, com o valor já digitado
+    ui.stdin.write(F7);
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+    ui.stdin.write('1000');
+    await expectFrame(ui.lastFrame, 'Valor: R$ 10,00');
+    ui.stdin.write('\u001b');
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Sangria (F7)');
+    });
+    expect(withdrawCash).not.toHaveBeenCalled();
+
+    // ESC na confirmação: o pedido estava pronto, mas o ENTER que chama a API não veio
+    ui.stdin.write(F7);
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+    await fillForm(ui);
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'confirmar sangria de R$ 10,00?');
+    ui.stdin.write('\u001b');
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Sangria (F7)');
+    });
+    expect(withdrawCash).not.toHaveBeenCalled();
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 0,00'); // a venda intacta
+  });
+
+  test('a sangria confirma depois do formulário e mostra o esperado do servidor', async () => {
+    const withdrawCash = vi.fn(
+      async (): Promise<CashMovementOutcome> => ({ ok: true, movement: movement(10, 150, 140) }),
+    );
+    const ui = render(<App api={apiStub({ withdrawCash })} />);
+    await reachSale(ui);
+    ui.stdin.write(F7);
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+
+    await sendMovement(ui, 'sangria');
+
+    await expectFrame(ui.lastFrame, 'sangria registrada: R$ 10,00');
+    expect(ui.lastFrame()).toContain('esperado antes: R$ 150,00');
+    expect(ui.lastFrame()).toContain('esperado agora: R$ 140,00');
+    expect(withdrawCash).toHaveBeenCalledWith(
+      'r1', // o `{id}` da rota é o caixa da sessão, não a sessão (passo 609)
+      { amount: 10, reason: 'troco para o banco' },
+      expect.any(String),
+    );
+
+    ui.stdin.write('\r'); // sucesso: o ENTER fecha o modal
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(ui.lastFrame()).not.toContain('Sangria (F7)');
+  });
+
+  test('o suprimento mostra o esperado atualizado do servidor', async () => {
+    const supplyCash = vi.fn(
+      async (): Promise<CashMovementOutcome> => ({
+        ok: true,
+        movement: { ...movement(50, 150, 200), type: 'SUPPLY' },
+      }),
+    );
+    const ui = render(<App api={apiStub({ supplyCash })} />);
+    await reachSale(ui);
+    ui.stdin.write(F8);
+    await expectFrame(ui.lastFrame, 'Suprimento (F8)');
+
+    await sendMovement(ui, 'suprimento');
+
+    await expectFrame(ui.lastFrame, 'suprimento registrado: R$ 50,00');
+    expect(ui.lastFrame()).toContain('esperado agora: R$ 200,00');
+    expect(supplyCash).toHaveBeenCalledWith(
+      'r1',
+      { amount: 10, reason: 'troco para o banco' },
+      expect.any(String),
+    );
+  });
+
+  test('403 do OPERADOR mostra a mensagem no modal e o ESC fecha sem mexer na venda', async () => {
+    const withdrawCash = vi.fn(
+      async (): Promise<CashMovementOutcome> => ({
+        ok: false,
+        kind: 'rejected',
+        message: 'sem permissão para registrar sangria',
+      }),
+    );
+    const ui = render(<App api={apiStub({ withdrawCash })} />);
+    await reachSale(ui);
+    ui.stdin.write(F7);
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+
+    await sendMovement(ui, 'sangria');
+
+    await expectFrame(ui.lastFrame, 'sem permissão para registrar sangria');
+    expect(ui.lastFrame()).toContain('Sangria (F7)'); // o modal segue aberto no formulário
+
+    ui.stdin.write('\u001b');
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Sangria (F7)');
+    });
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 0,00'); // a venda intacta
+    expect(withdrawCash).toHaveBeenCalledTimes(1);
+  });
+
+  test('bipe com o modal aberto não vira item: a rajada entra no valor da gaveta', async () => {
+    const addSaleItem = vi.fn(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: true,
+        sale: {
+          id: 'sale-1',
+          items: [
+            { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+          ],
+          subtotal: 24.9,
+          discountAmount: 0,
+          total: 24.9,
+          paidAmount: 0,
+          changeAmount: 0,
+          payments: [],
+          customerId: null,
+        },
+      }),
+    );
+    const withdrawCash = vi.fn(
+      async (): Promise<CashMovementOutcome> => ({ ok: true, movement: movement(10, 150, 140) }),
+    );
+    const ui = render(<App api={apiStub({ addSaleItem, withdrawCash })} />);
+    await reachSale(ui);
+    ui.stdin.write('7891000100103\r'); // o bipe que cria a venda com o item
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+    expect(addSaleItem).toHaveBeenCalledTimes(1);
+
+    ui.stdin.write(F7);
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+
+    ui.stdin.write('123456\r'); // rajada com o modal à vista
+
+    await expectFrame(ui.lastFrame, 'Valor: R$ 1234,56'); // os dígitos caem no campo, como texto
+    expect(ui.lastFrame()).toContain('Sangria (F7)');
+    expect(addSaleItem).toHaveBeenCalledTimes(1); // o bipe não virou item: a venda saiu de cena
+    expect(withdrawCash).not.toHaveBeenCalled(); // o terminador colado não confirma nada
+  });
+
+  test('com o modal aberto os demais atalhos ficam bloqueados', async () => {
+    const ui = render(<App api={apiStub()} />);
+    await reachSale(ui);
+    ui.stdin.write(F7);
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+
+    ui.stdin.write('\u001b[15~'); // F5 (desconto) com a gaveta aberta: bloqueado
+
+    await expectFrame(ui.lastFrame, 'Sangria (F7)');
+    expect(ui.lastFrame()).not.toContain('Desconto na venda (F5)');
   });
 });

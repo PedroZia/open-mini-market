@@ -1228,3 +1228,186 @@ describe('createTerminalApi: pagamento e conclusão (1113)', () => {
     });
   });
 });
+
+describe('createTerminalApi: sangria e suprimento (1114)', () => {
+  test('a sangria manda valor, motivo e a chave do chamador, e devolve o movimento do servidor', async () => {
+    const post = vi.fn(async () => ({
+      sessionId: 'session-1',
+      type: 'WITHDRAWAL',
+      amount: 10,
+      reason: 'troco para o banco',
+      expectedBefore: 150,
+      expectedAfter: 140,
+      aboveExpected: true,
+    }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(await api.withdrawCash('r1', { amount: 10, reason: 'troco para o banco' }, 'key-7')).toEqual({
+      ok: true,
+      movement: {
+        sessionId: 'session-1',
+        type: 'WITHDRAWAL',
+        amount: 10,
+        reason: 'troco para o banco',
+        expectedBefore: 150,
+        expectedAfter: 140,
+        aboveExpected: true, // o alerta da sangria acima do esperado é do servidor (609)
+      },
+    });
+    // o `{id}` da rota é o **caixa**, não a sessão (passo 609)
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/cash-registers/r1/withdrawals',
+      { amount: 10, reason: 'troco para o banco' },
+      { idempotencyKey: 'key-7' },
+    );
+  });
+
+  test('o suprimento usa a rota do F8, no mesmo contrato', async () => {
+    const post = vi.fn(async () => ({
+      sessionId: 'session-1',
+      type: 'SUPPLY',
+      amount: 50,
+      reason: 'fundo de troco',
+      expectedBefore: 150,
+      expectedAfter: 200,
+      aboveExpected: false,
+    }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(await api.supplyCash('r1', { amount: 50, reason: 'fundo de troco' }, 'key-8')).toEqual({
+      ok: true,
+      movement: {
+        sessionId: 'session-1',
+        type: 'SUPPLY',
+        amount: 50,
+        reason: 'fundo de troco',
+        expectedBefore: 150,
+        expectedAfter: 200,
+        aboveExpected: false,
+      },
+    });
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/cash-registers/r1/supplies',
+      { amount: 50, reason: 'fundo de troco' },
+      { idempotencyKey: 'key-8' },
+    );
+  });
+
+  test('403 sem a permissão vira recusa fixa, sem expor o código; a sessão do caixa tem mensagem própria', async () => {
+    const denied = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão cash.withdrawal' });
+        },
+      }),
+    );
+    const notOpen = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(404, {
+            code: 'CASH_SESSION_NOT_OPEN',
+            detail: 'caixa sem sessão aberta',
+          });
+        },
+      }),
+    );
+    const required = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(409, {
+            code: 'CASH_SESSION_REQUIRED',
+            detail: 'sessão de caixa aberta obrigatória',
+          });
+        },
+      }),
+    );
+    const missing = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(404, { code: 'CASH_REGISTER_NOT_FOUND', detail: 'caixa r9 não existe' });
+        },
+      }),
+    );
+    const movement = { amount: 10, reason: 'troco para o banco' } as const;
+
+    expect(await denied.withdrawCash('r1', movement, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para registrar sangria',
+    });
+    expect(await denied.supplyCash('r1', movement, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para registrar suprimento',
+    });
+    expect(await notOpen.withdrawCash('r1', movement, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'caixa sem sessão aberta — fale com o gerente',
+    });
+    expect(await required.supplyCash('r1', movement, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'caixa sem sessão aberta — fale com o gerente',
+    });
+    expect(await missing.withdrawCash('r9', movement, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'caixa não encontrado — verifique o cadastro',
+    });
+  });
+
+  test('400 do valor/motivo vira recusa com o detail; rede e 5xx são transitórias (retry no modal)', async () => {
+    const invalid = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(400, {
+            code: 'VALIDATION_ERROR',
+            detail: 'amount deve ser maior que zero',
+          });
+        },
+      }),
+    );
+    const offline = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+    const unavailable = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(503, { code: 'UNAVAILABLE', detail: 'servidor fora do ar' });
+        },
+      }),
+    );
+    const movement = { amount: 0, reason: 'troco para o banco' } as const;
+
+    expect(await invalid.withdrawCash('r1', movement, 'k')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'amount deve ser maior que zero',
+    });
+    expect(await offline.supplyCash('r1', movement, 'k')).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+    expect(await unavailable.withdrawCash('r1', movement, 'k')).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 503, code: 'UNAVAILABLE', detail: 'servidor fora do ar' },
+    });
+  });
+
+  test('201 sem movimento na resposta é falha bloqueante', async () => {
+    const api = createTerminalApi(stubClient({ post: async () => ({ amount: 10 }) }));
+
+    expect(await api.withdrawCash('r1', { amount: 10, reason: 'troco' }, 'k')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'sangria sem movimento na resposta' },
+    });
+  });
+});
