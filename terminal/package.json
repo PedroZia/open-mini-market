@@ -11,16 +11,21 @@
     "dev": "tsx src/index.tsx",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "start:opentui": "bun run src/opentui/index.tsx",
+    "test:opentui": "bun test src/opentui",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },
   "dependencies": {
     "@minimarket/api-client": "*",
+    "@opentui/core": "0.5.12",
+    "@opentui/react": "0.5.12",
     "ink": "7.1.1",
     "react": "19.3.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@types/bun": "1.4.2",
     "@types/node": "26.6.2",
     "@types/react": "19.3.0",
     "eslint": "10.11.0",

@@ -1059,7 +1059,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** RestAssured 201 (OPERADOR com a permissão), 403 (sem permissão), 409 `BARCODE_ALREADY_EXISTS`, 400 validações + auditoria registrada; `./mvnw verify` verde.
   **Commit:** `feat(catalog): adiciona cadastro rapido de produto`
 
-- [ ] **1123a — Fundação da UI OpenTUI**
+- [x] **1123a — Fundação da UI OpenTUI**
   **Objetivo:** esqueleto executável da UI nova, sem portar telas. **Depende:** 1121
   **Implementar:** `terminal/src/opentui/`: entry com `createCliRenderer` + `createRoot`, `theme.ts` com fallback monocromático, regiões de layout do shell, error boundary e shutdown (`renderer.destroy` em toda saída); dependências `@opentui/core`/`@opentui/react` (versões do spike), `jsxImportSource` por arquivo (sem contaminar os `.tsx` da Ink), script `start:opentui` (Bun), `test:opentui` (`bun test src/opentui`) e `src/opentui/**` fora do vitest; fontes do OpenTUI em `docs/referencias.md`. Passo dividido do 1123 original (diff estimado acima de ~300 linhas); o restante é o 1123b.
   **Testes/aceite:** teste de fumaça renderiza o shell em 80×24; `bun test src/opentui`, `tsc --noEmit` e `npm test` (vitest) verdes.

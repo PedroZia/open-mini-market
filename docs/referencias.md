@@ -65,6 +65,12 @@ versões seguem a estável do momento da instalação). Links verificados em 202
 | --- | --- |
 | [Ink](https://github.com/vadimdemedes/ink) | componentes, `useInput`, foco, layout em terminal |
 | [ink-testing-library](https://github.com/vadimdemedes/ink-testing-library) | renderização em teste, simulação de teclas |
+| [OpenTUI — React binding](https://opentui.com/docs/bindings/react) | `createRoot`, hooks, `jsxImportSource` por arquivo, `testRender` |
+| [OpenTUI — teclado](https://opentui.com/docs/core-concepts/keyboard) | `KeyEvent`, `prependListener`, `preventDefault`/`stopPropagation` |
+| [OpenTUI — renderer](https://opentui.com/docs/core-concepts/renderer) | `createCliRenderer`, capacidades, eventos e streams |
+| [OpenTUI — testes](https://opentui.com/docs/core-concepts/testing) | `createTestRenderer`, `captureCharFrame`, `mockInput`, `resize` |
+| [OpenTUI — runtime support](https://opentui.com/docs/getting-started/runtime-support) | matriz de runtime/OS da engine nativa (UI nova roda no Bun) |
+| [Bun — test runner](https://bun.sh/docs/cli/test) | `bun test` da UI nova (`npm run test:opentui`) |
 
 ## Web (Fase 12)
 

@@ -10,6 +10,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.test.{ts,tsx}'],
-    exclude: ['e2e/**'],
+    // `src/opentui/**` é a UI nova (Fase 11b) e só roda no `bun test` (`npm run test:opentui`):
+    // o Vitest/Node não carrega a lib nativa da OpenTUI (decisão do spike 1121).
+    exclude: ['e2e/**', 'src/opentui/**'],
   },
 });

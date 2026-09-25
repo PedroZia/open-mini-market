@@ -10,7 +10,7 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node", "bun"]
   },
   "include": ["src", "e2e", "vitest.config.ts", "vitest.e2e.config.ts"]
 }
