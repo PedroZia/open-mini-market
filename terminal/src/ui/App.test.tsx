@@ -2,6 +2,7 @@ import { render } from 'ink-testing-library';
 import { describe, expect, test, vi } from 'vitest';
 
 import type {
+  BarcodeLookupOutcome,
   CashRegisterOption,
   CashRegistersOutcome,
   CurrentCashSessionOutcome,
@@ -12,10 +13,10 @@ import type {
 import { App } from './App';
 
 /**
- * Shell + entrada do operador (1106) e abertura de caixa (1107) pelo `ink-testing-library`, com a
- * camada de API dublada: o que se testa é o fluxo da tela — login, escolha do caixa, abertura,
- * erro que fica na tela e erro que bloqueia com volta —, nunca o HTTP (esse é do
- * `@minimarket/api-client`).
+ * Shell + entrada do operador (1106), abertura de caixa (1107) e venda com o canal cru do teclado
+ * (1108) pelo `ink-testing-library`, com a camada de API dublada: o que se testa é o fluxo da tela —
+ * login, escolha do caixa, abertura, erro que fica na tela, erro que bloqueia com volta e o F11 do
+ * autoteste —, nunca o HTTP (esse é do `@minimarket/api-client`).
  */
 
 const OPERADOR = { id: 'u1', name: 'Ana Souza' };
@@ -47,6 +48,12 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     currentCashSession: vi.fn(
       async (): Promise<CurrentCashSessionOutcome> => ({ ok: true, sessionId: 'session-1' }),
+    ),
+    resolveBarcode: vi.fn(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: true,
+        product: { name: 'Arroz 5kg', price: 24.9, quantity: null },
+      }),
     ),
     ...overrides,
   };
@@ -87,6 +94,21 @@ async function signIn(
   stdin.write('\r');
 }
 
+/** Entra, escolhe o caixa e abre com fundo de troco: a tela de venda é o ponto de partida daqui. */
+async function reachSale(ui: {
+  lastFrame: () => string | undefined;
+  stdin: { write: (data: string) => void };
+}): Promise<void> {
+  await signIn(ui.lastFrame, ui.stdin);
+  await expectFrame(ui.lastFrame, 'Escolha o caixa');
+  ui.stdin.write('\r');
+  await expectFrame(ui.lastFrame, 'Abertura de caixa');
+  ui.stdin.write('1000');
+  await expectFrame(ui.lastFrame, 'Fundo de troco: R$ 10,00');
+  ui.stdin.write('\r');
+  await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+}
+
 describe('App', () => {
   test('login aceito lista os caixas ativos com código, nome, status e operador', async () => {
     const { lastFrame, stdin } = render(<App api={apiStub()} />);
@@ -125,7 +147,7 @@ describe('App', () => {
     await expectFrame(lastFrame, 'Fundo de troco: R$ 10,00');
     stdin.write('\r');
 
-    await expectFrame(lastFrame, 'tela do passo 1108');
+    await expectFrame(lastFrame, 'bipar o primeiro item para iniciar a venda');
     expect(openCashRegister).toHaveBeenCalledWith('r1', 10);
   });
 
@@ -152,7 +174,7 @@ describe('App', () => {
 
     stdin.write('\r');
 
-    await expectFrame(lastFrame, 'tela do passo 1108');
+    await expectFrame(lastFrame, 'bipar o primeiro item para iniciar a venda');
     expect(openCashRegister).toHaveBeenCalledTimes(1); // não reabre nada
   });
 
@@ -330,5 +352,72 @@ describe('App', () => {
 
     stdin.write('\r');
     await expectFrame(lastFrame, 'Abertura de caixa');
+  });
+});
+
+describe('App: venda e canal cru do teclado (1108)', () => {
+  test('a venda abre com cabeçalho, totais zerados e a barra de atalhos', async () => {
+    const ui = render(<App api={apiStub()} />);
+
+    await reachSale(ui);
+
+    expect(ui.lastFrame()).toContain('PDV minimercado · Caixa principal');
+    expect(ui.lastFrame()).toContain('Operador: Ana Souza');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 0,00');
+    expect(ui.lastFrame()).toContain('F11 Autoteste do leitor');
+  });
+
+  test('F11 no canal cru abre o autoteste, o bipe resolve no servidor e o ESC volta para a venda', async () => {
+    const resolveBarcode = vi.fn(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: true,
+        product: { name: 'Banana prata', price: 6.99, quantity: 0.75 },
+      }),
+    );
+    const ui = render(<App api={apiStub({ resolveBarcode })} />);
+    await reachSale(ui);
+
+    // F11 chega como sequência crua: o `useInput` do Ink não a entrega
+    ui.stdin.write('\u001b[23~');
+    await expectFrame(ui.lastFrame, 'Autoteste do leitor (F11)');
+
+    // bipe da etiqueta de balança: o código vai bruto ao servidor (BR-14)
+    ui.stdin.write('2000420001234\r');
+    await expectFrame(ui.lastFrame, 'produto "Banana prata"');
+    expect(resolveBarcode).toHaveBeenCalledWith('2000420001234');
+
+    ui.stdin.write('\u001b'); // ESC fecha o overlay
+    await expectFrame(ui.lastFrame, 'TOTAL: R$ 0,00');
+    expect(ui.lastFrame()).not.toContain('Autoteste do leitor (F11)');
+  });
+
+  test('dígitos do operador não disparam atalho nenhum na venda', async () => {
+    const resolveBarcode = vi.fn(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: false,
+        problem: { status: 404, code: 'PRODUCT_NOT_FOUND', detail: 'produto não encontrado' },
+      }),
+    );
+    const ui = render(<App api={apiStub({ resolveBarcode })} />);
+    await reachSale(ui);
+
+    ui.stdin.write('123');
+
+    await expectFrame(ui.lastFrame, 'TOTAL: R$ 0,00');
+    expect(ui.lastFrame()).not.toContain('Autoteste do leitor (F11)');
+    expect(resolveBarcode).not.toHaveBeenCalled();
+  });
+
+  test('com o autoteste aberto, os outros F não atuam na venda (modal bloqueia)', async () => {
+    const ui = render(<App api={apiStub()} />);
+    await reachSale(ui);
+
+    ui.stdin.write('\u001b[23~');
+    await expectFrame(ui.lastFrame, 'Autoteste do leitor (F11)');
+
+    ui.stdin.write('\u001b[21~'); // F10 (fechar caixa) com o overlay aberto: bloqueado
+
+    await expectFrame(ui.lastFrame, 'Autoteste do leitor (F11)');
+    expect(ui.lastFrame()).not.toContain('Fechamento de caixa');
   });
 });

@@ -61,9 +61,17 @@ export type Screen = State['kind'];
 
 /**
  * Modal bloqueante aberto sobre a tela (§11.3): enquanto um está aberto, o leitor e os atalhos não
- * atuam — só ESC, que o fecha antes de sair da tela.
+ * atuam — só ESC, que o fecha antes de sair da tela. O autoteste do leitor (F11) entra aqui porque
+ * é aberto como overlay da venda e bloqueia o resto da tela enquanto está à vista (1108).
  */
-export type ModalName = 'help' | 'priceLookup' | 'discount' | 'customer' | 'withdrawal' | 'supply';
+export type ModalName =
+  | 'help'
+  | 'priceLookup'
+  | 'discount'
+  | 'customer'
+  | 'withdrawal'
+  | 'supply'
+  | 'readerSelfTest';
 
 /** Onde a tecla foi pressionada: a tela e o modal aberto (`null` quando não há modal). */
 export type KeyContext = {
@@ -211,6 +219,53 @@ export function resolveKey(input: string, key: KeyFlags): KeyName | null {
   if (input === '-') return 'MINUS';
 
   return null;
+}
+
+/**
+ * Sequências conhecidas da mais longa para a mais curta: na leitura de um chunk a mais longa vence
+ * (`ESC [ [ A` é F1 no console Linux, não uma seta com prefixo). O ESC fica de fora: sozinho ele é
+ * a tecla, e como prefixo de sequência não pode virar tecla (o `useInput` entrega o ESC).
+ */
+const RAW_KEY_SEQUENCES: ReadonlyArray<readonly [string, KeyName]> = Object.entries(RAW_KEYS)
+  .filter(([sequence]) => sequence !== '\x1b')
+  .sort(([a], [b]) => b.length - a.length);
+
+/**
+ * Teclas de um chunk cru do stdin, na ordem em que chegaram (§11.3): o wiring do shell entrega o
+ * que veio do `stdin.on('data')` — um chunk pode trazer mais de uma tecla, porque o console manda a
+ * sequência de F1–F12 inteira e o leitor manda a rajada com o terminador junto — e recebe de volta
+ * os nomes lógicos reconhecidos.
+ *
+ * Só as **sequências** da tabela crua viram tecla: texto (dígitos do leitor, letras do formulário)
+ * é ignorado, porque quem o trata são os `useInput` das telas. Sequência cortada entre dois chunks
+ * também é ignorada (`ESC [ 2 3` sem o `~` fica pendente no console, e o ESC do começo não vira
+ * tecla): completá-la exigiria guardar estado entre eventos, e um F perdido não paga um buffer que
+ * pode engolir a tecla seguinte. O ESC conta só como último caractere do chunk, que é como a tecla
+ * sozinha chega.
+ */
+export function resolveRawKeys(chunk: string): KeyName[] {
+  const keys: KeyName[] = [];
+  let index = 0;
+
+  while (index < chunk.length) {
+    if (chunk[index] === '\x1b' && index === chunk.length - 1) {
+      keys.push('ESC');
+      index += 1;
+      continue;
+    }
+
+    const match = RAW_KEY_SEQUENCES.find(([sequence]) => chunk.startsWith(sequence, index));
+
+    if (match === undefined) {
+      index += 1;
+      continue;
+    }
+
+    keys.push(match[1]);
+    index += match[0].length;
+  }
+
+  return keys;
 }
 
 /**

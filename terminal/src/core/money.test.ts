@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { centsToAmount, digitsToCents, formatBRL } from './money';
+import { centsToAmount, digitsToCents, formatAmount, formatBRL } from './money';
 
 /**
  * Máscara do campo de valor (1107): dígitos viram centavos, centavos viram a exibição em reais e o
@@ -23,5 +23,11 @@ describe('formatação de dinheiro', () => {
   test('centavos viram o valor em reais do corpo da API', () => {
     expect(centsToAmount(1250)).toBe(12.5);
     expect(centsToAmount(0)).toBe(0);
+  });
+
+  test('valor do servidor, já em reais, vira a máscara da tela', () => {
+    expect(formatAmount(24.9)).toBe('R$ 24,90');
+    expect(formatAmount(0)).toBe('R$ 0,00');
+    expect(formatAmount(1234.5)).toBe('R$ 1234,50');
   });
 });

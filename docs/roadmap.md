@@ -955,7 +955,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** abre e navega; valor inválido não envia; caixa já aberto exibe aviso e permite continuar.
   **Commit:** `feat(tui): adiciona abertura de caixa`
 
-- [ ] **1108 — Tela de venda (layout)**
+- [x] **1108 — Tela de venda (layout)**
   **Objetivo:** tela principal do operador. **Depende:** 1107
   **Implementar:** cabeçalho (loja, caixa, operador, hora), lista de itens com último destacado, painel de totais (subtotal, desconto, total) e barra de status com atalhos.
   **Testes/aceite:** snapshot de render com 0, 1 e 20 itens; largura mínima 80×24 sem quebrar.

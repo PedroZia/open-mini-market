@@ -14,6 +14,14 @@ export function formatBRL(cents: number): string {
   return `R$ ${(cents / 100).toFixed(2).replace('.', ',')}`;
 }
 
+/**
+ * Valor **já em reais** como o servidor manda (venda, item, produto) com a máscara pt-BR:
+ * `24.9` → `R$ 24,90`. Só exibição — somar, descontar e arredondar é do servidor (BR-12).
+ */
+export function formatAmount(amount: number): string {
+  return `R$ ${amount.toFixed(2).replace('.', ',')}`;
+}
+
 /** Valor para o corpo da API: centavos → reais (`1250` → `12.5`). */
 export function centsToAmount(cents: number): number {
   return cents / 100;

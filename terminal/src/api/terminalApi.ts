@@ -50,6 +50,19 @@ export type CurrentCashSessionOutcome =
   | { ok: true; sessionId: string }
   | { ok: false; problem: ApiProblem };
 
+/** Produto do bipe (passos 409 e 1104b3): o que a tela precisa para mostrar o item ou o autoteste. */
+export type BarcodeProduct = {
+  name: string;
+  price: number;
+  /** Quantidade sugerida pela etiqueta de balança; `null` fora dela (BR-14). */
+  quantity: number | null;
+};
+
+/** Resultado do bipe: produto resolvido pelo servidor ou o `problem+json` da recusa (§9.2). */
+export type BarcodeLookupOutcome =
+  | { ok: true; product: BarcodeProduct }
+  | { ok: false; problem: ApiProblem };
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -70,6 +83,15 @@ export type TerminalApi = {
   openCashRegister(registerId: string, openingAmount: number): Promise<OpenCashRegisterOutcome>;
   /** Sessão aberta agora no caixa (`GET .../current-session`); sem sessão, a falha é bloqueante. */
   currentCashSession(registerId: string): Promise<CurrentCashSessionOutcome>;
+  /**
+   * Resolve o código **bruto** do bipe no caminho quente do PDV (`GET /products/barcode/{barcode}`,
+   * passo 409): o servidor decide se é GTIN, código interno ou etiqueta de balança e devolve a
+   * quantidade sugerida quando a etiqueta embute peso ou preço (BR-14).
+   *
+   * Toda recusa (404 do produto, 422 da etiqueta, 5xx) volta como `problem+json` em `problem` — quem
+   * decide o que fazer com ela é a tela (o autoteste do F11 mostra, o bipe da venda 1109 avisa).
+   */
+  resolveBarcode(barcode: string): Promise<BarcodeLookupOutcome>;
 };
 
 /** Monta a camada de API sobre um client já configurado (base URL + token da sessão). */
@@ -175,6 +197,27 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         }
 
         return { ok: true, sessionId: response.sessionId };
+      } catch (error) {
+        return { ok: false, problem: problemOf(error) };
+      }
+    },
+
+    async resolveBarcode(barcode) {
+      try {
+        // o código vai como o leitor mandou (BR-14); o percent-encoding evita que espaço, `+` ou
+        // `#` de uma etiqueta quebrem o caminho da rota
+        const response = await client.get<components['schemas']['ProductBarcodeResponse']>(
+          `/api/v1/products/barcode/${encodeURIComponent(barcode)}`,
+        );
+
+        return {
+          ok: true,
+          product: {
+            name: response.name ?? '',
+            price: response.price ?? 0,
+            quantity: response.quantity ?? null,
+          },
+        };
       } catch (error) {
         return { ok: false, problem: problemOf(error) };
       }

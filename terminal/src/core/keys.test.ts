@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   resolveKey,
+  resolveRawKeys,
   resolveShortcut,
   type IntentName,
   type KeyContext,
@@ -187,6 +188,46 @@ describe('resolveKey: nome lógico da tecla', () => {
   });
 });
 
+describe('resolveRawKeys: um chunk cru pode trazer mais de uma tecla', () => {
+  test('a sequência de F11 vira F11 (é o canal que o `useInput` não entrega)', () => {
+    expect(resolveRawKeys('\x1b[23~')).toEqual(['F11']);
+  });
+
+  test('duas teclas no mesmo chunk saem na ordem, sem virar uma só', () => {
+    expect(resolveRawKeys('\x1b[23~\x1b[24~')).toEqual(['F11', 'F12']);
+    expect(resolveRawKeys('\x1bOP\x1b[21~')).toEqual(['F1', 'F10']);
+  });
+
+  test('texto entre as teclas do chunk é ignorado', () => {
+    expect(resolveRawKeys('\x1b[23~abc\x1bOP')).toEqual(['F11', 'F1']);
+  });
+
+  test('o bipe inteiro só entrega o terminador: os dígitos são do leitor, não do mapa', () => {
+    expect(resolveRawKeys('7891000100103\r')).toEqual(['ENTER']);
+    expect(resolveRawKeys('7891000100103')).toEqual([]);
+  });
+
+  test('a sequência mais longa vence: F1 do console Linux não vira seta', () => {
+    expect(resolveRawKeys('\x1b[[A')).toEqual(['F1']);
+    expect(resolveRawKeys('\x1b[A')).toEqual(['UP']);
+  });
+
+  test('setas, ENTER, TAB, ESC e DEL crus também resolvem', () => {
+    expect(resolveRawKeys('\x1b[B\x1b[3~\t\x1b')).toEqual(['DOWN', 'DEL', 'TAB', 'ESC']);
+  });
+
+  test('sequência cortada entre dois chunks é ignorada, sem engolir a tecla seguinte', () => {
+    expect(resolveRawKeys('\x1b[23')).toEqual([]);
+    expect(resolveRawKeys('~')).toEqual([]);
+  });
+
+  test('controle desconhecido no meio do chunk não quebra os vizinhos', () => {
+    expect(resolveRawKeys('\x1b[2~\x1b[23~')).toEqual(['F11']);
+    expect(resolveRawKeys('\x1b[1~')).toEqual([]); // HOME não é do mapa, e o ESC do começo não vira tecla
+    expect(resolveRawKeys('')).toEqual([]);
+  });
+});
+
 describe('resolveShortcut: atalho por contexto', () => {
   const saleShortcuts: Array<[KeyName, IntentName]> = [
     ['F1', 'help'],
@@ -262,7 +303,15 @@ describe('resolveShortcut: atalho por contexto', () => {
     }
   });
 
-  const modals: ModalName[] = ['help', 'priceLookup', 'discount', 'customer', 'withdrawal', 'supply'];
+  const modals: ModalName[] = [
+    'help',
+    'priceLookup',
+    'discount',
+    'customer',
+    'withdrawal',
+    'supply',
+    'readerSelfTest',
+  ];
 
   test.each(modals)('com o modal %s aberto, ESC fecha o modal', (modal) => {
     expect(resolveShortcut('ESC', context('saleOpen', modal))).toEqual({
@@ -277,6 +326,15 @@ describe('resolveShortcut: atalho por contexto', () => {
       name: 'closeModal',
     });
     expect(resolveShortcut('ESC', context('closingCash', 'withdrawal'))).toEqual({
+      type: 'intent',
+      name: 'closeModal',
+    });
+  });
+
+  test('com o autoteste aberto, ESC fecha e o F11 de novo não reabre nem vaza para a venda', () => {
+    expect(resolveShortcut('F11', context('saleOpen', 'readerSelfTest'))).toBeNull();
+    expect(resolveShortcut('F9', context('saleOpen', 'readerSelfTest'))).toBeNull();
+    expect(resolveShortcut('ESC', context('saleOpen', 'readerSelfTest'))).toEqual({
       type: 'intent',
       name: 'closeModal',
     });

@@ -2,6 +2,7 @@ import { render } from 'ink-testing-library';
 import { describe, expect, test, vi } from 'vitest';
 
 import type {
+  BarcodeLookupOutcome,
   CashRegistersOutcome,
   CurrentCashSessionOutcome,
   LoginOutcome,
@@ -36,6 +37,13 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     currentCashSession: vi.fn(
       async (): Promise<CurrentCashSessionOutcome> => ({ ok: true, sessionId: 'session-9' }),
+    ),
+    // a abertura não bipa: o bipe (1108) entra na camada tipada só para fechar o contrato
+    resolveBarcode: vi.fn(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: true,
+        product: { name: 'Arroz 5kg', price: 24.9, quantity: null },
+      }),
     ),
     ...overrides,
   };

@@ -312,4 +312,55 @@ describe('createTerminalApi', () => {
       problem: { status: 404, code: 'CASH_SESSION_NOT_OPEN', detail: 'caixa sem sessão aberta' },
     });
   });
+
+  test('bipe devolve o produto do servidor e a quantidade sugerida da etiqueta', async () => {
+    const get = vi.fn(async () => ({
+      id: 'p1',
+      barcode: '7891000100103',
+      name: 'Arroz 5kg',
+      price: 24.9,
+      unit: 'UN',
+      quantity: null,
+    }));
+    const api = createTerminalApi(stubClient({ get }));
+
+    expect(await api.resolveBarcode('7891000100103')).toEqual({
+      ok: true,
+      product: { name: 'Arroz 5kg', price: 24.9, quantity: null },
+    });
+    expect(get).toHaveBeenCalledWith('/api/v1/products/barcode/7891000100103');
+  });
+
+  test('etiqueta de balança sugere a quantidade e o código vai codificado no caminho', async () => {
+    const get = vi.fn(async () => ({ name: 'Banana prata', price: 6.99, quantity: 0.75 }));
+    const api = createTerminalApi(stubClient({ get }));
+
+    expect(await api.resolveBarcode('20004200012 34')).toEqual({
+      ok: true,
+      product: { name: 'Banana prata', price: 6.99, quantity: 0.75 },
+    });
+    expect(get).toHaveBeenCalledWith('/api/v1/products/barcode/20004200012%2034');
+  });
+
+  test('produto não encontrado (404) volta como recusa com o problem+json', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiError(404, {
+            code: 'PRODUCT_NOT_FOUND',
+            detail: 'produto com código de barras 789 não encontrado',
+          });
+        },
+      }),
+    );
+
+    expect(await api.resolveBarcode('789')).toEqual({
+      ok: false,
+      problem: {
+        status: 404,
+        code: 'PRODUCT_NOT_FOUND',
+        detail: 'produto com código de barras 789 não encontrado',
+      },
+    });
+  });
 });
