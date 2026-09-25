@@ -14,6 +14,7 @@ import type {
   CashMovementKind,
   CashMovementView,
   CustomerOption,
+  QuickCreateProductIntent,
   SaleDiscountIntent,
   SendFailure,
   TerminalApi,
@@ -32,6 +33,10 @@ import { DiscountModal, type DiscountApplyResult } from "./DiscountModal"
 import { HelpModal } from "./HelpModal"
 import { useGlobalKeyboard } from "./keyboard"
 import { PriceLookupModal } from "./PriceLookupModal"
+import {
+  QuickCreateProductModal,
+  type QuickCreateProductApplyResult,
+} from "./QuickCreateProductModal"
 import { RemoveItemConfirmModal } from "./RemoveItemConfirmModal"
 import { SwitchOperatorModal } from "./SwitchOperatorModal"
 import { theme } from "./theme"
@@ -82,9 +87,11 @@ import { theme } from "./theme"
  *
  * O envio é uma fila local (`queueRef`) drenada pelo `pump`, um bipe por vez, na ordem em que
  * chegaram: sem venda criada, o primeiro bipe abre a venda (`POST /sales`) e o item entra em
- * seguida; sucesso vira `saleUpdated`, com a confirmação no rodapé e o bell; 404/422 avisam e o bipe
- * é consumido (`scanDismissed`); falha transitória mantém o bipe no topo e o ENTER refaz; bloqueante
- * vai para a tela de erro (`apiFailed`).
+ * seguida; sucesso vira `saleUpdated`, com a confirmação no rodapé e o bell; o 404 abre o cadastro
+ * rápido (F-02, 1128) com o código travado e o bipe consumido (`scanDismissed`) — o item só entra
+ * depois que o produto existe, no reenvio do sucesso —; o 422 avisa e o bipe é consumido; falha
+ * transitória mantém o bipe no topo e o ENTER refaz; bloqueante vai para a tela de erro
+ * (`apiFailed`).
  *
  * A quantidade do item selecionado (1125c) é uma mutação por vez (`mutatingRef`, com a mesma trava
  * do envio): o `+`/`-` manda a quantidade **absoluta** no `PATCH` (nada de soma local — BR-12) e a
@@ -93,7 +100,9 @@ import { theme } from "./theme"
  * empilha chamada; no `finally` a trava cai e o `pump` drena o bipe que chegou no meio — nenhum bipe
  * se perde e a venda não é mexida por duas chamadas ao mesmo tempo. A remoção do 1126a entra pela
  * mesma `runMutation`, que devolve o desfecho para a confirmação decidir se sai de cena ou fica
- * esperando o ENTER refazer. O cadastro rápido do 404 é do 1128.
+ * esperando o ENTER refazer. O cadastro rápido do 404 (F-02, 1128) também é modal: abre com o
+ * código travado, chama `POST /products/quick` e, no sucesso, fecha e reenvia o bipe com a
+ * quantidade do leitor — a recusa do servidor fica no formulário.
  *
  * A lista é do `<scrollbox>` (F-04): em vez do `slice(-10)` da Ink — onde a seleção podia sair da
  * área visível e `+`/`-`/DEL agiam em item invisível —, a janela rola atrás do item selecionado e o
@@ -228,6 +237,8 @@ type SaleModal =
   | { kind: "switchOperator" }
   | { kind: "cancelSale"; saleId: string }
   | { kind: "cashMovement"; movement: CashMovementKind }
+  /** 404 do bipe (F-02, 1128): o código e a quantidade do leitor que o reenvio usa no sucesso. */
+  | { kind: "quickCreate"; scan: ScanIntent }
 
 /**
  * Desfecho de uma mutação da venda (1125c/1126a/1126b) para quem a pediu decidir o que fica à
@@ -823,6 +834,57 @@ export function SaleScreen({
   }
 
   /**
+   * ENTER do cadastro rápido (F-02, 1128): cria o produto desconhecido (`POST /products/quick`,
+   * passo 1122) pela mesma trava de mutação das demais operações — uma por vez, com a fila de bipes
+   * drenada no `finally`. O sucesso fecha o modal e **reenvia o bipe** que abriu tudo, com a
+   * quantidade que ele trouxe (o `3*` inclusive): agora que o produto existe, o item entra na venda
+   * pelo caminho normal. A recusa do servidor (403/409/400) e a falha transitória voltam para o
+   * modal; a bloqueante vai para a tela de erro.
+   */
+  async function quickCreateFromModal(
+    intent: QuickCreateProductIntent,
+  ): Promise<QuickCreateProductApplyResult> {
+    const scan = modal?.kind === "quickCreate" ? modal.scan : null
+
+    if (scan === null) {
+      // fora do 404 não há bipe para reenviar e o cadastro não viraria item
+      return { kind: "failed" }
+    }
+
+    mutatingRef.current = true
+    setMutating(true)
+
+    try {
+      const outcome = await api.quickCreateProduct(intent)
+
+      if (outcome.ok) {
+        closeModal()
+        setFeedback({ kind: "success", text: `cadastrado: ${outcome.product.name}` })
+        // o bipe volta para a fila com a quantidade original; o `pump` do `finally` o envia
+        enqueue({ barcode: scan.barcode, quantity: scan.quantity })
+        return { kind: "created" }
+      }
+
+      if (outcome.kind === "rejected") {
+        // recusa do servidor (403 sem `product.quick_create`, 409 do código já usado, 400 do
+        // formulário): o modal fica à vista com a mensagem e o que foi digitado
+        return { kind: "rejected", message: outcome.message }
+      }
+
+      if (outcome.kind === "retryable") {
+        return { kind: "retryable" }
+      }
+
+      dispatch({ type: "apiFailed", problem: outcome.problem })
+      return { kind: "failed" }
+    } finally {
+      mutatingRef.current = false
+      setMutating(false)
+      void pump() // o bipe reenviado no sucesso espera a trava cair para entrar na venda
+    }
+  }
+
+  /**
    * Envia a fila de bipes, um por vez, na ordem em que chegaram:
    *
    * - sem venda criada, abre a venda primeiro (`POST /sales`, 201) e registra o id no reducer — é o
@@ -832,7 +894,9 @@ export function SaleScreen({
    *   multiplicador (BR-14); dois bipes do mesmo produto viram duas chamadas e quem soma é o
    *   servidor (BR-01);
    * - sucesso: `saleUpdated` (limpa o pendente), linha de confirmação e bell;
-   * - 404/422: aviso na tela e o bipe é consumido (`scanDismissed`) sem mexer na venda;
+   * - 404/422: o 404 abre o cadastro rápido do F-02 (1128) com o código travado — o bipe é
+   *   consumido (`scanDismissed`) e o item só entra no reenvio do sucesso; o 422 avisa na tela e o
+   *   bipe é consumido do mesmo jeito, sem mexer na venda;
    * - falha transitória (rede, timeout, 5xx): o bipe fica no topo da fila e o ENTER refaz;
    * - falha bloqueante (403/400/contrato): vai para a tela de erro guardando a venda; o 409 de
    *   idempotência/concorrência fica na tela e quem relê o estado é o shell (1117).
@@ -881,13 +945,13 @@ export function SaleScreen({
         }
 
         if (added.kind === "notFound") {
+          // o código não existe: o bipe é consumido e o cadastro rápido (F-02, 1128) abre com ele
+          // travado e a quantidade do leitor guardada; o pump para aqui porque o modal é bloqueante
+          // — o item só entra no reenvio do sucesso
           queueRef.current.shift()
-          setFeedback({
-            kind: "notice",
-            text: `produto não encontrado: ${added.barcode} — cadastro rápido ainda não disponível`,
-          })
           dispatch({ type: "scanDismissed" })
-          continue
+          setModal({ kind: "quickCreate", scan: { barcode: added.barcode, quantity: scan.quantity } })
+          return
         }
 
         if (added.kind === "rejected") {
@@ -964,6 +1028,12 @@ export function SaleScreen({
             onSend={(intent, idempotencyKey) =>
               sendCashMovement(modal.movement, intent, idempotencyKey)
             }
+            onCancel={closeModal}
+          />
+        ) : modal.kind === "quickCreate" ? (
+          <QuickCreateProductModal
+            barcode={modal.scan.barcode}
+            onCreate={quickCreateFromModal}
             onCancel={closeModal}
           />
         ) : (

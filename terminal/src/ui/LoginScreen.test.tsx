@@ -16,6 +16,7 @@ import type {
   LoginOutcome,
   OpenCashRegisterOutcome,
   ProductStockOutcome,
+  QuickCreateProductOutcome,
   SaleItemMutationOutcome,
   SearchCustomersOutcome,
   SearchProductsOutcome,
@@ -87,6 +88,14 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
         ok: false,
         kind: 'retryable',
         problem: { status: 0, code: null, detail: 'saldo não usado na tela de login' },
+      }),
+    ),
+    // o cadastro rápido é da UI nova (1128): aqui ele não é usado e falha se for chamado
+    quickCreateProduct: vi.fn(
+      async (): Promise<QuickCreateProductOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'cadastro rápido não usado na tela de login' },
       }),
     ),
     createSale: vi.fn(

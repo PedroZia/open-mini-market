@@ -108,6 +108,7 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     resolveBarcode: mock(async () => sendFailure()),
     searchProducts: mock(async () => sendFailure()),
     productStock: mock(async () => sendFailure()),
+    quickCreateProduct: mock(async () => sendFailure()),
     createSale: mock(async () => sendFailure()),
     addSaleItem: mock(async () => sendFailure()),
     changeSaleItemQuantity: mock(async () => ({ ok: false as const, kind: "notFound" as const })),

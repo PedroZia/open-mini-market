@@ -1919,3 +1919,123 @@ describe('createTerminalApi: sessão, releitura e o que não é recusa da tela (
     });
   });
 });
+
+describe('createTerminalApi: cadastro rápido do PDV (1128)', () => {
+  /** O corpo que o modal manda: nome digitado, código travado (BR-14), preço em reais e unidade. */
+  const REQUEST = { name: 'Chiclete', barcode: '7899999999999', price: 2.5, unit: 'UN' };
+
+  test('cria pelo `POST /products/quick` do 1122 e devolve o produto que o servidor gravou', async () => {
+    const post = vi.fn(async () => ({
+      id: 'p9',
+      name: 'Chiclete',
+      barcode: '7899999999999',
+      unit: 'UN',
+      price: 2.5,
+      active: true,
+      version: 0,
+    }));
+    const api = createTerminalApi(stubClient({ post }));
+
+    expect(await api.quickCreateProduct(REQUEST)).toEqual({
+      ok: true,
+      product: { id: 'p9', barcode: '7899999999999', name: 'Chiclete', price: 2.5, unit: 'UN' },
+    });
+    expect(post).toHaveBeenCalledWith('/api/v1/products/quick', {
+      name: 'Chiclete',
+      barcode: '7899999999999',
+      price: 2.5,
+      unit: 'UN',
+    });
+  });
+
+  test('201 sem id é falha bloqueante: sem produto não há bipe para reenviar', async () => {
+    const api = createTerminalApi(stubClient({ post: async () => ({ name: 'Chiclete' }) }));
+
+    expect(await api.quickCreateProduct(REQUEST)).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'cadastro rápido sem produto na resposta' },
+    });
+  });
+
+  test('409 BARCODE_ALREADY_EXISTS vira recusa com o detail do servidor e o caminho de volta', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(409, {
+            code: 'BARCODE_ALREADY_EXISTS',
+            detail: 'código de barras 7899999999999 já está em uso',
+          });
+        },
+      }),
+    );
+
+    expect(await api.quickCreateProduct(REQUEST)).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'código já cadastrado no servidor — feche e bipe de novo',
+    });
+  });
+
+  test('403 sem `product.quick_create` vira recusa fixa: quem recusa é o servidor', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(403, {
+            code: 'ACCESS_DENIED',
+            detail: 'permissão product.quick_create',
+          });
+        },
+      }),
+    );
+
+    expect(await api.quickCreateProduct(REQUEST)).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para cadastrar produto pelo PDV',
+    });
+  });
+
+  test('400 do formulário vira recusa com o detail; rede e 5xx são transitórias (retry no modal)', async () => {
+    const invalid = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(400, {
+            code: 'VALIDATION_ERROR',
+            detail: 'unidade deve ser UN ou KG',
+          });
+        },
+      }),
+    );
+    const offline = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+    const unavailable = createTerminalApi(
+      stubClient({
+        post: async () => {
+          throw new ApiError(503, { code: 'UNAVAILABLE', detail: 'servidor fora do ar' });
+        },
+      }),
+    );
+
+    expect(await invalid.quickCreateProduct(REQUEST)).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'unidade deve ser UN ou KG',
+    });
+    expect(await offline.quickCreateProduct(REQUEST)).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+    expect(await unavailable.quickCreateProduct(REQUEST)).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 503, code: 'UNAVAILABLE', detail: 'servidor fora do ar' },
+    });
+  });
+});

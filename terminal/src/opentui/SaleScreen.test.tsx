@@ -16,6 +16,8 @@ import type {
   CustomerSaleOutcome,
   ProductOption,
   ProductStockOutcome,
+  QuickCreatedProduct,
+  QuickCreateProductOutcome,
   SearchCustomersOutcome,
   SearchProductsOutcome,
   SendFailure,
@@ -165,6 +167,7 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     resolveBarcode: mock(async () => sendFailure()),
     searchProducts: mock(async () => ({ ok: true as const, products: [] })),
     productStock: mock(async () => sendFailure()),
+    quickCreateProduct: mock(async () => sendFailure()),
     createSale: mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleOf([]) })),
     getSale: mock(async () => ({ ok: false as const, problem: API_PROBLEM })),
     addSaleItem: mock(async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ]) })),
@@ -332,7 +335,7 @@ function itemLines(frame: string): string[] {
   return frameLines(frame).filter((line) => line.includes(" x Produto "))
 }
 
-async function pressArrow(setup: Setup, direction: "up" | "down"): Promise<void> {
+async function pressArrow(setup: Setup, direction: "up" | "down" | "left" | "right"): Promise<void> {
   await act(async () => {
     setup.mockInput.pressArrow(direction)
   })
@@ -734,7 +737,7 @@ describe("SaleScreen: bipe e leitura manual (1125b)", () => {
     }
   })
 
-  test("404 avisa, não põe item na venda e o bipe é consumido", async () => {
+  test("404 abre o cadastro rápido, não põe item na venda e o bipe é consumido", async () => {
     const createSale = mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleOf([]) }))
     const addSaleItem = mock(
       async (_saleId: string, item: SaleItemIntent): Promise<AddSaleItemOutcome> =>
@@ -742,24 +745,29 @@ describe("SaleScreen: bipe e leitura manual (1125b)", () => {
           ? { ok: false, kind: "notFound", barcode: MISSING }
           : { ok: true, sale: saleOf([ARROZ]) },
     )
+    const quickCreateProduct = mock(async (): Promise<QuickCreateProductOutcome> => sendFailure())
     const actions: Action[] = []
-    const setup = await renderHarness(apiStub({ createSale, addSaleItem }), stateWith(null), (action) =>
-      actions.push(action),
+    const setup = await renderHarness(
+      apiStub({ createSale, addSaleItem, quickCreateProduct }),
+      stateWith(null),
+      (action) => actions.push(action),
     )
 
     try {
       await scanReader(setup, MISSING)
 
-      const frame = await expectFrame(
-        setup,
-        `produto não encontrado: ${MISSING} — cadastro rápido ainda não disponível`,
-      )
+      const frame = await expectFrame(setup, "Cadastro rápido (F-02)")
 
+      expect(frame).toContain(`Código: ${MISSING} (travado)`)
       expect(actions).toContainEqual({ type: "scanDismissed" })
-      expect(frame).toContain("bipar o primeiro item para iniciar a venda") // a venda criada segue vazia
       expect(frame).not.toContain("adicionado")
+      expect(quickCreateProduct).not.toHaveBeenCalled() // abrir o cadastro não cadastra nada
+      expect(addSaleItem).toHaveBeenCalledWith(SALE_ID, { barcode: MISSING, quantity: 1 })
 
-      // o próximo bipe reusa a venda que o 404 abriu: nada é criado de novo (BR-11 não tem o que refazer)
+      // o ESC fecha o cadastro e o próximo bipe reusa a venda que o 404 abriu: nada é criado de novo
+      await pressEscape(setup)
+      await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
       await scanReader(setup, BARCODE)
       const after = await expectFrame(setup, "adicionado: 1 x Arroz 5kg — R$ 24,90")
 
@@ -863,8 +871,8 @@ describe("SaleScreen: bipe e leitura manual (1125b)", () => {
       expect(bells()).toBe(1)
 
       await scanReader(setup, MISSING)
-      await expectFrame(setup, `produto não encontrado: ${MISSING}`)
-      expect(bells()).toBe(1) // o aviso não toca o bell
+      await expectFrame(setup, "Cadastro rápido (F-02)")
+      expect(bells()).toBe(1) // o cadastro rápido não toca o bell
     } finally {
       bell.mockRestore()
       setup.renderer.destroy()
@@ -2798,6 +2806,312 @@ describe("SaleScreen: modais — cancelamento e gaveta (1126d)", () => {
 
       expect(withdrawCash).not.toHaveBeenCalled()
       expect(frame).toContain("Sangria (F7)") // o formulário ficou como estava
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+})
+
+describe("SaleScreen: cadastro rápido (F-02, 1128)", () => {
+  /** Produto que o `POST /products/quick` devolveu no 201 (1122): o servidor é quem o criou. */
+  const CHICLETE: QuickCreatedProduct = {
+    id: "p9",
+    barcode: MISSING,
+    name: "Chiclete",
+    price: 2.5,
+    unit: "UN",
+  }
+
+  /** O item como o servidor o devolve no reenvio do bipe: os valores são dele (BR-12). */
+  const CHICLETE_ITEM: SaleItemView = {
+    productId: "p9",
+    name: "Chiclete",
+    unit: "UN",
+    quantity: 1,
+    unitPrice: 2.5,
+    lineTotal: 2.5,
+  }
+
+  /** O mesmo item na unidade `KG`, quando o operador alternou a unidade no cadastro. */
+  const CHICLETE_KG: SaleItemView = { ...CHICLETE_ITEM, unit: "KG" }
+
+  test("404 abre o modal com o código travado; cadastrar reenvia o bipe e o item entra na venda", async () => {
+    let registered = false
+    const quickCreateProduct = mock(async (): Promise<QuickCreateProductOutcome> => {
+      registered = true
+      return { ok: true, product: CHICLETE }
+    })
+    const addSaleItem = mock(
+      async (_saleId: string, item: SaleItemIntent): Promise<AddSaleItemOutcome> =>
+        item.barcode === MISSING && !registered
+          ? { ok: false, kind: "notFound", barcode: MISSING }
+          : { ok: true, sale: saleOf([CHICLETE_KG]) },
+    )
+    const createSale = mock(async (): Promise<CreateSaleOutcome> => ({ ok: true, sale: saleOf([]) }))
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ createSale, addSaleItem, quickCreateProduct }),
+      stateWith(null),
+      (action) => actions.push(action),
+    )
+
+    try {
+      await scanReader(setup, MISSING)
+
+      const opened = await expectFrame(setup, "Cadastro rápido (F-02)")
+
+      // o código é o do bipe e está travado; o formulário abre no nome e a unidade começa em UN
+      expect(opened).toContain(`Código: ${MISSING} (travado)`)
+      expect(opened).toContain("› Nome:")
+      expect(opened).toContain("Preço: R$ 0,00")
+      expect(opened).toContain("Unidade: [UN] · KG")
+      expect(opened).not.toContain("TOTAL:") // o corpo da venda saiu de cena
+      expect(actions).toContainEqual({ type: "scanDismissed" })
+
+      // ENTER sem nome (e depois sem preço) não chama a API: a dica fica no próprio formulário
+      await pressEnter(setup)
+      await expectFrame(setup, "informe o nome do produto")
+      expect(quickCreateProduct).not.toHaveBeenCalled()
+
+      await typeHuman(setup, "Chiclete")
+      await expectFrame(setup, "› Nome: Chiclete")
+
+      await pressTab(setup)
+      await pressEnter(setup)
+      await expectFrame(setup, "informe o preço em centavos")
+      expect(quickCreateProduct).not.toHaveBeenCalled()
+
+      await typeHuman(setup, "250")
+      await expectFrame(setup, "› Preço: R$ 2,50") // a máscara de centavos da abertura de caixa
+
+      // TAB até a unidade e ← alterna UN/KG
+      await pressTab(setup)
+      await expectFrame(setup, "› Unidade: [UN] · KG")
+      await pressArrow(setup, "left")
+      await expectFrame(setup, "› Unidade: UN · [KG]")
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "adicionado: 1 x Chiclete — R$ 2,50")
+
+      expect(quickCreateProduct).toHaveBeenCalledWith({
+        name: "Chiclete",
+        barcode: MISSING,
+        price: 2.5,
+        unit: "KG",
+      })
+      // o bipe reenviado é o mesmo: o código bruto do leitor e a quantidade que ele trouxe
+      expect(addSaleItem).toHaveBeenCalledTimes(2)
+      expect(addSaleItem).toHaveBeenNthCalledWith(1, SALE_ID, { barcode: MISSING, quantity: 1 })
+      expect(addSaleItem).toHaveBeenNthCalledWith(2, SALE_ID, { barcode: MISSING, quantity: 1 })
+      expect(createSale).toHaveBeenCalledTimes(1) // a venda aberta pelo 404 é reaproveitada
+      expect(frame).not.toContain("Cadastro rápido (F-02)")
+      expect(frame).toContain("› 1 x Chiclete — R$ 2,50")
+      expect(frame).toContain("TOTAL: R$ 2,50")
+      expectLayout(frame, 80, 24)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("3* desconhecido: a quantidade 3 é preservada no reenvio do bipe", async () => {
+    let registered = false
+    const quickCreateProduct = mock(async (): Promise<QuickCreateProductOutcome> => {
+      registered = true
+      return { ok: true, product: CHICLETE }
+    })
+    const received: Array<{ barcode: string; quantity: number }> = []
+    const addSaleItem = mock(
+      async (_saleId: string, item: SaleItemIntent): Promise<AddSaleItemOutcome> => {
+        received.push({ barcode: item.barcode, quantity: item.quantity })
+
+        return item.barcode === MISSING && !registered
+          ? { ok: false, kind: "notFound", barcode: MISSING }
+          : { ok: true, sale: saleOf([{ ...CHICLETE_ITEM, quantity: 3, lineTotal: 7.5 }]) }
+      },
+    )
+    const setup = await renderHarness(apiStub({ addSaleItem, quickCreateProduct }))
+
+    try {
+      // o `3` e o `*` são digitados devagar (80 ms): o `*` fecha o multiplicador do próximo bipe
+      await act(async () => {
+        await setup.mockInput.pressKeys(["3", "*"], 80)
+      })
+      await scanReader(setup, MISSING)
+
+      await expectFrame(setup, "Cadastro rápido (F-02)")
+      await typeHuman(setup, "Chiclete")
+      await pressTab(setup)
+      await typeHuman(setup, "250")
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "adicionado: 3 x Chiclete — R$ 7,50")
+
+      // as duas chamadas levam a quantidade do `3*`: o cadastro rápido não perde o multiplicador
+      expect(received).toEqual([
+        { barcode: MISSING, quantity: 3 },
+        { barcode: MISSING, quantity: 3 },
+      ])
+      expect(frame).toContain("› 3 x Chiclete — R$ 7,50")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("recusa 403/409/400 fica no modal com a mensagem e nada entra na venda", async () => {
+    const refusals = [
+      "sem permissão para cadastrar produto pelo PDV",
+      "código já cadastrado no servidor — feche e bipe de novo",
+      "unidade deve ser UN ou KG",
+    ]
+    let attempt = 0
+    const quickCreateProduct = mock(async (): Promise<QuickCreateProductOutcome> => {
+      const message = refusals[attempt] ?? "recusa inesperada do servidor"
+      attempt += 1
+      return { ok: false, kind: "rejected", message }
+    })
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: false, kind: "notFound", barcode: MISSING }),
+    )
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ addSaleItem, quickCreateProduct }),
+      stateWith(null),
+      (action) => actions.push(action),
+    )
+
+    try {
+      await scanReader(setup, MISSING)
+      await expectFrame(setup, "Cadastro rápido (F-02)")
+      await typeHuman(setup, "Chiclete")
+      await pressTab(setup)
+      await typeHuman(setup, "250")
+
+      for (const message of refusals) {
+        await pressEnter(setup)
+
+        const frame = await expectFrame(setup, message)
+
+        expect(frame).toContain("Cadastro rápido (F-02)") // a recusa não fecha o modal
+        expect(frame).toContain("Nome: Chiclete") // o digitado não se perde
+        expect(frame).toContain("Preço: R$ 2,50")
+      }
+
+      expect(quickCreateProduct).toHaveBeenCalledTimes(3)
+      expect(addSaleItem).toHaveBeenCalledTimes(1) // só o 404 que abriu o cadastro: nada foi reenviado
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(back).not.toContain("adicionado")
+      expect(back).toContain("TOTAL: R$ 0,00") // a venda criada pelo 404 segue vazia
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("falha transitória mantém o modal e o ENTER refaz o cadastro", async () => {
+    let attempts = 0
+    let registered = false
+    const quickCreateProduct = mock(async (): Promise<QuickCreateProductOutcome> => {
+      attempts += 1
+
+      if (attempts === 1) {
+        return sendFailure()
+      }
+
+      registered = true
+      return { ok: true, product: CHICLETE }
+    })
+    const addSaleItem = mock(
+      async (_saleId: string, item: SaleItemIntent): Promise<AddSaleItemOutcome> =>
+        item.barcode === MISSING && !registered
+          ? { ok: false, kind: "notFound", barcode: MISSING }
+          : { ok: true, sale: saleOf([CHICLETE_ITEM]) },
+    )
+    const setup = await renderHarness(apiStub({ addSaleItem, quickCreateProduct }))
+
+    try {
+      await scanReader(setup, MISSING)
+      await expectFrame(setup, "Cadastro rápido (F-02)")
+      await typeHuman(setup, "Chiclete")
+      await pressTab(setup)
+      await typeHuman(setup, "250")
+      await pressEnter(setup)
+
+      const failed = await expectFrame(setup, "falha ao cadastrar o produto — ENTER tenta de novo")
+
+      expect(failed).toContain("Cadastro rápido (F-02)") // o formulário continua à vista
+      expect(failed).toContain("Nome: Chiclete")
+      expect(quickCreateProduct).toHaveBeenCalledTimes(1) // sem retry automático
+      expect(addSaleItem).toHaveBeenCalledTimes(1)
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "adicionado: 1 x Chiclete — R$ 2,50")
+
+      expect(quickCreateProduct).toHaveBeenCalledTimes(2)
+      expect(addSaleItem).toHaveBeenCalledTimes(2) // o bipe foi reenviado depois do cadastro
+      expect(addSaleItem).toHaveBeenLastCalledWith(SALE_ID, { barcode: MISSING, quantity: 1 })
+      expect(frame).not.toContain("Cadastro rápido (F-02)")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("ESC cancela sem cadastrar e o bipe fica consumido (scanDismissed)", async () => {
+    const quickCreateProduct = mock(async (): Promise<QuickCreateProductOutcome> => sendFailure())
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: false, kind: "notFound", barcode: MISSING }),
+    )
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ addSaleItem, quickCreateProduct }),
+      stateWith(null),
+      (action) => actions.push(action),
+    )
+
+    try {
+      await scanReader(setup, MISSING)
+      await expectFrame(setup, "Cadastro rápido (F-02)")
+
+      await pressEscape(setup)
+
+      const frame = await expectFrame(setup, "bipar o primeiro item para iniciar a venda")
+
+      expect(frame).not.toContain("Cadastro rápido (F-02)")
+      expect(frame).not.toContain("adicionado")
+      expect(quickCreateProduct).not.toHaveBeenCalled()
+      expect(addSaleItem).toHaveBeenCalledTimes(1)
+      expect(actions).toContainEqual({ type: "scanDismissed" })
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("a rajada do leitor com o cadastro aberto não vira cadastro nem item (leitor desligado)", async () => {
+    const quickCreateProduct = mock(async (): Promise<QuickCreateProductOutcome> => sendFailure())
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: false, kind: "notFound", barcode: MISSING }),
+    )
+    const setup = await renderHarness(apiStub({ addSaleItem, quickCreateProduct }))
+
+    try {
+      await scanReader(setup, MISSING)
+      await expectFrame(setup, "Cadastro rápido (F-02)")
+      await waitMs(60) // o operador parou de digitar: o primeiro caractere da rajada não é rajada
+
+      await act(async () => {
+        await setup.mockInput.typeText(BARCODE)
+        setup.mockInput.pressEnter()
+      })
+
+      const frame = await expectFrame(setup, "Cadastro rápido (F-02)")
+
+      expect(frame).not.toContain("adicionado")
+      expect(quickCreateProduct).not.toHaveBeenCalled() // o terminador do bipe não é o ENTER do operador
+      expect(addSaleItem).toHaveBeenCalledTimes(1) // só o bipe que abriu o cadastro
     } finally {
       setup.renderer.destroy()
     }

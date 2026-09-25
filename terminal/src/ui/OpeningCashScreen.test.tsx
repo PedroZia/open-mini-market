@@ -15,6 +15,7 @@ import type {
   LoginOutcome,
   OpenCashRegisterOutcome,
   ProductStockOutcome,
+  QuickCreateProductOutcome,
   SaleItemMutationOutcome,
   SearchCustomersOutcome,
   SearchProductsOutcome,
@@ -74,6 +75,10 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     productStock: vi.fn(
       async (): Promise<ProductStockOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),
+    ),
+    // o cadastro rápido é da UI nova (1128): aqui ele não é usado e falha se for chamado
+    quickCreateProduct: vi.fn(
+      async (): Promise<QuickCreateProductOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),
     ),
     createSale: vi.fn(
       async (): Promise<CreateSaleOutcome> => ({

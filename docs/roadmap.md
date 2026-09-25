@@ -1137,7 +1137,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** contado/diferença, bloqueio por venda aberta, falha sem perder o caixa; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta fechamento de caixa`
 
-- [ ] **1128 — Cadastro rápido — modal (F-02)**
+- [x] **1128 — Cadastro rápido — modal (F-02)**
   **Objetivo:** cadastrar o produto desconhecido sem sair da venda. **Depende:** 1122, 1127b
   **Implementar:** método `quickCreateProduct` no `TerminalApi` (schema do 1122) com testes da camada de API; no 404 do bipe/linha digitada, abrir o modal (F-02) com o código travado usando o endpoint do 1122; no sucesso, reenviar o bipe; recusa no modal (a sessão do operador não traz permissões — quem recusa é o 403 do servidor).
   **Testes/aceite:** teste do fluxo "desconhecido → cadastra → item na venda" e recusa no modal; o E2E com o cadastro rápido entra na reescrita do 1130 (a Ink não recebe recurso novo); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

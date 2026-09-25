@@ -382,6 +382,45 @@ export type ProductStockOutcome =
   | { ok: false; kind: 'rejected'; message: string }
   | SendFailure;
 
+/**
+ * O que o cadastro rápido manda (`QuickCreateProductRequest`, passo 1122): o nome digitado pelo
+ * operador, o código **bruto** que abriu o modal (travado lá, BR-14), o preço informado e a
+ * unidade. Nada é calculado aqui (BR-12): quem normaliza, valida e audita é o servidor.
+ */
+export type QuickCreateProductIntent = {
+  name: string;
+  /** Código lido, como o leitor o mandou, e que o modal não deixa editar. */
+  barcode: string;
+  /** Em reais (`12.5`), como o operador o digitou em centavos no modal. */
+  price: number;
+  /** `UN` ou `KG` da whitelist do caso de uso. */
+  unit: string;
+};
+
+/** Produto criado pelo cadastro rápido, como o `ProductResponse` do 201 o traz (1122). */
+export type QuickCreatedProduct = {
+  id: string;
+  barcode: string;
+  name: string;
+  price: number;
+  unit: string;
+};
+
+/**
+ * Resultado do cadastro rápido (`POST /products/quick`, 201, passo 1122):
+ * - `ok`: o produto que o servidor criou — agora o bipe do código resolve nele e é isso que a tela
+ *   usa para reenviar a leitura que abriu o modal;
+ * - `rejected`: a recusa que **o próprio modal** mostra — 403 sem `product.quick_create` (a sessão
+ *   do operador não traz as permissões, então quem recusa é o servidor), 409
+ *   `BARCODE_ALREADY_EXISTS` do código que outro cadastrou no meio do caminho e 400
+ *   `VALIDATION_ERROR` do nome/código/preço/unidade —, sem fechar o formulário;
+ * - `SendFailure`: retry manual no modal (rede/5xx) ou tela de erro (401, contrato).
+ */
+export type QuickCreateProductOutcome =
+  | { ok: true; product: QuickCreatedProduct }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
 /** Loja da sessão corrente (`GET /auth/me`, 1117): o que o cabeçalho da venda mostra. */
 export type StoreView = {
   code: string;
@@ -453,6 +492,13 @@ export type TerminalApi = {
    * quantidade, o mínimo e o aviso de estoque baixo são do servidor (BR-12) — a TUI só exibe.
    */
   productStock(productId: string): Promise<ProductStockOutcome>;
+  /**
+   * Cadastra o produto desconhecido sem sair da venda (F-02, `POST /products/quick`, 201, passo
+   * 1122): nome, código **bruto** travado, preço e unidade vão no corpo e quem normaliza, valida,
+   * grava e audita na mesma transação é o servidor. Quem recusa por permissão é o **servidor**
+   * (403): a sessão da TUI não traz as permissões do operador, então o modal não decide isso.
+   */
+  quickCreateProduct(request: QuickCreateProductIntent): Promise<QuickCreateProductOutcome>;
   /**
    * Abre a venda (`POST /sales`, 201, sem corpo) no primeiro bipe: a resposta só traz os totais
    * zerados (ainda sem itens), e é o id dela que o `addSaleItem` usa. A `Idempotency-Key` é do
@@ -775,6 +821,48 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
       } catch (error) {
         if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
           return { ok: false, kind: 'rejected', message: stockRejectionMessage(error) };
+        }
+
+        return sendFailure(error);
+      }
+    },
+
+    async quickCreateProduct(request) {
+      try {
+        const response = await client.post<components['schemas']['ProductResponse']>(
+          '/api/v1/products/quick',
+          {
+            name: request.name,
+            barcode: request.barcode,
+            price: request.price,
+            unit: request.unit,
+          },
+        );
+
+        if (response.id === undefined) {
+          // 201 fora do contrato: sem id o produto não tem como ser reusado no reenvio do bipe
+          return failed({
+            status: 0,
+            code: null,
+            detail: 'cadastro rápido sem produto na resposta',
+          });
+        }
+
+        return {
+          ok: true,
+          product: {
+            id: response.id,
+            // o servidor normaliza o código: o dele manda no reenvio; sem ele, fica o que foi lido
+            barcode: response.barcode ?? request.barcode,
+            name: response.name ?? request.name,
+            price: response.price ?? request.price,
+            unit: response.unit ?? request.unit,
+          },
+        };
+      } catch (error) {
+        if (error instanceof ApiError && isQuickCreateRejection(error.status)) {
+          // a recusa fica no próprio modal, com o formulário à vista para o operador corrigir (1128)
+          return { ok: false, kind: 'rejected', message: quickCreateRejectionMessage(error) };
         }
 
         return sendFailure(error);
@@ -1405,6 +1493,34 @@ function stockRejectionMessage(error: ApiError): string {
   return error.status === 403
     ? 'sem permissão para consultar o estoque'
     : 'produto não encontrado — faça a consulta de novo';
+}
+
+/**
+ * Recusa do cadastro rápido que fica no próprio modal (F-02, 1128): 403 sem `product.quick_create`
+ * (quem recusa é o servidor — a sessão da TUI não traz as permissões do operador), 409 do barcode
+ * que outro cadastrou no meio do caminho e 400 do formulário. O 401 não entra aqui: sessão caída é
+ * do shell, como nas demais operações.
+ */
+function isQuickCreateRejection(status: number): boolean {
+  return status === 400 || status === 403 || status === 409;
+}
+
+/**
+ * Mensagem da recusa do cadastro rápido: o 403 ganha texto fixo (sem expor o código da permissão);
+ * o 409 diz que o produto já existe e que o caminho de volta é bipar de novo — texto curto porque
+ * o quadro do modal tem largura fixa —, sem reescrever a mensagem pt-BR do servidor; o 400 do
+ * formulário já traz o que corrigir no `detail`.
+ */
+function quickCreateRejectionMessage(error: ApiError): string {
+  if (error.status === 403) {
+    return 'sem permissão para cadastrar produto pelo PDV';
+  }
+
+  if (error.code === 'BARCODE_ALREADY_EXISTS') {
+    return 'código já cadastrado no servidor — feche e bipe de novo';
+  }
+
+  return error.detail;
 }
 
 /** Normaliza a página de produtos para a lista do F2; registro sem `id` não é consultável e fica de fora. */
