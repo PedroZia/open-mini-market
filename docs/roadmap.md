@@ -1046,11 +1046,12 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 > Gate de todo passo da UI nova: `tsc --noEmit` + o runner decidido no 1121 (`bun test` ou vitest) verdes,
 > com testes de tela pelo `testRender` do `@opentui/react/test-utils`.
 
-- [ ] **1121 — Spike OpenTUI (go/no-go)**
+- [x] **1121 — Spike OpenTUI (go/no-go)**
   **Objetivo:** provar a engine OpenTUI na máquina do caixa antes de investir na migração — é o gate go/no-go da fase. **Depende:** 1120
   **Implementar:** app mínimo **fora do fluxo do PDV** (branch/worktree próprio; nada do `terminal/` do main muda): Bun 1.3+ (recomendado) e, se der, Node 26.4 + `--experimental-ffi`; render em 80×24 e 120×40; F1–F12; rajada do leitor interceptada por listener global **antes** do `<input>` focado; `<scrollbox>` com venda de 50 itens; `testRender` no runner escolhido; plano de rollback. Relatório curto com os 6 itens de §5 de `melhorias_terminal.md`.
   **Testes/aceite:** os 6 critérios com evidência: (a) instalação/start no Windows do caixa; (b) frames em 80×24 e 120×40; (c) F-keys e rajada do leitor; (d) `testRender` sob o runner escolhido; (e) venda de 50 itens fluida; (f) plano de rollback. Critério falho ou ambíguo = **no-go**: não entra no main, a fase para e o dono decide (Anexo A).
   **Commit:** `chore(tui): avalia OpenTUI com spike no caixa` (branch/worktree; não entra no main sem go)
+  > **Go/no-go (2026-09-25): GO.** Evidência na branch `spike/1121-opentui` (commit `73038bb`, `spike/opentui/REPORT.md`): Bun 1.4.2 no Windows x64, frames 80×24 e 120×40, F1–F12 e rajada interceptada antes do input focado, `bun test` 14/14 e venda de 50 itens a 0,63 ms/evento. Runner da UI nova: **`bun test`** (Vitest/Node 24 não carrega a lib nativa; Node 26.4+ não testável nesta máquina). Pendências do dono: instalar o Bun no caixa (§9.1) e a convivência dos dois runners durante a transição (§9.2).
 
 - [x] **1122 — Cadastro rápido — backend**
   **Objetivo:** permitir que o PDV cadastre produto quando o código não existe (F-02). **Depende:** 406
