@@ -967,7 +967,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** bipe adiciona e soma quantidade; não encontrado mostra aviso e não quebra a venda; erro de rede mantém estado e permite retry.
   **Commit:** `feat(tui): adiciona itens por codigo de barras`
 
-- [ ] **1110 — Fluxo: alterar quantidade e remover item**
+- [x] **1110 — Fluxo: alterar quantidade e remover item**
   **Objetivo:** corrigir a venda. **Depende:** 1109
   **Implementar:** `+`/`-` no item selecionado, `DEL` remove (com confirmação), setas navegam.
   **Testes/aceite:** quantidade e totais atualizam; remover zera item; confirmação evita remoção acidental.

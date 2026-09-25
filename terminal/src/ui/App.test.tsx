@@ -10,6 +10,7 @@ import type {
   CurrentCashSessionOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
+  SaleItemMutationOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import { App } from './App';
@@ -69,13 +70,20 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
         sale: {
           id: 'sale-1',
           items: [
-            { productId: 'p1', name: 'Arroz 5kg', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+            { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
           ],
           subtotal: 24.9,
           discountAmount: 0,
           total: 24.9,
         },
       }),
+    ),
+    // a venda do App bipa: `+`/`-` e DEL (1110) entram só para fechar o contrato
+    changeSaleItemQuantity: vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'notFound' }),
+    ),
+    removeSaleItem: vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'notFound' }),
     ),
     ...overrides,
   };
@@ -458,7 +466,7 @@ describe('App: bipe adiciona item (1109)', () => {
         sale: {
           id: 'sale-1',
           items: [
-            { productId: 'p1', name: 'Arroz 5kg', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+            { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
           ],
           subtotal: 24.9,
           discountAmount: 0,

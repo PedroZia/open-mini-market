@@ -311,6 +311,7 @@ describe('resolveShortcut: atalho por contexto', () => {
     'withdrawal',
     'supply',
     'readerSelfTest',
+    'removeItemConfirm',
   ];
 
   test.each(modals)('com o modal %s aberto, ESC fecha o modal', (modal) => {

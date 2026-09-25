@@ -10,6 +10,7 @@ import type {
   CurrentCashSessionOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
+  SaleItemMutationOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import { reduce } from '../core/reducer';
@@ -63,6 +64,7 @@ const PRODUCTS = [
 const ARROZ: SaleItemView = {
   productId: 'p1',
   name: 'Arroz 5kg',
+  unit: 'UN',
   quantity: 1,
   unitPrice: 24.9,
   lineTotal: 24.9,
@@ -71,9 +73,20 @@ const ARROZ: SaleItemView = {
 const FEIJAO: SaleItemView = {
   productId: 'p2',
   name: 'Feijão 1kg',
+  unit: 'UN',
   quantity: 1,
   unitPrice: 8.9,
   lineTotal: 8.9,
+};
+
+/** Banana é vendida a granel: o passo do `+`/`-` em KG é 0,1 (1110). */
+const BANANA: SaleItemView = {
+  productId: 'p3',
+  name: 'Banana prata',
+  unit: 'KG',
+  quantity: 0.75,
+  unitPrice: 6.99,
+  lineTotal: 5.24,
 };
 
 /** Venda como o servidor devolveu: o fixture repete a conta dele; a tela só exibe (BR-12). */
@@ -99,12 +112,18 @@ function saleWith(count: number): SaleOpenState {
   const items: SaleItemView[] = PRODUCTS.slice(0, count).map((name, index) => ({
     productId: `p${index}`,
     name,
+    unit: 'UN',
     quantity: 2,
     unitPrice: index + 3,
     lineTotal: (index + 3) * 2,
   }));
 
   return { ...saleOpen(), sale: count === 0 ? null : saleWithItems(items) };
+}
+
+/** Estado da tela com a venda já criada e os itens exatos que o teste quer (1110). */
+function saleOf(items: SaleItemView[]): SaleOpenState {
+  return { ...saleOpen(), sale: saleWithItems(items) };
 }
 
 /** Dublê da camada de API: só a venda entra aqui; o resto existe para satisfazer o tipo. */
@@ -133,6 +152,12 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     addSaleItem: vi.fn(
       async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleWithItems([ARROZ]) }),
+    ),
+    changeSaleItemQuantity: vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleWithItems([ARROZ]) }),
+    ),
+    removeSaleItem: vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleWithItems([]) }),
     ),
     ...overrides,
   };
@@ -416,5 +441,253 @@ describe('SaleScreen: bipe adiciona item (1109)', () => {
 
     await expectFrame(ui.lastFrame, 'adicionado: 1 x Arroz 5kg — R$ 24,90');
     expect(ui.frames.join('')).toContain('\u0007');
+  });
+});
+
+describe('SaleScreen: alterar quantidade e remover item (1110)', () => {
+  test('`+` manda o PATCH com a quantidade nova e os totais são os da resposta do servidor', async () => {
+    const changeSaleItemQuantity = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({
+        ok: true,
+        sale: saleWithItems([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }]),
+      }),
+    );
+    const ui = renderSale(apiStub({ changeSaleItemQuantity }), saleOf([ARROZ]));
+
+    ui.stdin.write('+');
+
+    await expectFrame(ui.lastFrame, '› 2 x Arroz 5kg — R$ 49,80');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 49,80');
+    expect(changeSaleItemQuantity).toHaveBeenCalledWith(SALE_ID, 'p1', 2);
+    await expectFrame(ui.lastFrame, 'quantidade: 2 x Arroz 5kg — R$ 49,80');
+  });
+
+  test('`-` manda o PATCH com a quantidade menor, também absoluta', async () => {
+    const changeSaleItemQuantity = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({
+        ok: true,
+        sale: saleWithItems([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }]),
+      }),
+    );
+    const ui = renderSale(
+      apiStub({ changeSaleItemQuantity }),
+      saleOf([{ ...ARROZ, quantity: 3, lineTotal: 74.7 }]),
+    );
+
+    ui.stdin.write('-');
+
+    await expectFrame(ui.lastFrame, '› 2 x Arroz 5kg — R$ 49,80');
+    expect(changeSaleItemQuantity).toHaveBeenCalledWith(SALE_ID, 'p1', 2);
+  });
+
+  test('em KG o passo é 0,1 (venda a granel) e a quantidade vai sem ruído de ponto flutuante', async () => {
+    const changeSaleItemQuantity = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({
+        ok: true,
+        sale: saleWithItems([{ ...BANANA, quantity: 0.85, lineTotal: 5.94 }]),
+      }),
+    );
+    const ui = renderSale(apiStub({ changeSaleItemQuantity }), saleOf([BANANA]));
+
+    ui.stdin.write('+');
+
+    await expectFrame(ui.lastFrame, '› 0,850 x Banana prata — R$ 5,94');
+    expect(changeSaleItemQuantity).toHaveBeenCalledWith(SALE_ID, 'p3', 0.85);
+  });
+
+  test('`-` que zeraria não chama a API: quem remove é o DEL', async () => {
+    const changeSaleItemQuantity = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleWithItems([ARROZ]) }),
+    );
+    const ui = renderSale(apiStub({ changeSaleItemQuantity }), saleOf([ARROZ]));
+
+    ui.stdin.write('-');
+
+    await expectFrame(ui.lastFrame, 'use DEL para remover o item');
+    expect(changeSaleItemQuantity).not.toHaveBeenCalled();
+    expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90');
+  });
+
+  test('uma mutação por vez: com o PATCH em voo a tecla é ignorada e o rodapé mostra "enviando…"', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const changeSaleItemQuantity = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => {
+        await pending;
+        return { ok: true, sale: saleWithItems([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }]) };
+      },
+    );
+    const ui = renderSale(apiStub({ changeSaleItemQuantity }), saleOf([ARROZ]));
+
+    ui.stdin.write('+');
+    await expectFrame(ui.lastFrame, 'enviando…');
+
+    ui.stdin.write('+'); // segunda tecla com a primeira ainda em voo
+    expect(changeSaleItemQuantity).toHaveBeenCalledTimes(1);
+
+    release();
+
+    await expectFrame(ui.lastFrame, '› 2 x Arroz 5kg — R$ 49,80');
+    expect(changeSaleItemQuantity).toHaveBeenCalledTimes(1);
+    expect(ui.lastFrame()).not.toContain('enviando…');
+  });
+
+  test('DEL abre a confirmação e nada vai à API antes do ENTER', async () => {
+    const removeSaleItem = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleWithItems([ARROZ]) }),
+    );
+    const ui = renderSale(apiStub({ removeSaleItem }), saleOf([ARROZ, FEIJAO]));
+
+    ui.stdin.write('\x1b[3~'); // DEL
+
+    await expectFrame(ui.lastFrame, 'remover Feijão 1kg? ENTER confirma · ESC cancela');
+    expectLayout(ui.lastFrame() ?? ''); // o overlay não estoura as 24 linhas
+    expect(removeSaleItem).not.toHaveBeenCalled();
+    expect(ui.lastFrame()).toContain('› 1 x Feijão 1kg — R$ 8,90'); // a venda intacta
+
+    ui.stdin.write('\r'); // ENTER confirma
+
+    await expectFrame(ui.lastFrame, 'removido: Feijão 1kg');
+    expect(removeSaleItem).toHaveBeenCalledWith(SALE_ID, 'p2');
+  });
+
+  test('ESC cancela a confirmação sem chamar a API e sem mexer na venda', async () => {
+    const removeSaleItem = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleWithItems([ARROZ]) }),
+    );
+    const ui = renderSale(apiStub({ removeSaleItem }), saleOf([ARROZ, FEIJAO]));
+
+    ui.stdin.write('\x1b[3~');
+    await expectFrame(ui.lastFrame, 'remover Feijão 1kg? ENTER confirma · ESC cancela');
+
+    ui.stdin.write('\x1b'); // ESC cancela
+
+    // o Ink segura o ESC sozinho por alguns ms antes de entregá-lo (pode ser o início de uma sequência)
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('remover Feijão 1kg?');
+    });
+    expect(ui.lastFrame()).toContain('› 1 x Feijão 1kg — R$ 8,90');
+    expect(removeSaleItem).not.toHaveBeenCalled();
+  });
+
+  test('remover o único item deixa a venda vazia (estado vazio do 1108)', async () => {
+    const removeSaleItem = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleWithItems([]) }),
+    );
+    const ui = renderSale(apiStub({ removeSaleItem }), saleOf([ARROZ]));
+
+    ui.stdin.write('\x1b[3~');
+    await expectFrame(ui.lastFrame, 'remover Arroz 5kg? ENTER confirma · ESC cancela');
+
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 0,00');
+    expect(highlighted(ui.lastFrame() ?? '')).toEqual([]); // a lista ficou vazia
+  });
+
+  test('durante a confirmação o leitor não vira item: a rajada morre no modal', async () => {
+    const addSaleItem = vi.fn(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleWithItems([ARROZ, FEIJAO]) }),
+    );
+    const removeSaleItem = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleWithItems([ARROZ]) }),
+    );
+    const ui = renderSale(apiStub({ addSaleItem, removeSaleItem }), saleOf([ARROZ, FEIJAO]));
+
+    ui.stdin.write('\x1b[3~');
+    await expectFrame(ui.lastFrame, 'remover Feijão 1kg? ENTER confirma · ESC cancela');
+
+    ui.stdin.write(`${BARCODE}\r`); // bipe com o modal à vista
+
+    expect(addSaleItem).not.toHaveBeenCalled();
+    expect(ui.lastFrame()).toContain('remover Feijão 1kg?'); // o overlay segue aberto
+
+    ui.stdin.write('\x1b'); // ESC cancela
+
+    await expectFrame(ui.lastFrame, '› 1 x Feijão 1kg — R$ 8,90');
+    expect(addSaleItem).not.toHaveBeenCalled(); // o bipe engolido não reaparece depois
+    expect(removeSaleItem).not.toHaveBeenCalled();
+  });
+
+  test('as setas movem o destaque e nas pontas não dão a volta (clamp)', async () => {
+    const ui = renderSale(apiStub(), saleOf([ARROZ, FEIJAO, BANANA]));
+
+    // sem seta, o destaque é o último item — o comportamento do 1108
+    expect(highlighted(ui.lastFrame() ?? '')).toEqual(['› 0,750 x Banana prata — R$ 5,24']);
+
+    ui.stdin.write('\x1b[A'); // ↑
+    await expectFrame(ui.lastFrame, '› 1 x Feijão 1kg — R$ 8,90');
+    expect(highlighted(ui.lastFrame() ?? '')).toHaveLength(1);
+
+    ui.stdin.write('\x1b[B'); // ↓ volta para o último
+    await expectFrame(ui.lastFrame, '› 0,750 x Banana prata — R$ 5,24');
+
+    ui.stdin.write('\x1b[B'); // ↓ no último: clamp
+    ui.stdin.write('\x1b[A');
+    ui.stdin.write('\x1b[A');
+    ui.stdin.write('\x1b[A'); // ↑ no primeiro: clamp
+
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+    expect(highlighted(ui.lastFrame() ?? '')).toEqual(['› 1 x Arroz 5kg — R$ 24,90']);
+  });
+
+  test('404 SALE_ITEM_NOT_FOUND avisa e mantém a venda como está', async () => {
+    const changeSaleItemQuantity = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'notFound' }),
+    );
+    const ui = renderSale(apiStub({ changeSaleItemQuantity }), saleOf([ARROZ]));
+
+    ui.stdin.write('+');
+
+    await expectFrame(ui.lastFrame, 'item já não está na venda: Arroz 5kg');
+    expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90');
+  });
+
+  test('falha de rede mantém o item e a mesma tecla tenta de novo', async () => {
+    let call = 0;
+    const changeSaleItemQuantity = vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => {
+        call += 1;
+
+        return call === 1
+          ? {
+              ok: false,
+              kind: 'retryable',
+              problem: { status: 0, code: null, detail: 'Falha de rede ao chamar a API.' },
+            }
+          : { ok: true, sale: saleWithItems([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }]) };
+      },
+    );
+    const ui = renderSale(apiStub({ changeSaleItemQuantity }), saleOf([ARROZ]));
+
+    ui.stdin.write('+');
+    await expectFrame(ui.lastFrame, 'falha ao falar com o servidor — +/- tenta de novo');
+    expect(ui.lastFrame()).toContain('› 1 x Arroz 5kg — R$ 24,90'); // o item fica como estava
+
+    ui.stdin.write('+');
+
+    await expectFrame(ui.lastFrame, '› 2 x Arroz 5kg — R$ 49,80');
+    expect(changeSaleItemQuantity).toHaveBeenCalledTimes(2);
+  });
+
+  test('409 SALE_NOT_OPEN bloqueia na tela de erro sem perder a venda (a tela despacha apiFailed)', async () => {
+    const problem = { status: 409, code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' };
+    const dispatch = vi.fn();
+    const api = apiStub({
+      changeSaleItemQuantity: vi.fn(
+        async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'failed', problem }),
+      ),
+    });
+    const ui = render(<SaleScreen state={saleOf([ARROZ])} api={api} dispatch={dispatch} now={NOW} />);
+
+    ui.stdin.write('+');
+
+    await vi.waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith({ type: 'apiFailed', problem });
+    });
   });
 });

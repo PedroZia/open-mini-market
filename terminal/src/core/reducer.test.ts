@@ -8,7 +8,9 @@ const register = { id: 'r-1', name: 'Caixa 1' };
 
 const sale: SaleView = {
   id: 'sale-1',
-  items: [{ productId: 'p-1', name: 'Arroz 1kg', quantity: 1, unitPrice: 5.5, lineTotal: 5.5 }],
+  items: [
+    { productId: 'p-1', name: 'Arroz 1kg', unit: 'UN', quantity: 1, unitPrice: 5.5, lineTotal: 5.5 },
+  ],
   subtotal: 5.5,
   discountAmount: 0,
   total: 5.5,

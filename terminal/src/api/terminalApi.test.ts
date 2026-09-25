@@ -14,9 +14,11 @@ import { createTerminalApi } from './terminalApi';
 type Handlers = {
   get?: (path: string) => Promise<unknown>;
   post?: (path: string, body?: unknown) => Promise<unknown>;
+  patch?: (path: string, body?: unknown) => Promise<unknown>;
+  delete?: (path: string) => Promise<unknown>;
 };
 
-/** Client dublê: só GET e POST entram na entrada do PDV; o resto é erro de teste. */
+/** Client dublê: só as rotas da entrada do PDV entram; o resto é erro de teste. */
 function stubClient(handlers: Handlers): ApiClient {
   const unused = (method: string) => () => Promise.reject(new Error(`${method} não usado aqui`));
 
@@ -27,8 +29,12 @@ function stubClient(handlers: Handlers): ApiClient {
       (handlers.post?.(path, body) ?? Promise.reject(new Error(`POST inesperado: ${path}`))) as
         Promise<T>,
     put: unused('PUT') as ApiClient['put'],
-    patch: unused('PATCH') as ApiClient['patch'],
-    delete: unused('DELETE') as ApiClient['delete'],
+    patch: <T>(path: string, body?: unknown) =>
+      (handlers.patch?.(path, body) ?? Promise.reject(new Error(`PATCH inesperado: ${path}`))) as
+        Promise<T>,
+    delete: <T>(path: string) =>
+      (handlers.delete?.(path) ?? Promise.reject(new Error(`DELETE inesperado: ${path}`))) as
+        Promise<T>,
   };
 }
 
@@ -427,7 +433,7 @@ describe('createTerminalApi', () => {
       sale: {
         id: 'sale-1',
         items: [
-          { productId: 'p1', name: 'Arroz 5kg', quantity: 2, unitPrice: 24.9, lineTotal: 49.8 },
+          { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 2, unitPrice: 24.9, lineTotal: 49.8 },
         ],
         subtotal: 49.8,
         discountAmount: 0,
@@ -540,6 +546,119 @@ describe('createTerminalApi', () => {
       ok: false,
       kind: 'retryable',
       problem: { status: 503, code: 'UNAVAILABLE', detail: 'servidor fora do ar' },
+    });
+  });
+
+  test('trocar a quantidade manda o PATCH com a quantidade absoluta e devolve a venda do servidor', async () => {
+    const patch = vi.fn(async () => ({
+      id: 'sale-1',
+      status: 'OPEN',
+      subtotal: 49.8,
+      discountAmount: 0,
+      total: 49.8,
+      items: [
+        { productId: 'p1', barcode: '7891000100103', name: 'Arroz 5kg', unit: 'UN', unitPrice: 24.9, quantity: 2, lineTotal: 49.8 },
+      ],
+    }));
+    const api = createTerminalApi(stubClient({ patch }));
+
+    expect(await api.changeSaleItemQuantity('sale-1', 'p1', 2)).toEqual({
+      ok: true,
+      sale: {
+        id: 'sale-1',
+        items: [
+          { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 2, unitPrice: 24.9, lineTotal: 49.8 },
+        ],
+        subtotal: 49.8,
+        discountAmount: 0,
+        total: 49.8,
+      },
+    });
+    // o `{itemId}` da rota é o productId do item (decisão do 802/809b)
+    expect(patch).toHaveBeenCalledWith('/api/v1/sales/sale-1/items/p1', { quantity: 2 });
+  });
+
+  test('404 SALE_ITEM_NOT_FOUND é desfecho próprio: o item sumiu entre a leitura e a ação', async () => {
+    const api = createTerminalApi(
+      stubClient({
+        patch: async () => {
+          throw new ApiError(404, {
+            code: 'SALE_ITEM_NOT_FOUND',
+            detail: 'produto 01924d2c não está na venda',
+          });
+        },
+      }),
+    );
+
+    expect(await api.changeSaleItemQuantity('sale-1', 'p1', 2)).toEqual({
+      ok: false,
+      kind: 'notFound',
+    });
+  });
+
+  test('remover item manda o DELETE no productId e devolve a venda já recalculada', async () => {
+    const remove = vi.fn(async () => ({
+      id: 'sale-1',
+      status: 'OPEN',
+      subtotal: 8.9,
+      discountAmount: 0,
+      total: 8.9,
+      items: [
+        { productId: 'p2', name: 'Feijão 1kg', unit: 'UN', unitPrice: 8.9, quantity: 1, lineTotal: 8.9 },
+      ],
+    }));
+    const api = createTerminalApi(stubClient({ delete: remove }));
+
+    expect(await api.removeSaleItem('sale-1', 'p1')).toEqual({
+      ok: true,
+      sale: {
+        id: 'sale-1',
+        items: [
+          { productId: 'p2', name: 'Feijão 1kg', unit: 'UN', quantity: 1, unitPrice: 8.9, lineTotal: 8.9 },
+        ],
+        subtotal: 8.9,
+        discountAmount: 0,
+        total: 8.9,
+      },
+    });
+    expect(remove).toHaveBeenCalledWith('/api/v1/sales/sale-1/items/p1');
+  });
+
+  test('409 SALE_NOT_OPEN na mutação é falha bloqueante; rede é transitória (retry manual)', async () => {
+    const closed = createTerminalApi(
+      stubClient({
+        delete: async () => {
+          throw new ApiError(409, { code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' });
+        },
+      }),
+    );
+    const offline = createTerminalApi(
+      stubClient({
+        patch: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+
+    expect(await closed.removeSaleItem('sale-1', 'p1')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 409, code: 'SALE_NOT_OPEN', detail: 'venda não está aberta' },
+    });
+    expect(await offline.changeSaleItemQuantity('sale-1', 'p1', 2)).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+  });
+
+  test('200 sem venda na resposta é falha bloqueante: a tela não teria o que exibir', async () => {
+    const api = createTerminalApi(stubClient({ patch: async () => ({ status: 'OPEN' }) }));
+
+    expect(await api.changeSaleItemQuantity('sale-1', 'p1', 2)).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'item alterado sem venda na resposta' },
     });
   });
 });

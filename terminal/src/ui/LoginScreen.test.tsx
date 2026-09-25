@@ -10,6 +10,7 @@ import type {
   CurrentCashSessionOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
+  SaleItemMutationOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import { LoginScreen } from './LoginScreen';
@@ -69,6 +70,13 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
         kind: 'notFound',
         barcode: '7891000100103',
       }),
+    ),
+    // o login não mexe em item: `+`/`-` e DEL (1110) entram só para fechar o contrato
+    changeSaleItemQuantity: vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'notFound' }),
+    ),
+    removeSaleItem: vi.fn(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'notFound' }),
     ),
     ...overrides,
   };

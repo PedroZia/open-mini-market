@@ -94,6 +94,21 @@ export type AddSaleItemOutcome =
   | { ok: false; kind: 'rejected'; barcode: string; message: string }
   | SendFailure;
 
+/**
+ * Resultado de mexer num item que já está na venda — trocar a quantidade (`PATCH`) ou removê-lo
+ * (`DELETE`, passo 1110): as duas rotas devolvem o mesmo `SaleDetailResponse` e recusam do mesmo
+ * jeito.
+ * - `ok`: a venda inteira como o servidor recalculou (BR-12);
+ * - `notFound`: 404 `SALE_ITEM_NOT_FOUND` — o item sumiu entre a leitura da tela e a ação (a venda
+ *   pode ter sido mexida em outro terminal); a tela avisa e nada muda aqui;
+ * - `SendFailure`: retry manual (rede/5xx) ou tela de erro (403 `ACCESS_DENIED`, 409
+ *   `SALE_NOT_OPEN`, 400/contrato).
+ */
+export type SaleItemMutationOutcome =
+  | { ok: true; sale: SaleView }
+  | { ok: false; kind: 'notFound' }
+  | SendFailure;
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -134,6 +149,22 @@ export type TerminalApi = {
    * etiqueta de balança e soma na linha do produto que já está na venda (BR-01).
    */
   addSaleItem(saleId: string, item: SaleItemIntent): Promise<AddSaleItemOutcome>;
+  /**
+   * Troca a quantidade de um item que já está na venda (`PATCH /sales/{id}/items/{itemId}`, 200): a
+   * quantidade vai **absoluta** — nada de soma local — e quem recalcula linha e totais é o servidor
+   * (BR-02, BR-12). O `{itemId}` do contrato é o `productId` do item (decisão do 802/809b).
+   */
+  changeSaleItemQuantity(
+    saleId: string,
+    productId: string,
+    quantity: number,
+  ): Promise<SaleItemMutationOutcome>;
+  /**
+   * Remove o item da venda aberta (`DELETE /sales/{id}/items/{itemId}`, 200): a venda inteira
+   * volta na resposta, com os totais já recalculados pelo servidor. Remover o último item deixa a
+   * venda vazia — quem decide voltar ao estado vazio é a tela (1108).
+   */
+  removeSaleItem(saleId: string, productId: string): Promise<SaleItemMutationOutcome>;
 };
 
 /** Monta a camada de API sobre um client já configurado (base URL + token da sessão). */
@@ -325,6 +356,23 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
         return sendFailure(error);
       }
     },
+
+    async changeSaleItemQuantity(saleId, productId, quantity) {
+      return mutateSaleItem(() =>
+        client.patch<components['schemas']['SaleDetailResponse']>(
+          `/api/v1/sales/${saleId}/items/${productId}`,
+          { quantity },
+        ),
+      );
+    },
+
+    async removeSaleItem(saleId, productId) {
+      return mutateSaleItem(() =>
+        client.delete<components['schemas']['SaleDetailResponse']>(
+          `/api/v1/sales/${saleId}/items/${productId}`,
+        ),
+      );
+    },
   };
 }
 
@@ -361,6 +409,32 @@ function sendFailure(error: unknown): SendFailure {
   return { ok: false, kind: 'retryable', problem: problemOf(error) };
 }
 
+/**
+ * Rota de item da venda (`PATCH` da quantidade e `DELETE`, passo 1110) traduzida para a tela: a
+ * venda inteira quando deu certo e o 404 `SALE_ITEM_NOT_FOUND` como desfecho próprio — o item sumiu
+ * entre a leitura da tela e a ação, então a tela avisa e a venda segue como está. O resto é falha
+ * bloqueante ou transitória, como no bipe (1109).
+ */
+async function mutateSaleItem(
+  send: () => Promise<components['schemas']['SaleDetailResponse']>,
+): Promise<SaleItemMutationOutcome> {
+  try {
+    const sale = toSaleView(await send());
+
+    if (sale === null) {
+      return failed({ status: 0, code: null, detail: 'item alterado sem venda na resposta' });
+    }
+
+    return { ok: true, sale };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404 && error.code === 'SALE_ITEM_NOT_FOUND') {
+      return { ok: false, kind: 'notFound' };
+    }
+
+    return sendFailure(error);
+  }
+}
+
 /** Mensagem do 422 para a tela: o operador precisa saber o que fazer, sem ver o UUID do produto. */
 function rejectionMessage(error: ApiError, barcode: string): string {
   return error.code === 'PRODUCT_INACTIVE'
@@ -379,6 +453,8 @@ function toSaleView(response: components['schemas']['SaleDetailResponse']): Sale
     items: (response.items ?? []).map((item) => ({
       productId: item.productId ?? '',
       name: item.name ?? '',
+      // unidade fora do contrato cai no passo de `UN` (1109): é granularidade de entrada, não cálculo
+      unit: item.unit ?? '',
       quantity: item.quantity ?? 0,
       unitPrice: item.unitPrice ?? 0,
       lineTotal: item.lineTotal ?? 0,

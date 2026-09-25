@@ -23,6 +23,8 @@ export type CashRegister = {
 export type SaleItemView = {
   productId: string;
   name: string;
+  /** `UN` ou `KG`: muda só a granularidade do `+`/`-` (1109/1110), nunca o cálculo (BR-12). */
+  unit: string;
   quantity: number;
   unitPrice: number;
   lineTotal: number;
