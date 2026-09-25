@@ -3117,3 +3117,50 @@ describe("SaleScreen: cadastro rápido (F-02, 1128)", () => {
     }
   })
 })
+
+describe("SaleScreen: autoteste do leitor (1129b)", () => {
+  test("F11 abre o autoteste e o ESC volta para a venda intacta; a rajada alimenta a tela, não a venda", async () => {
+    const resolveBarcode = mock(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: true,
+        product: { id: "p1", name: "Arroz 5kg", price: 24.9, unit: "UN", quantity: null },
+      }),
+    )
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ, FEIJAO]) }),
+    )
+    const setup = await renderHarness(
+      apiStub({ addSaleItem, resolveBarcode }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F11)
+
+      const frame = await expectFrame(setup, "Autoteste do leitor (F11)")
+
+      expect(frame).toContain("Última leitura: nenhuma ainda")
+      expect(frame).toContain("Histórico (5):")
+      expect(frame).toContain("Instruções de configuração:")
+      expect(frame).not.toContain("TOTAL: R$ 24,90") // o corpo da venda saiu de cena (overlay)
+
+      await scanReader(setup, BARCODE)
+
+      const scanned = await expectFrame(setup, 'produto "Arroz 5kg"')
+
+      expect(scanned).toContain(`Última leitura: ${BARCODE}`) // o código bruto veio do bipe
+      expect(resolveBarcode).toHaveBeenCalledWith(BARCODE) // o autoteste tem o próprio scanner
+      expect(addSaleItem).not.toHaveBeenCalled() // e o leitor da venda está desligado (§11.3)
+
+      await pressEscape(setup)
+
+      const back = await expectFrame(setup, "TOTAL: R$ 24,90")
+
+      expect(back).toContain("› 1 x Arroz 5kg — R$ 24,90")
+      expect(back).not.toContain("Última leitura:") // o overlay saiu de cena
+      expect(addSaleItem).not.toHaveBeenCalled() // o bipe engolido não reaparece depois do ESC
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+})

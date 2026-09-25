@@ -37,6 +37,7 @@ import {
   QuickCreateProductModal,
   type QuickCreateProductApplyResult,
 } from "./QuickCreateProductModal"
+import { ReaderSelfTestScreen } from "./ReaderSelfTestScreen"
 import { RemoveItemConfirmModal } from "./RemoveItemConfirmModal"
 import { SwitchOperatorModal } from "./SwitchOperatorModal"
 import { theme } from "./theme"
@@ -224,12 +225,13 @@ type Feedback =
 /**
  * Modal bloqueante aberto sobre a venda (1126a–1126d): a ajuda do F1, a confirmação do DEL/F3, a
  * consulta de preço do F2, o desconto do F5, o cliente do F6, a troca de operador do F12, o
- * cancelamento do F4 (o id da venda fica guardado: alvo fixo do `POST .../cancel`) e a gaveta do
- * F7/F8. O item guardado na confirmação é o alvo fixo do `DELETE` — com o modal à vista a seleção
- * não se move.
+ * cancelamento do F4 (o id da venda fica guardado: alvo fixo do `POST .../cancel`), a gaveta do
+ * F7/F8 e o autoteste do leitor do F11 (1129b, o overlay com o próprio scanner). O item guardado na
+ * confirmação é o alvo fixo do `DELETE` — com o modal à vista a seleção não se move.
  */
 type SaleModal =
   | { kind: "help" }
+  | { kind: "readerSelfTest" }
   | { kind: "removeItemConfirm"; item: SaleItemView }
   | { kind: "priceLookup" }
   | { kind: "discount" }
@@ -355,8 +357,8 @@ export function SaleScreen({
    * leitura —, e o ENTER refaz o bipe que ficou na fila depois de uma falha transitória. O F9 (1127a)
    * abre o pagamento e o F10 (1127b) o fechamento de caixa — os dois substituem esta tela no shell
    * (a venda vai preservada para o ESC do fechamento e quem recusa fechar com venda aberta é o
-   * servidor, 409 `SESSION_HAS_OPEN_SALES`); o F11 (1129) não age aqui: a tecla devolve `false` e o
-   * hook global a engole pelo mapa.
+   * servidor, 409 `SESSION_HAS_OPEN_SALES`); o F11 (1129b) monta o autoteste do leitor no lugar do
+   * corpo da venda, com o leitor desta tela desligado e o scanner do próprio autoteste.
    *
    * Com um modal à vista (1126a–1126d) a tela **não** age: o handler devolve `false` e quem
    * trata a tecla é o handler do próprio modal, que roda antes deste (o `prependListener` do hook
@@ -466,8 +468,15 @@ export function SaleScreen({
 
           return true
 
+        case "readerSelfTest":
+          // F11 (1129b): o autoteste é overlay da venda — o corpo sai de cena, o leitor da venda
+          // fica desligado (`barcodeEnabled`, §11.3) e a tela coleta as próprias leituras; o ESC
+          // dela fecha e a venda volta como estava
+          setModal({ kind: "readerSelfTest" })
+          return true
+
         default:
-          return false // F11 é do 1129
+          return false // `closeModal` só resolve com modal aberto, e aqui não há modal
       }
     }
 
@@ -986,6 +995,8 @@ export function SaleScreen({
       <box width="100%" height="100%" flexDirection="column" alignItems="center" justifyContent="center">
         {modal.kind === "help" ? (
           <HelpModal onClosed={closeModal} />
+        ) : modal.kind === "readerSelfTest" ? (
+          <ReaderSelfTestScreen api={api} onClosed={closeModal} />
         ) : modal.kind === "removeItemConfirm" ? (
           <RemoveItemConfirmModal
             item={modal.item}

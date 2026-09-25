@@ -1149,7 +1149,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes puros de cada diagnóstico e do histórico (5, ordem, leitura nova empurra a antiga); `bun test src/opentui` e `tsc --noEmit` verdes.
   **Commit:** `feat(tui): diagnostica o transporte do leitor`
 
-- [ ] **1129b — Tela do autoteste (F11 2.0)**
+- [x] **1129b — Tela do autoteste (F11 2.0)**
   **Objetivo:** portar o F11 com o histórico e o diagnóstico. **Depende:** 1129a
   **Implementar:** tela do autoteste (overlay) com a última leitura bruta, intervalo entre caracteres, interpretação do servidor, o histórico das 5 e os avisos do diagnóstico + as instruções de configuração do guia; F11 abre pelo `resolveShortcut` (contexto `saleOpen`) e ESC fecha.
   **Testes/aceite:** tela renderiza última leitura/intervalo/histórico/diagnóstico; F11 abre e ESC fecha; testes de tela equivalentes aos da Ink; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
