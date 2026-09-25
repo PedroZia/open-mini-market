@@ -1071,14 +1071,20 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** adaptadores puros testados (F1–F12, setas, ENTER/TAB/BACKSPACE/DEL, release/ctrl ignorados) e rajada interceptada antes do `<input>` focado no `testRender`; `bun test src/opentui` e `tsc --noEmit` verdes.
   **Commit:** `feat(tui): liga teclado e leitor ao core na UI nova`
 
-- [ ] **1124 — Entrada: login, abertura de caixa e erro**
-  **Objetivo:** portar a entrada do PDV para a UI nova. **Depende:** 1123b
-  **Implementar:** portar `LoginScreen` (senha mascarada própria — o `<input>` do OpenTUI não tem máscara), seleção de caixa, `OpeningCashScreen` (máscara de dinheiro) e `ErrorScreen`, reaproveitando os dublês de API dos testes da Ink.
-  **Testes/aceite:** testes de tela equivalentes aos da Ink (login OK/credencial inválida, valor inválido, retry); gate do 1121 verde.
-  **Commit:** `feat(tui): porta entrada do PDV para OpenTUI`
+- [ ] **1124a — Entrada: login do operador e seleção de caixa**
+  **Objetivo:** portar o login do PDV para a UI nova, com o shell roteador. **Depende:** 1123b
+  **Implementar:** shell em `src/opentui/App.tsx` (`useReducer(reduce, initialState)` + `withProblemGuard`, rota de `login`), `LoginScreen` com senha mascarada própria (o `<input>` do OpenTUI não tem máscara), foco/TAB, etapa de seleção de caixa com revogação da sessão provisória e relogin vinculado, `preferredRegisterId` e `notice`. Passo dividido do 1124 original (diff estimado acima de ~300 linhas); o restante é o 1124b.
+  **Testes/aceite:** testes de tela equivalentes aos da Ink (login OK/credencial inválida/campo vazio/lista pendente/lista vazia/ordem login→logout→login/caixa preferido/senha nunca no frame); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): porta o login do PDV para OpenTUI`
+
+- [ ] **1124b — Entrada: abertura de caixa e erro**
+  **Objetivo:** fechar a entrada do PDV na UI nova. **Depende:** 1124a
+  **Implementar:** `OpeningCashScreen` com máscara de dinheiro em centavos e o caminho de caixa já aberto (409 → sessão corrente → ENTER), `ErrorScreen` e as rotas de `openingCash`/`error` no shell.
+  **Testes/aceite:** testes de tela equivalentes aos da Ink (valor inválido, abrindo, 409 com/sem sessão legível, retry ENTER/ESC na tela de erro); `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): porta abertura de caixa e erro para OpenTUI`
 
 - [ ] **1125 — Tela de venda**
-  **Objetivo:** venda operável na UI nova com leitura manual e janela rolante. **Depende:** 1124
+  **Objetivo:** venda operável na UI nova com leitura manual e janela rolante. **Depende:** 1124b
   **Implementar:** cabeçalho + relógio vivo, lista com `<scrollbox>` e janela que segue a seleção (F-04), **leitura manual** com `<input>` + rajada do leitor interceptada globalmente (F-01), totais, feedback/spinner e barra de status base.
   **Testes/aceite:** testes de bipe, digitação manual, `3*`, scroll/seleção, 80×24 e 120×40; gate do 1121 verde.
   **Commit:** `feat(tui): migra a tela de venda para OpenTUI`
