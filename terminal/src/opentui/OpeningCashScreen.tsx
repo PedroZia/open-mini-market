@@ -87,7 +87,7 @@ export function OpeningCashScreen({ state, api, dispatch }: OpeningCashScreenPro
       return true
     }
 
-    // combo do sistema/formulário não é dígito do campo (mesma regra do `resolveKey` do Ink)
+    // combo do sistema/formulário não é dígito do campo (mesma regra do adaptador de teclas)
     if (event.ctrl || event.meta) {
       return false
     }

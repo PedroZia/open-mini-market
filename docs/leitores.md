@@ -146,7 +146,10 @@ Checklist, em ordem:
 ## Para quem mexe no código
 
 - `terminal/src/core/scanner.ts` — regras da rajada (timing, terminador, multiplicador `3*`).
-- `terminal/src/ui/ReaderSelfTestScreen.tsx` — a tela do `F11`.
+- `terminal/src/opentui/ReaderSelfTestScreen.tsx` — a tela do `F11` (histórico das 5 e instruções).
+- `terminal/src/opentui/readerDiagnosis.ts` — o diagnóstico do transporte (F11 2.0, 1129a): classifica
+  cada leitura em `slow`, `no-terminator`, `layout` ou `server-error` a partir do timing medido e da
+  resposta do servidor.
 - `catalog/domain/ScaleLabel.java` e `catalog/application/BarcodeResolver.java` — a interpretação do
   código, que é sempre do servidor (BR-14).
 - `catalog/application/InternalCodeNormalizer.java` — a regra do código interno (só dígitos, zeros à

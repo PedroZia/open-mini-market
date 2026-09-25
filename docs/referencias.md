@@ -12,8 +12,8 @@ código que usa biblioteca, confirme a assinatura na fonte listada aqui.
    conflito para revisão em vez de decidir sozinho.
 4. Biblioteca nova entra no projeto? Justifique no commit **e** acrescente a fonte aqui.
 
-Versões fixadas: **Quarkus 3.33 LTS · Java 25 · PostgreSQL 18 · Ink 7 · TanStack Query v5** (demais
-versões seguem a estável do momento da instalação). Links verificados em 2026-09-23.
+Versões fixadas: **Quarkus 3.33 LTS · Java 25 · PostgreSQL 18 · OpenTUI 0.5 (Bun 1.4) · TanStack Query v5**
+(demais versões seguem a estável do momento da instalação). Links verificados em 2026-09-23.
 
 ---
 
@@ -63,14 +63,13 @@ versões seguem a estável do momento da instalação). Links verificados em 202
 
 | Fonte | Quando consultar |
 | --- | --- |
-| [Ink](https://github.com/vadimdemedes/ink) | componentes, `useInput`, foco, layout em terminal |
-| [ink-testing-library](https://github.com/vadimdemedes/ink-testing-library) | renderização em teste, simulação de teclas |
 | [OpenTUI — React binding](https://opentui.com/docs/bindings/react) | `createRoot`, hooks, `jsxImportSource` por arquivo, `testRender` |
 | [OpenTUI — teclado](https://opentui.com/docs/core-concepts/keyboard) | `KeyEvent`, `prependListener`, `preventDefault`/`stopPropagation` |
 | [OpenTUI — renderer](https://opentui.com/docs/core-concepts/renderer) | `createCliRenderer`, capacidades, eventos e streams |
 | [OpenTUI — testes](https://opentui.com/docs/core-concepts/testing) | `createTestRenderer`, `captureCharFrame`, `mockInput`, `resize` |
-| [OpenTUI — runtime support](https://opentui.com/docs/getting-started/runtime-support) | matriz de runtime/OS da engine nativa (UI nova roda no Bun) |
-| [Bun — test runner](https://bun.sh/docs/cli/test) | `bun test` da UI nova (`npm run test:opentui`) |
+| [OpenTUI — runtime support](https://opentui.com/docs/getting-started/runtime-support) | matriz de runtime/OS da engine nativa (a UI roda no Bun) |
+| [Bun — instalação](https://bun.sh/docs/installation) | instalar/atualizar o runtime da UI (Bun 1.3+) |
+| [Bun — test runner](https://bun.sh/docs/cli/test) | `bun test`: suíte da UI e E2E (`npm test` roda vitest + `bun test`) |
 
 ## Web (Fase 12)
 

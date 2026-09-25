@@ -1,7 +1,8 @@
 import type { Action } from './reducer';
 
 /**
- * Buffer do leitor de código de barras (§11.3), sem React, Ink ou timer próprio: o instante de cada
+ * Buffer do leitor de código de barras (§11.3), sem React, biblioteca de UI ou timer próprio: o
+ * instante de cada
  * caractere entra por parâmetro (`feed(char, atMs)`), então o teste não precisa dormir.
  *
  * Regras:
@@ -134,8 +135,8 @@ function isPrintable(char: string): boolean {
  * O chunk do teclado é um bipe do leitor? (1117)
  *
  * Nos campos de formulário (o desconto do F5, por exemplo) a rajada não pode virar texto nem
- * submeter: o leitor manda o código e o terminador **no mesmo chunk** — o mesmo pressuposto do
- * wiring da venda (1104a: "o Ink pode entregar a rajada inteira de uma vez, terminador incluso") —,
+ * submeter: o leitor manda o código e o terminador **no mesmo chunk** — o pressuposto do wiring da
+ * venda (1104a: a rajada chega inteira de uma vez, terminador incluso) —,
  * então é o chunk inteiro que o detector reconhece: `MIN_BURST_LENGTH` caracteres imprimíveis ou
  * mais fechados em `ENTER`/`TAB`. Terminador sozinho é tecla humana (o ENTER que aplica o desconto,
  * o TAB que troca de campo) e texto sem terminador (a digitação) entra no campo normalmente.

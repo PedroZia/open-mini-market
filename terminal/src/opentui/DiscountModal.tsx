@@ -102,7 +102,7 @@ export function DiscountModal({ onApply, onCancel }: DiscountModalProps) {
       return true
     }
 
-    // combo do sistema não é texto do campo (mesma regra do `resolveKey` do Ink)
+    // combo do sistema não é texto do campo (mesma regra do adaptador de teclas)
     if (event.ctrl || event.meta) {
       return true
     }

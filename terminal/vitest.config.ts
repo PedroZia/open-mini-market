@@ -1,17 +1,16 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * Suíte padrão da TUI (`src/`): unidade e integração das telas e do núcleo, com a API dublada.
+ * Suíte do núcleo e da API da TUI (`src/`, menos `src/opentui/`): unidade e integração com a API
+ * dublada, rodando no Vitest/Node.
  *
- * O E2E do fluxo completo (`e2e/`, passo 1120) é dirigido por `vitest.e2e.config.ts` e roda com
- * `npm run test:e2e`: ele exige um backend real no ar e é execução local obrigatória, então fica
- * **fora** do `npm test`.
+ * A UI (`src/opentui/**`) roda no `bun test` — o Vitest/Node não carrega a lib nativa da OpenTUI
+ * (decisão do spike 1121) —; o `npm test` encadeia as duas suítes. O E2E (`e2e/`, passo 1130a) fica
+ * de fora: exige o backend real no ar e roda com `bun test e2e`.
  */
 export default defineConfig({
   test: {
     include: ['src/**/*.test.{ts,tsx}'],
-    // `src/opentui/**` é a UI nova (Fase 11b) e só roda no `bun test` (`npm run test:opentui`):
-    // o Vitest/Node não carrega a lib nativa da OpenTUI (decisão do spike 1121).
     exclude: ['e2e/**', 'src/opentui/**'],
   },
 });

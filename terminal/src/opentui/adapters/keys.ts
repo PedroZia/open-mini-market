@@ -4,14 +4,14 @@ import type { KeyName } from "../../core/keys"
 
 /**
  * Adaptador puro `KeyEvent` (OpenTUI) → `KeyName` (`core/keys.ts`), o mesmo vocabulário do mapa de
- * atalhos (§11.3). Diferente do Ink, o parser da OpenTUI entrega o **nome canônico** da tecla
- * (`f1`..`f12`, `return`, `escape`, `tab`, `up`..`right`, `backspace`, `delete`), então aqui não há
- * tabela de sequências cruas: o `resolveRawKeys` do Ink segue intocado na UI antiga (sai no 1130).
+ * atalhos (§11.3). O parser da OpenTUI entrega o **nome canônico** da tecla
+ * (`f1`..`f12`, `return`, `escape`, `tab`, `up`..`right`, `backspace`, `delete`), então não existe
+ * tabela de sequências cruas: quem traduz o evento bruto é este adaptador.
  *
  * Ficam de fora:
  * - `release` (o binding só entrega `press`/`repeat` por padrão; o kitty manda release e ele não é
  *   atalho);
- * - `ctrl`/`meta` (combo é do sistema/formulário, nunca do mapa — mesma regra do `resolveKey`);
+ * - `ctrl`/`meta` (combo é do sistema/formulário, nunca do mapa — mesma regra do `resolveShortcut`);
  * - texto comum (dígitos, letras, espaço, `*`): não é atalho, fica com o campo ou com o leitor.
  *
  * `+`/`-` vêm no `sequence` (o `name` é o próprio caractere), tanto no teclado principal quanto no

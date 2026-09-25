@@ -1,8 +1,9 @@
 # Terminal (TUI) — PDV
 
-A TUI em [Ink](https://github.com/vadimdemedes/ink) é o que o operador do caixa usa: login, abertura do
-caixa, bipe dos itens, desconto, pagamento, sangria/suprimento, fechamento e troca de operador. Ela **não
-calcula nada** — envia intenções e exibe o que o servidor respondeu (BR-12); o contrato HTTP vem do
+A TUI em [OpenTUI](https://opentui.com/) (React sobre [Bun](https://bun.sh/)) é o que o operador do
+caixa usa: login, abertura do caixa, bipe dos itens, desconto, pagamento, sangria/suprimento,
+fechamento e troca de operador. Ela **não calcula nada** — envia intenções e exibe o que o servidor
+respondeu (BR-12); o contrato HTTP vem do
 [`@minimarket/api-client`](../packages/api-client/README.md).
 
 O caminho completo do ambiente (banco + API + TUI) está no [README da raiz](../README.md); este guia é o
@@ -10,10 +11,12 @@ do computador do caixa.
 
 ## Requisitos
 
-- **Node.js 22 ou superior** (o `npm` vem junto). Confira com `node --version`.
-- Uma **janela de terminal de verdade** (cmd, PowerShell ou Windows Terminal) com pelo menos 80×24. A TUI
-  usa o modo cru do teclado: rodando com a saída redirecionada para arquivo/pipe ela aborta com
-  `Raw mode is not supported...`.
+- **Bun 1.3 ou superior** — é o runtime da UI (`bun --version`). Instalação:
+  <https://bun.sh/docs/installation>.
+- **Node.js 22 ou superior** (o `npm` vem junto) — só para instalar o workspace e rodar os testes do
+  núcleo/client (vitest). Confira com `node --version`.
+- Uma **janela de terminal de verdade** (cmd, PowerShell ou Windows Terminal) com pelo menos 80×24. A UI
+  desenha direto no terminal: rodando com a saída redirecionada para arquivo/pipe ela falha no boot.
 - A **API no ar** (nesta máquina ou na rede da loja) — veja abaixo como subir localmente.
 - **Docker** apenas se for subir banco/API nesta máquina.
 
@@ -25,6 +28,9 @@ No diretório raiz do repositório (o `npm install` instala os workspaces, inclu
 ```bash
 npm install
 ```
+
+A UI é iniciada com o Bun (acima); o `npm` fica com a instalação do workspace e com os testes do
+núcleo/client.
 
 ## Configurando a API: `MINIMARKET_API_URL`
 
@@ -74,18 +80,21 @@ npm start                  # roda o start do workspace @minimarket/terminal
 ou direto nesta pasta:
 
 ```bash
-npm start                  # tsx src/index.tsx
+npm start                  # bun run src/opentui/index.tsx
 ```
 
-`npm run dev` roda o mesmo comando (nome mantido do passo 1101). A TUI sobe na tela de entrada do
-operador; para sair, use o fluxo da tela (`F10` fecha o caixa e faz logout) e depois feche a janela do
-terminal — ou `Ctrl+C`.
+`npm run dev` roda o mesmo comando. A UI sobe na tela de entrada do operador; para sair, use o fluxo da
+tela (`F10` fecha o caixa e faz logout) e depois feche a janela do terminal — ou `Ctrl+C`.
+
+> A UI depende da engine nativa da OpenTUI: rode-a com o **Bun** (`npm start` já faz isso). O Node/Vitest
+> não carrega essa lib — é por isso que a UI tem runner próprio (`bun test`).
 
 ## Atalho no Windows (abrir com dois cliques)
 
 O [`pdv.cmd`](./pdv.cmd) é o lançador: fixa `MINIMARKET_API_URL` se a variável não existir, aceita a URL
-da API como primeiro argumento, entra na pasta do terminal e chama o `npm start` — se o PDV terminar com
-erro, a janela fica aberta para o operador ler a mensagem.
+da API como primeiro argumento, entra na pasta do terminal e chama o `npm start` (que roda a UI no Bun) —
+se o PDV terminar com erro, a janela fica aberta para o operador ler a mensagem. O Bun precisa estar no
+`PATH` da conta do operador.
 
 Para criar o atalho na área de trabalho:
 
@@ -102,26 +111,32 @@ Para criar o atalho na área de trabalho:
 
 | Sintoma | Causa provável |
 | --- | --- |
-| `Raw mode is not supported on the current process.stdin...` | a TUI está rodando sem terminal interativo (pipe, redirecionamento ou CI). Rode numa janela de terminal real. |
+| Erro de terminal/modo cru no boot da UI | a TUI está rodando sem terminal interativo (pipe, redirecionamento ou CI). Rode numa janela de terminal real. |
+| `bun` não reconhecido | Bun não instalado ou fora do `PATH` — instale o Bun 1.3+ e abra o terminal de novo. |
+| Falha ao carregar a engine nativa da OpenTUI | Bun desatualizado (a UI exige o Bun 1.3+) ou sistema sem os artefatos nativos — confira a matriz de runtime da OpenTUI. |
 | Tela de erro de conexão / nada carrega | API fora do ar ou `MINIMARKET_API_URL` errada. Confira com `curl http://localhost:8081/q/health`. |
-| `npm` não reconhecido | Node.js não instalado ou fora do `PATH` — instale o Node 22+ e abra o terminal de novo. |
-| Erro de sintaxe/`Unsupported Node.js version` | Node anterior ao 22: atualize. |
+| `npm` não reconhecido | Node.js não instalado ou fora do `PATH` — instale o Node 22+ e abra o terminal de novo (é o `npm` que instala o workspace). |
+| Erro de sintaxe/`Unsupported Node.js version` nos testes | Node anterior ao 22 (vitest/núcleo): atualize. |
 
 ## Testes
 
 ```bash
-npm test          # unitários e de integração das telas e do núcleo, com a API dublada (vitest)
-npx tsc --noEmit  # typecheck (src, e2e e configs do vitest)
-npm run lint      # eslint
+npm test           # vitest (núcleo/API, com a API dublada) + bun test src/opentui (UI)
+npm run test:opentui  # só a UI, no Bun
+npx tsc --noEmit   # typecheck (src, e2e e configs)
+npm run lint       # eslint
 ```
+
+O `npm test` encadeia as duas suítes: o núcleo/client (`src/`, menos `src/opentui/`) roda no Vitest/Node
+e a UI (`src/opentui/**`) no `bun test`, porque o Vitest/Node não carrega a lib nativa da OpenTUI.
 
 ### E2E do fluxo completo (`npm run test:e2e`)
 
-O [`e2e/pdv.e2e.test.tsx`](./e2e/pdv.e2e.test.tsx) dirige o **App real** com a `terminalApi` real — sem
-dublê de API — e percorre o fluxo inteiro do operador por teclas: login, escolha do caixa, abertura,
-bipe, desconto (F5), pagamento (F9), conclusão e fechamento (F10). No fim, confere por API que o
-estoque baixou pela quantidade vendida, que a venda ficou `COMPLETED`, que a sessão de caixa fechou
-com contado/esperado/diferença coerentes e que a auditoria da sessão tem os eventos do fluxo
+O [`e2e/pdv.e2e.test.tsx`](./e2e/pdv.e2e.test.tsx) dirige o **App real** da UI (`src/opentui/`) com a
+`terminalApi` real — sem dublê de API — e percorre o fluxo inteiro do operador por teclas: login, escolha
+do caixa, abertura, bipe, desconto (F5), pagamento (F9), conclusão e fechamento (F10). No fim, confere
+por API que o estoque baixou pela quantidade vendida, que a venda ficou `COMPLETED`, que a sessão de
+caixa fechou com contado/esperado/diferença coerentes e que a auditoria da sessão tem os eventos do fluxo
 (`SALE_CREATED`, `SALE_ITEM_ADDED`, `SALE_DISCOUNT_APPLIED`, `PAYMENT_ADDED`, `SALE_COMPLETED`,
 `CASH_SESSION_OPENED`, `CASH_SESSION_CLOSED`).
 
@@ -132,7 +147,7 @@ Pré-requisitos — o teste **não** sobe nada por conta própria:
 - o ADMIN inicial (`admin`/`admin123` no `%dev`; veja "Subindo a API localmente" acima).
 
 ```bash
-cd terminal && npm run test:e2e
+cd terminal && npm run test:e2e     # bun test e2e
 ```
 
 > **Execução local obrigatória, fora do CI.** Decisão do passo 1120: em vez de um job de E2E, o

@@ -60,7 +60,7 @@ import { theme } from "./theme"
  * Teclado (§11.3): a rajada do leitor é interceptada pelo **hook global** (1123b) antes de qualquer
  * campo focado e chega pelo `onBarcode` com o código **bruto** e a quantidade do multiplicador
  * (BR-14); desta tela, o `onKey` resolve os atalhos da venda pelo **contexto** do `core/keys`
- * (`resolveShortcut` com `{ screen: 'saleOpen', modal: null }`, como o `useRawShortcuts` da Ink):
+ * (`resolveShortcut` com `{ screen: 'saleOpen', modal: null }`):
  * setas, `+`/`-`, DEL/F3 e o F1. O campo de leitura é a leitura **manual**: o ENTER entrega o texto
  * ao mesmo `core/scanner` como uma rajada sintética (caracteres + `\r` no mesmo instante, com o
  * `n*` valendo como multiplicador), então digitar o código vale tanto quanto bipá-lo. O que a rajada
@@ -347,8 +347,7 @@ export function SaleScreen({
   }, [renderer, top])
 
   /**
-   * Teclado da venda resolvido pelo contexto do `core/keys` (§11.3, como o `useRawShortcuts` da
-   * Ink): as setas movem a seleção com clamp nas pontas, `+`/`-` mexem na quantidade do item
+   * Teclado da venda resolvido pelo contexto do `core/keys` (§11.3): as setas movem a seleção com clamp nas pontas, `+`/`-` mexem na quantidade do item
    * selecionado, DEL e F3 abrem a **mesma** confirmação de remoção, o F1 abre a ajuda, o F2 a
    * consulta de preço (sem venda criada inclusive), o F5 o desconto (só com venda criada), o F6 o
    * cliente (também só com venda criada), o F12 a troca de operador (sempre: sem venda é confirmação

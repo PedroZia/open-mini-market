@@ -86,7 +86,7 @@ export function LoginScreen({ state, api, dispatch, preferredRegisterId }: Login
       return false
     }
 
-    // combo do sistema/formulário não é texto do campo (mesma regra do `resolveKey` do Ink)
+    // combo do sistema/formulário não é texto do campo (mesma regra do adaptador de teclas)
     if (event.ctrl || event.meta) {
       return true
     }

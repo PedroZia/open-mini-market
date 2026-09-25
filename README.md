@@ -22,12 +22,12 @@ O backend concentra **toda** a regra de negócio. TUI e Web são clientes finos.
 | [`AGENTS.md`](AGENTS.md) | regras de trabalho para o coding agent (um passo por vez, DoD, convenções) |
 | [`docs/referencias.md`](docs/referencias.md) | fontes de verdade por biblioteca — doc oficial a consultar antes de escrever API |
 | [`docs/leitores.md`](docs/leitores.md) | guia de configuração do leitor de código de barras (sufixo, prefixo, simbologias, etiqueta de balança) e do autoteste `F11` |
-| [`terminal/README.md`](terminal/README.md) | instalação e execução do PDV (TUI): Node 22+, `MINIMARKET_API_URL` e atalho do Windows |
+| [`terminal/README.md`](terminal/README.md) | instalação e execução do PDV (TUI): Bun 1.3+ (Node 22+ para os testes), `MINIMARKET_API_URL` e atalho do Windows |
 
 ## Stack
 
 - **Backend:** Java 25 · Quarkus 3.33 LTS · Hibernate ORM/JPA · Flyway · PostgreSQL 18 · Maven
-- **PDV (terminal):** TypeScript · Ink 7 (Node 22+)
+- **PDV (terminal):** TypeScript · OpenTUI (React) + Bun 1.3+ · Node 22+ para os testes do núcleo
 - **Retaguarda (web):** React · TypeScript · Vite · TanStack Query
 - **Compartilhado:** client TypeScript gerado do OpenAPI
 
@@ -35,7 +35,7 @@ O backend concentra **toda** a regra de negócio. TUI e Web são clientes finos.
 
 ```text
 backend/                API Quarkus (monólito modular, package-by-feature)
-terminal/               TUI do PDV (Ink)
+terminal/               TUI do PDV (OpenTUI + Bun)
 web/                    React Web (retaguarda)
 packages/api-client/    client/tipos TS gerados do OpenAPI
 docs/                   plano técnico e roadmap
@@ -50,7 +50,7 @@ Do zero ao PDV respondendo:
 docker compose up -d postgres                                # 1. banco PostgreSQL de desenvolvimento
 cd backend && ./mvnw quarkus:dev "-Dquarkus.http.port=8081"  # 2. API em http://localhost:8081
 cd backend && ./mvnw verify                                  # 3. build + testes
-npm install && npm start                                     # 4. PDV (TUI) apontando para a API de dev
+npm install && npm start                                     # 4. PDV (TUI, exige Bun 1.3+) apontando para a API de dev
 ```
 
 O passo 4 roda a TUI descrita em [`terminal/README.md`](terminal/README.md) — instalação, como apontar
@@ -93,7 +93,8 @@ não é preciso subir o `docker-compose` antes — mas o **Docker precisa estar 
 - **UUIDv7** gerado na aplicação como chave primária.
 - **Auditoria própria** append-only (`audit_events`) com ator, caixa, motivo e correlação — não Envers.
 - **Flyway** para schema; nunca `hbm2ddl.auto`.
-- **Ink** para a TUI (Node universal e estável), com núcleo lógico puro para permitir migração futura.
+- **OpenTUI** para a TUI (React sobre Bun 1.3+), com núcleo lógico puro que não depende da biblioteca
+  de UI — a escolha do cut-over da Fase 11b, trocando a biblioteca anterior (TUI em Node).
 - **Sem** cache, fila, broker, microsserviço ou native image antes de existir dor medida.
 - **Fiscal (NFC-e) fora do MVP**, com fase dedicada já desenhada (§18 do plano + Fase 14 do roadmap,
   ≈ 3–4 semanas via API de provedor); a única exceção pré-aprovada a "sem fila" é o outbox da emissão fiscal.
