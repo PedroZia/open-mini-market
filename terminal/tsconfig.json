@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src"]
+  "include": ["src", "e2e", "vitest.config.ts", "vitest.e2e.config.ts"]
 }

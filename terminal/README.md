@@ -107,10 +107,37 @@ Para criar o atalho na área de trabalho:
 | `npm` não reconhecido | Node.js não instalado ou fora do `PATH` — instale o Node 22+ e abra o terminal de novo. |
 | Erro de sintaxe/`Unsupported Node.js version` | Node anterior ao 22: atualize. |
 
-## Desenvolvimento
+## Testes
 
 ```bash
-npm test          # vitest
-npx tsc --noEmit  # typecheck
+npm test          # unitários e de integração das telas e do núcleo, com a API dublada (vitest)
+npx tsc --noEmit  # typecheck (src, e2e e configs do vitest)
 npm run lint      # eslint
 ```
+
+### E2E do fluxo completo (`npm run test:e2e`)
+
+O [`e2e/pdv.e2e.test.tsx`](./e2e/pdv.e2e.test.tsx) dirige o **App real** com a `terminalApi` real — sem
+dublê de API — e percorre o fluxo inteiro do operador por teclas: login, escolha do caixa, abertura,
+bipe, desconto (F5), pagamento (F9), conclusão e fechamento (F10). No fim, confere por API que o
+estoque baixou pela quantidade vendida, que a venda ficou `COMPLETED`, que a sessão de caixa fechou
+com contado/esperado/diferença coerentes e que a auditoria da sessão tem os eventos do fluxo
+(`SALE_CREATED`, `SALE_ITEM_ADDED`, `SALE_DISCOUNT_APPLIED`, `PAYMENT_ADDED`, `SALE_COMPLETED`,
+`CASH_SESSION_OPENED`, `CASH_SESSION_CLOSED`).
+
+Pré-requisitos — o teste **não** sobe nada por conta própria:
+
+- backend no ar **com o banco de dev** (o de `docker compose up -d postgres` + `quarkus:dev`, ou os
+  dois em container), no endereço de `MINIMARKET_API_URL` (default `http://localhost:8081`);
+- o ADMIN inicial (`admin`/`admin123` no `%dev`; veja "Subindo a API localmente" acima).
+
+```bash
+cd terminal && npm run test:e2e
+```
+
+> **Execução local obrigatória, fora do CI.** Decisão do passo 1120: em vez de um job de E2E, o
+> fluxo completo é um teste local documentado. Ele **grava dados no banco de dev** — produto com
+> barcode novo, entrada de estoque, venda e sessão de caixa —, então aponte `MINIMARKET_API_URL` para
+> o ambiente de desenvolvimento, nunca para o banco da loja. O cenário se limpa ao começar: a sessão
+> de caixa deixada aberta por uma execução anterior é fechada com as vendas `OPEN` canceladas antes
+> do fluxo (senão o fechamento esbarraria no 409 `SESSION_HAS_OPEN_SALES`).

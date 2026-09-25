@@ -58,6 +58,12 @@ para o servidor da loja (`MINIMARKET_API_URL`) e o atalho do Windows estão lá.
 `http://localhost:8081`; se subir o `quarkus:dev` sem a flag, a API fica na 8080 e o passo 4 precisa de
 `MINIMARKET_API_URL=http://localhost:8080`.
 
+Com o banco e a API no ar, o E2E do fluxo completo do PDV (login → caixa → bipe → desconto → pagamento
+→ conclusão → fechamento, com conferência de estoque e auditoria por API) roda com
+`cd terminal && npm run test:e2e` (ou `npm run test:e2e` da raiz). Ele **grava dados no banco de dev**
+e é **execução local obrigatória**, fora do CI — pré-requisitos e o que ele confere estão em
+[`terminal/README.md`](terminal/README.md).
+
 Para subir banco e API em containers, use `docker compose up -d --build` depois de copiar `.env.example`
 para `.env` (`APP_PORT=8081`): a API fica em http://localhost:8081 (health em `/q/health`, porta
 configurável por `APP_PORT`) e roda no perfil de produção, sem o seed de dev. Nesse caso não rode o

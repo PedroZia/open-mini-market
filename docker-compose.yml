@@ -30,6 +30,11 @@ services:
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-minimarket}
       QUARKUS_DATASOURCE_USERNAME: ${POSTGRES_USER:-minimarket}
       QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-minimarket}
+      # ADMIN inicial do %prod (passo 115): em %prod não há senha default e sem ela o backend de um
+      # banco novo não semeia ADMIN nenhum — o login do E2E (admin/admin123) não teria a quem
+      # autenticar. O nome da variável é o que o SmallRye Config mapeia para
+      # `minimarket.security.admin.initial-password`; o valor default espelha o %dev/.env.example.
+      MINIMARKET_SECURITY_ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-admin123}
     ports:
       - "${APP_PORT:-8080}:8080"
 

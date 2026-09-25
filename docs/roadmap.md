@@ -1027,7 +1027,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** execução limpa em máquina Windows; documento no README.
   **Commit:** `chore(tui): adiciona empacotamento e instrucoes de execucao`
 
-- [ ] **1120 — Teste E2E da TUI**
+- [x] **1120 — Teste E2E da TUI**
   **Objetivo:** provar o PDV completo. **Depende:** 1119
   **Implementar:** teste automatizado (Vitest + backend real em docker-compose) executando: login → abrir caixa → bipe → desconto → pagamento → conclusão → fechamento; valida estoque e auditoria via API.
   **Testes/aceite:** E2E verde no CI (job separado) ou documentado como execução local obrigatória.
