@@ -37,6 +37,12 @@ export type SaleView = {
   subtotal: number;
   discountAmount: number;
   total: number;
+  /**
+   * Cliente vinculado como o servidor o tem (`customerId` do `SaleDetailResponse`, 1112); `null` na
+   * venda anônima. O **nome** exibido no cabeçalho não vem daqui: é a anotação local que o shell
+   * guarda quando o próprio operador vincula (o reducer não tem o nome).
+   */
+  customerId: string | null;
 };
 
 /** Bipe do leitor aguardando a chamada da API; o código segue **bruto** (BR-14). */

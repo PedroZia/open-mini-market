@@ -8,9 +8,11 @@ import type {
   CashRegistersOutcome,
   CreateSaleOutcome,
   CurrentCashSessionOutcome,
+  CustomerSaleOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
   SaleItemMutationOutcome,
+  SearchCustomersOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import type { ApiProblem, OpeningCashState } from '../core/state';
@@ -52,7 +54,7 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     createSale: vi.fn(
       async (): Promise<CreateSaleOutcome> => ({
         ok: true,
-        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0 },
+        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0, customerId: null },
       }),
     ),
     addSaleItem: vi.fn(
@@ -72,6 +74,16 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     // o desconto (1111) é do modal de venda: aqui só fecha o contrato
     applyDiscount: vi.fn(
       async (): Promise<ApplyDiscountOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),
+    ),
+    // o cliente (1112) é do F6 da venda: aqui só fecha o contrato
+    searchCustomers: vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),
+    ),
+    linkCustomer: vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),
+    ),
+    unlinkCustomer: vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: false, kind: 'retryable', problem: PROBLEM }),
     ),
     ...overrides,
   };

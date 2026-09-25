@@ -979,7 +979,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** desconto aplicado reflete nos totais; OPERADOR sem permissão vê mensagem clara (403 tratado); ESC cancela sem alterar.
   **Commit:** `feat(tui): aplica desconto com motivo`
 
-- [ ] **1112 — Fluxo: cliente na venda (F6)**
+- [x] **1112 — Fluxo: cliente na venda (F6)**
   **Objetivo:** vincular CPF/nome. **Depende:** 1111, 502
   **Implementar:** busca por nome/CPF com lista de resultados; vincular/remover.
   **Testes/aceite:** busca retorna resultados; vínculo aparece no cabeçalho; remover limpa.

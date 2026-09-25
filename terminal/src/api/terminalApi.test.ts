@@ -385,7 +385,7 @@ describe('createTerminalApi', () => {
 
     expect(await api.createSale()).toEqual({
       ok: true,
-      sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0 },
+      sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0, customerId: null },
     });
     expect(post).toHaveBeenCalledWith('/api/v1/sales', undefined);
   });
@@ -439,6 +439,7 @@ describe('createTerminalApi', () => {
         subtotal: 49.8,
         discountAmount: 0,
         total: 49.8,
+        customerId: null,
       },
     });
     expect(post).toHaveBeenCalledWith('/api/v1/sales/sale-1/items', {
@@ -573,6 +574,7 @@ describe('createTerminalApi', () => {
         subtotal: 49.8,
         discountAmount: 0,
         total: 49.8,
+        customerId: null,
       },
     });
     // o `{itemId}` da rota é o productId do item (decisão do 802/809b)
@@ -620,6 +622,7 @@ describe('createTerminalApi', () => {
         subtotal: 8.9,
         discountAmount: 0,
         total: 8.9,
+        customerId: null,
       },
     });
     expect(remove).toHaveBeenCalledWith('/api/v1/sales/sale-1/items/p1');
@@ -690,6 +693,7 @@ describe('createTerminalApi', () => {
         subtotal: 24.9,
         discountAmount: 2.49,
         total: 22.41,
+        customerId: null,
       },
     });
     expect(put).toHaveBeenCalledWith('/api/v1/sales/sale-1/discount', {
@@ -787,6 +791,171 @@ describe('createTerminalApi', () => {
       ok: false,
       kind: 'failed',
       problem: { status: 0, code: null, detail: 'desconto aplicado sem venda na resposta' },
+    });
+  });
+});
+
+describe('createTerminalApi: cliente na venda (1112)', () => {
+  test('busca manda o termo com a primeira página pequena e normaliza os clientes do servidor', async () => {
+    const get = vi.fn(async () => ({
+      items: [
+        { id: 'c1', name: 'Maria Silva', taxId: '12345678900', active: true },
+        { id: 'c2', name: 'Ana Souza' },
+        { name: 'sem id não é vinculável' },
+      ],
+      page: 0,
+      size: 10,
+      totalItems: 2,
+      totalPages: 1,
+    }));
+    const api = createTerminalApi(stubClient({ get }));
+
+    expect(await api.searchCustomers('maria')).toEqual({
+      ok: true,
+      customers: [
+        { id: 'c1', name: 'Maria Silva', taxId: '12345678900' },
+        { id: 'c2', name: 'Ana Souza', taxId: null },
+      ],
+    });
+    expect(get).toHaveBeenCalledWith('/api/v1/customers?search=maria&page=0&size=10');
+  });
+
+  test('403 sem `customer.read` na busca vira recusa; rede é transitória (retry no modal)', async () => {
+    const denied = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão customer.read' });
+        },
+      }),
+    );
+    const offline = createTerminalApi(
+      stubClient({
+        get: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    );
+
+    expect(await denied.searchCustomers('maria')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para consultar clientes',
+    });
+    expect(await offline.searchCustomers('maria')).toEqual({
+      ok: false,
+      kind: 'retryable',
+      problem: { status: 0, code: null, detail: 'fetch failed' },
+    });
+  });
+
+  test('vincular manda o customerId no PUT e devolve a venda com o cliente do servidor', async () => {
+    const put = vi.fn(async () => ({
+      id: 'sale-1',
+      status: 'OPEN',
+      customerId: 'c1',
+      subtotal: 24.9,
+      discountAmount: 0,
+      total: 24.9,
+    }));
+    const api = createTerminalApi(stubClient({ put }));
+
+    expect(await api.linkCustomer('sale-1', 'c1')).toEqual({
+      ok: true,
+      sale: {
+        id: 'sale-1',
+        items: [],
+        subtotal: 24.9,
+        discountAmount: 0,
+        total: 24.9,
+        customerId: 'c1',
+      },
+    });
+    expect(put).toHaveBeenCalledWith('/api/v1/sales/sale-1/customer', { customerId: 'c1' });
+  });
+
+  test('404 CUSTOMER_NOT_FOUND e 422 CUSTOMER_INACTIVE viram recusa com mensagem clara', async () => {
+    const missing = createTerminalApi(
+      stubClient({
+        put: async () => {
+          throw new ApiError(404, { code: 'CUSTOMER_NOT_FOUND', detail: 'cliente c9 não encontrado' });
+        },
+      }),
+    );
+    const inactive = createTerminalApi(
+      stubClient({
+        put: async () => {
+          throw new ApiError(422, { code: 'CUSTOMER_INACTIVE', detail: 'cliente c9 está inativo' });
+        },
+      }),
+    );
+
+    expect(await missing.linkCustomer('sale-1', 'c9')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'cliente não encontrado — busque de novo',
+    });
+    expect(await inactive.linkCustomer('sale-1', 'c9')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'cliente desativado no cadastro — escolha outro',
+    });
+  });
+
+  test('403 do vínculo vira recusa com a mensagem fixa; 404 SALE_NOT_FOUND bloqueia', async () => {
+    const denied = createTerminalApi(
+      stubClient({
+        put: async () => {
+          throw new ApiError(403, { code: 'ACCESS_DENIED', detail: 'permissão sale.create' });
+        },
+      }),
+    );
+    const gone = createTerminalApi(
+      stubClient({
+        put: async () => {
+          throw new ApiError(404, { code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' });
+        },
+      }),
+    );
+
+    expect(await denied.linkCustomer('sale-1', 'c1')).toEqual({
+      ok: false,
+      kind: 'rejected',
+      message: 'sem permissão para alterar o cliente da venda',
+    });
+    expect(await gone.linkCustomer('sale-1', 'c1')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 404, code: 'SALE_NOT_FOUND', detail: 'venda não encontrada' },
+    });
+  });
+
+  test('remover manda o DELETE e devolve a venda anônima; 200 sem venda é falha bloqueante', async () => {
+    const remove = vi.fn(async () => ({
+      id: 'sale-1',
+      status: 'OPEN',
+      subtotal: 24.9,
+      discountAmount: 0,
+      total: 24.9,
+    }));
+    const api = createTerminalApi(stubClient({ delete: remove }));
+    const empty = createTerminalApi(stubClient({ delete: async () => ({ status: 'OPEN' }) }));
+
+    expect(await api.unlinkCustomer('sale-1')).toEqual({
+      ok: true,
+      sale: {
+        id: 'sale-1',
+        items: [],
+        subtotal: 24.9,
+        discountAmount: 0,
+        total: 24.9,
+        customerId: null,
+      },
+    });
+    expect(remove).toHaveBeenCalledWith('/api/v1/sales/sale-1/customer');
+    expect(await empty.unlinkCustomer('sale-1')).toEqual({
+      ok: false,
+      kind: 'failed',
+      problem: { status: 0, code: null, detail: 'cliente alterado sem venda na resposta' },
     });
   });
 });

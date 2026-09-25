@@ -8,9 +8,11 @@ import type {
   CashRegistersOutcome,
   CreateSaleOutcome,
   CurrentCashSessionOutcome,
+  CustomerSaleOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
   SaleItemMutationOutcome,
+  SearchCustomersOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import type { SaleItemView, SaleView } from '../core/state';
@@ -46,6 +48,7 @@ function discounted(total: number): SaleView {
     subtotal: 24.9,
     discountAmount: 24.9 - total,
     total,
+    customerId: null,
   };
 }
 
@@ -84,6 +87,16 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     ),
     applyDiscount: vi.fn(
       async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: discounted(22.41) }),
+    ),
+    // o F6 (1112) é de outro modal: aqui só fecha o contrato
+    searchCustomers: vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    linkCustomer: vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    unlinkCustomer: vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
     ),
     ...overrides,
   };

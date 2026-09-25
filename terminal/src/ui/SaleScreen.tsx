@@ -1,7 +1,12 @@
 import { Box, Text, useInput, useStdout } from 'ink';
 import { useEffect, useRef, useState, type Dispatch } from 'react';
 
-import type { SendFailure, SaleItemMutationOutcome, TerminalApi } from '../api/terminalApi';
+import type {
+  CustomerOption,
+  SendFailure,
+  SaleItemMutationOutcome,
+  TerminalApi,
+} from '../api/terminalApi';
 import { resolveKey, resolveShortcut, type IntentName } from '../core/keys';
 import { formatAmount } from '../core/money';
 import type { Action } from '../core/reducer';
@@ -18,7 +23,9 @@ import { inputChars } from './scannerInput';
  *
  * A tela não calcula nada (BR-12): subtotal, desconto e total saem de `state.sale`, como o servidor
  * mandou; antes do primeiro bipe a venda é `null` e a tela mostra a lista vazia com zeros de
- * exibição. A hora entra por prop para o desenho ser determinístico no teste.
+ * exibição. A hora entra por prop para o desenho ser determinístico no teste. O cliente do
+ * cabeçalho (1112) é o `customerId` que a venda do servidor aponta com o nome que o shell capturou
+ * na busca local — o vínculo é do servidor, o nome é anotação da seleção.
  *
  * O nome da loja não está no estado (§11.2), então o cabeçalho mostra o que o reducer tem — caixa e
  * operador; quando a sessão carregar a loja (`GET /auth/me`), ela entra aqui, sem inchar o reducer
@@ -51,6 +58,8 @@ export type SaleScreenProps = {
   api: TerminalApi;
   /** Despacho do shell; toda transição nasce no reducer. */
   dispatch: Dispatch<Action>;
+  /** Cliente vinculado com o nome que a busca local capturou (1112); `null` na venda anônima. */
+  customer: CustomerOption | null;
 };
 
 /** Itens visíveis: o que sobra das 24 linhas depois de cabeçalho, totais, rodapé e status. */
@@ -82,7 +91,7 @@ type Feedback =
   | { kind: 'notice'; text: string }
   | { kind: 'failure'; text: string };
 
-export function SaleScreen({ state, now, api, dispatch }: SaleScreenProps) {
+export function SaleScreen({ state, now, api, dispatch, customer }: SaleScreenProps) {
   const { stdout } = useStdout();
   /** Buffer do leitor: um por tela, com o timing medido no wiring. */
   const scannerRef = useRef<Scanner | null>(null);
@@ -117,6 +126,13 @@ export function SaleScreen({ state, now, api, dispatch }: SaleScreenProps) {
   const hidden = items.length - visible.length;
   const selectedIndex = selectionIndex(selected, items.length);
   const selectedItem = selectedIndex < 0 ? null : (items[selectedIndex] ?? null);
+  /**
+   * Nome do cliente no cabeçalho: o vínculo real é o `customerId` que o servidor devolveu; o nome é
+   * a anotação local que o shell capturou na busca (1112) — sem os dois casando, a venda é anônima
+   * para esta tela (e a próxima venda, que nasce sem cliente, não herda o nome da anterior).
+   */
+  const customerName =
+    sale !== null && customer !== null && sale.customerId === customer.id ? customer.name : null;
 
   /**
    * Teclado da venda (§11.3), resolvido pelo mapa de `core/keys` no contexto `saleOpen`: as setas
@@ -425,6 +441,7 @@ export function SaleScreen({ state, now, api, dispatch }: SaleScreenProps) {
       <Text>
         Operador: {state.operator.name} · {formatTime(now)}
       </Text>
+      {customerName === null ? null : <Text>Cliente: {customerName}</Text>}
       <Text> </Text>
       {hidden === 0 ? null : <Text dimColor>… {hidden} itens acima</Text>}
       {items.length === 0 ? (

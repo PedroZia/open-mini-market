@@ -137,6 +137,39 @@ export type ApplyDiscountOutcome =
   | { ok: false; kind: 'rejected'; message: string }
   | SendFailure;
 
+/** Cliente como a busca do F6 mostra (1112): nome e CPF do `CustomerResponse` já normalizados. */
+export type CustomerOption = {
+  id: string;
+  name: string;
+  /** CPF só com dígitos (`12345678900`), como o servidor o guarda; a máscara é da apresentação. */
+  taxId: string | null;
+};
+
+/**
+ * Resultado da busca de clientes (`GET /customers?search=&page=&size=`, passo 502):
+ * - `ok`: a página que o servidor devolveu (a busca dele cobre trecho do nome e dígitos do CPF);
+ * - `rejected`: 403 sem `customer.read` — o modal diz que não dá para buscar;
+ * - `SendFailure`: retry manual no modal (rede/5xx) ou tela de erro (400/contrato).
+ */
+export type SearchCustomersOutcome =
+  | { ok: true; customers: CustomerOption[] }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
+/**
+ * Resultado de vincular/remover o cliente da venda aberta (`PUT`/`DELETE
+ * /sales/{id}/customer`, passo 811b):
+ * - `ok`: a venda inteira como o servidor a devolveu, já com o `customerId` novo;
+ * - `rejected`: a recusa que **o próprio modal** mostra — 404 `CUSTOMER_NOT_FOUND`, 422
+ *   `CUSTOMER_INACTIVE` e 403 sem `sale.create`;
+ * - `SendFailure`: retry manual no modal (rede/5xx) ou tela de erro (404 `SALE_NOT_FOUND`, 409
+ *   `SALE_NOT_OPEN`, 400/contrato), como nas demais operações da venda.
+ */
+export type CustomerSaleOutcome =
+  | { ok: true; sale: SaleView }
+  | { ok: false; kind: 'rejected'; message: string }
+  | SendFailure;
+
 /** O que as telas usam da API; em teste, um dublê com esta cara. */
 export type TerminalApi = {
   /**
@@ -200,6 +233,22 @@ export type TerminalApi = {
    * recalculada, que a tela registra com `saleUpdated` (1111).
    */
   applyDiscount(saleId: string, discount: SaleDiscountIntent): Promise<ApplyDiscountOutcome>;
+  /**
+   * Busca clientes por trecho do nome ou dígitos do CPF (`GET /customers`, passo 502): o termo vai
+   * **como o operador digitou** — quem decide o que é nome e o que é CPF é o servidor —, com a
+   * primeira página pequena, que é o que cabe na tela do F6 (1112).
+   */
+  searchCustomers(term: string): Promise<SearchCustomersOutcome>;
+  /**
+   * Vincula o cliente escolhido à venda aberta (`PUT /sales/{id}/customer`, passo 811b) e devolve a
+   * venda inteira com o `customerId`; o nome exibido no cabeçalho é a seleção local, não a resposta.
+   */
+  linkCustomer(saleId: string, customerId: string): Promise<CustomerSaleOutcome>;
+  /**
+   * Remove o cliente da venda aberta (`DELETE /sales/{id}/customer`, passo 811b): a venda volta
+   * anônima. Repetir a remoção é inofensivo no servidor (no-op com 200).
+   */
+  unlinkCustomer(saleId: string): Promise<CustomerSaleOutcome>;
 };
 
 /** Monta a camada de API sobre um client já configurado (base URL + token da sessão). */
@@ -349,6 +398,8 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
             subtotal: response.subtotal ?? 0,
             discountAmount: response.discountAmount ?? 0,
             total: response.total ?? 0,
+            // a venda nasce anônima: cliente é o F6 (1112)
+            customerId: null,
           },
         };
       } catch (error) {
@@ -434,6 +485,41 @@ export function createTerminalApi(client: ApiClient): TerminalApi {
 
         return sendFailure(error);
       }
+    },
+
+    async searchCustomers(term) {
+      try {
+        // a busca (nome/CPF) é do servidor (502): a TUI manda o termo como veio do campo
+        const query = new URLSearchParams({ search: term, page: '0', size: '10' });
+        const response = await client.get<components['schemas']['PageResponseCustomerResponse']>(
+          `/api/v1/customers?${query.toString()}`,
+        );
+
+        return { ok: true, customers: toCustomerOptions(response.items ?? []) };
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) {
+          return { ok: false, kind: 'rejected', message: 'sem permissão para consultar clientes' };
+        }
+
+        return sendFailure(error);
+      }
+    },
+
+    async linkCustomer(saleId, customerId) {
+      return customerSale(() =>
+        client.put<components['schemas']['SaleDetailResponse']>(
+          `/api/v1/sales/${saleId}/customer`,
+          { customerId },
+        ),
+      );
+    },
+
+    async unlinkCustomer(saleId) {
+      return customerSale(() =>
+        client.delete<components['schemas']['SaleDetailResponse']>(
+          `/api/v1/sales/${saleId}/customer`,
+        ),
+      );
     },
   };
 }
@@ -522,6 +608,77 @@ function discountRejectionMessage(error: ApiError): string {
   return error.status === 403 ? 'sem permissão para aplicar desconto' : error.detail;
 }
 
+/**
+ * Cliente da venda (`PUT`/`DELETE /sales/{id}/customer`, passo 811b) traduzido para a tela (1112): a
+ * venda inteira quando deu certo e as recusas do vínculo como mensagem para o **próprio modal**. O
+ * 404 `SALE_NOT_FOUND` e o 409 `SALE_NOT_OPEN` ficam de fora: a venda sumiu ou fechou, é falha
+ * bloqueante como no bipe e no desconto.
+ */
+async function customerSale(
+  send: () => Promise<components['schemas']['SaleDetailResponse']>,
+): Promise<CustomerSaleOutcome> {
+  try {
+    const sale = toSaleView(await send());
+
+    if (sale === null) {
+      return failed({ status: 0, code: null, detail: 'cliente alterado sem venda na resposta' });
+    }
+
+    return { ok: true, sale };
+  } catch (error) {
+    if (error instanceof ApiError && isCustomerRejection(error)) {
+      return { ok: false, kind: 'rejected', message: customerRejectionMessage(error) };
+    }
+
+    return sendFailure(error);
+  }
+}
+
+/**
+ * Recusa do vínculo que fica no próprio modal: 403 da permissão `sale.create` (matriz do 810), 404
+ * `CUSTOMER_NOT_FOUND` do id que sumiu entre a busca e o vínculo e 422 `CUSTOMER_INACTIVE` do
+ * cliente desativado no meio do caminho.
+ */
+function isCustomerRejection(error: ApiError): boolean {
+  return error.status === 403 || error.status === 422 || error.code === 'CUSTOMER_NOT_FOUND';
+}
+
+/** Mensagem da recusa: o 403 ganha texto fixo (sem expor o código da permissão); os demais já dizem o que fazer. */
+function customerRejectionMessage(error: ApiError): string {
+  if (error.status === 403) {
+    return 'sem permissão para alterar o cliente da venda';
+  }
+
+  if (error.code === 'CUSTOMER_NOT_FOUND') {
+    return 'cliente não encontrado — busque de novo';
+  }
+
+  if (error.code === 'CUSTOMER_INACTIVE') {
+    return 'cliente desativado no cadastro — escolha outro';
+  }
+
+  return error.detail;
+}
+
+/** Normaliza a página de clientes para a lista do modal; registro sem `id` não é vinculável. */
+function toCustomerOptions(
+  customers: readonly components['schemas']['CustomerResponse'][],
+): CustomerOption[] {
+  const options: CustomerOption[] = [];
+
+  for (const customer of customers) {
+    if (customer.id !== undefined) {
+      options.push({
+        id: customer.id,
+        name: customer.name ?? '',
+        taxId: customer.taxId ?? null,
+      });
+    }
+  }
+
+  return options;
+}
+
 /** `SaleDetailResponse` → `SaleView` da tela; `null` quando a resposta não trouxe a venda. */
 function toSaleView(response: components['schemas']['SaleDetailResponse']): SaleView | null {
   if (response.id === undefined) {
@@ -542,6 +699,7 @@ function toSaleView(response: components['schemas']['SaleDetailResponse']): Sale
     subtotal: response.subtotal ?? 0,
     discountAmount: response.discountAmount ?? 0,
     total: response.total ?? 0,
+    customerId: response.customerId ?? null,
   };
 }
 

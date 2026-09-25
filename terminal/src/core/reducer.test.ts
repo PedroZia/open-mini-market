@@ -14,6 +14,7 @@ const sale: SaleView = {
   subtotal: 5.5,
   discountAmount: 0,
   total: 5.5,
+  customerId: null,
 };
 
 const problem = { status: 503, code: null, detail: 'Serviço indisponível.' };

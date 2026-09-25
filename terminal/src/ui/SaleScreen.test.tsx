@@ -9,9 +9,12 @@ import type {
   CashRegistersOutcome,
   CreateSaleOutcome,
   CurrentCashSessionOutcome,
+  CustomerOption,
+  CustomerSaleOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
   SaleItemMutationOutcome,
+  SearchCustomersOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import { reduce } from '../core/reducer';
@@ -93,7 +96,7 @@ const BANANA: SaleItemView = {
 /** Venda como o servidor devolveu: o fixture repete a conta dele; a tela só exibe (BR-12). */
 function saleWithItems(items: SaleItemView[]): SaleView {
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
-  return { id: SALE_ID, items, subtotal, discountAmount: 0, total: subtotal };
+  return { id: SALE_ID, items, subtotal, discountAmount: 0, total: subtotal, customerId: null };
 }
 
 /** Estado em que o shell entrega a tela: caixa aberto e venda ainda não criada. */
@@ -125,6 +128,11 @@ function saleWith(count: number): SaleOpenState {
 /** Estado da tela com a venda já criada e os itens exatos que o teste quer (1110). */
 function saleOf(items: SaleItemView[]): SaleOpenState {
   return { ...saleOpen(), sale: saleWithItems(items) };
+}
+
+/** Estado da tela com o cliente que o servidor vinculou à venda (1112). */
+function saleOfWithCustomer(customerId: string | null): SaleOpenState {
+  return { ...saleOpen(), sale: { ...saleWithItems([ARROZ]), customerId } };
 }
 
 /** Dublê da camada de API: só a venda entra aqui; o resto existe para satisfazer o tipo. */
@@ -168,23 +176,45 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
         problem: unused,
       }),
     ),
+    // o F6 (1112) é do shell: aqui só fecha o contrato
+    searchCustomers: vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    linkCustomer: vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
+    unlinkCustomer: vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: false, kind: 'retryable', problem: unused }),
+    ),
     ...overrides,
   };
 }
 
 /** Shell mínimo do teste: o reducer real (1103) por trás da tela, como no App. */
-function SaleHarness({ api, initial }: { api: TerminalApi; initial: SaleOpenState }) {
+function SaleHarness({
+  api,
+  initial,
+  customer = null,
+}: {
+  api: TerminalApi;
+  initial: SaleOpenState;
+  customer?: CustomerOption | null;
+}) {
   const [state, dispatch] = useReducer(reduce, initial);
 
   if (state.kind !== 'saleOpen') {
     throw new Error(`estado inesperado no harness da venda: ${state.kind}`);
   }
 
-  return <SaleScreen state={state} api={api} dispatch={dispatch} now={NOW} />;
+  return <SaleScreen state={state} api={api} dispatch={dispatch} now={NOW} customer={customer} />;
 }
 
-function renderSale(api: TerminalApi = apiStub(), initial: SaleOpenState = saleOpen()) {
-  return render(<SaleHarness api={api} initial={initial} />);
+function renderSale(
+  api: TerminalApi = apiStub(),
+  initial: SaleOpenState = saleOpen(),
+  customer: CustomerOption | null = null,
+) {
+  return render(<SaleHarness api={api} initial={initial} customer={customer} />);
 }
 
 /** O render do Ink não é síncrono com o `stdin.write`: espera o frame alcançar o texto. */
@@ -691,12 +721,45 @@ describe('SaleScreen: alterar quantidade e remover item (1110)', () => {
         async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: 'failed', problem }),
       ),
     });
-    const ui = render(<SaleScreen state={saleOf([ARROZ])} api={api} dispatch={dispatch} now={NOW} />);
+    const ui = render(
+      <SaleScreen
+        state={saleOf([ARROZ])}
+        api={api}
+        dispatch={dispatch}
+        now={NOW}
+        customer={null}
+      />,
+    );
 
     ui.stdin.write('+');
 
     await vi.waitFor(() => {
       expect(dispatch).toHaveBeenCalledWith({ type: 'apiFailed', problem });
     });
+  });
+});
+
+describe('SaleScreen: cliente no cabeçalho (1112)', () => {
+  const MARIA: CustomerOption = { id: 'c1', name: 'Maria Silva', taxId: '12345678900' };
+
+  test('o vínculo do servidor aparece com o nome que a busca local capturou', () => {
+    const { lastFrame } = renderSale(apiStub(), saleOfWithCustomer(MARIA.id), MARIA);
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Cliente: Maria Silva');
+    expect(frame).toContain('Operador: Ana Souza · 14:32:05');
+    expectLayout(frame); // a linha nova não estoura as 24
+  });
+
+  test('nome local sem o vínculo do servidor não aparece: o vínculo é o `customerId` da venda', () => {
+    const anonima = renderSale(apiStub(), saleOfWithCustomer(null), MARIA);
+    const outra = renderSale(
+      apiStub(),
+      saleOfWithCustomer('c9'), // vinculado a outro cliente
+      MARIA,
+    );
+
+    expect(anonima.lastFrame()).not.toContain('Cliente:');
+    expect(outra.lastFrame()).not.toContain('Cliente:');
   });
 });

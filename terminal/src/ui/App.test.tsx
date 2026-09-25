@@ -9,9 +9,12 @@ import type {
   CashRegistersOutcome,
   CreateSaleOutcome,
   CurrentCashSessionOutcome,
+  CustomerOption,
+  CustomerSaleOutcome,
   LoginOutcome,
   OpenCashRegisterOutcome,
   SaleItemMutationOutcome,
+  SearchCustomersOutcome,
   TerminalApi,
 } from '../api/terminalApi';
 import type { SaleView } from '../core/state';
@@ -54,6 +57,7 @@ function saleDiscounted(discountAmount: number): SaleView {
     subtotal: 24.9,
     discountAmount,
     total: 24.9 - discountAmount,
+    customerId: null,
   };
 }
 
@@ -79,7 +83,7 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     createSale: vi.fn(
       async (): Promise<CreateSaleOutcome> => ({
         ok: true,
-        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0 },
+        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0, customerId: null },
       }),
     ),
     addSaleItem: vi.fn(
@@ -93,6 +97,7 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
           subtotal: 24.9,
           discountAmount: 0,
           total: 24.9,
+          customerId: null,
         },
       }),
     ),
@@ -106,6 +111,24 @@ function apiStub(overrides: Partial<TerminalApi> = {}): TerminalApi {
     // desconto (1111): a venda volta com o desconto que o servidor calculou
     applyDiscount: vi.fn(
       async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: saleDiscounted(2.49) }),
+    ),
+    // cliente (1112): o F6 do shell entra no teste do próprio fluxo; aqui só fecha o contrato
+    searchCustomers: vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [] }),
+    ),
+    linkCustomer: vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'cliente não usado neste teste' },
+      }),
+    ),
+    unlinkCustomer: vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({
+        ok: false,
+        kind: 'retryable',
+        problem: { status: 0, code: null, detail: 'cliente não usado neste teste' },
+      }),
     ),
     ...overrides,
   };
@@ -479,7 +502,7 @@ describe('App: bipe adiciona item (1109)', () => {
     const createSale = vi.fn(
       async (): Promise<CreateSaleOutcome> => ({
         ok: true,
-        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0 },
+        sale: { id: 'sale-1', items: [], subtotal: 0, discountAmount: 0, total: 0, customerId: null },
       }),
     );
     const addSaleItem = vi.fn(
@@ -493,6 +516,7 @@ describe('App: bipe adiciona item (1109)', () => {
           subtotal: 24.9,
           discountAmount: 0,
           total: 24.9,
+          customerId: null,
         },
       }),
     );
@@ -634,6 +658,7 @@ describe('App: desconto (1111)', () => {
           subtotal: 24.9,
           discountAmount: 0,
           total: 24.9,
+          customerId: null,
         },
       }),
     );
@@ -650,5 +675,216 @@ describe('App: desconto (1111)', () => {
     await expectFrame(ui.lastFrame, 'Desconto na venda (F5)');
     expect(addSaleItem).toHaveBeenCalledTimes(1); // o bipe não virou item: a venda saiu de cena
     expect(applyDiscount).not.toHaveBeenCalled(); // o terminador colado no texto não aplica nada
+  });
+});
+
+describe('App: cliente na venda (1112)', () => {
+  /** Clientes da busca: o CPF chega do servidor só com dígitos (502a) e nem todo cliente tem um. */
+  const MARIA: CustomerOption = { id: 'c1', name: 'Maria Silva', taxId: '12345678900' };
+  const ANA: CustomerOption = { id: 'c2', name: 'Ana Souza', taxId: null };
+
+  /** Venda que o servidor devolve no vínculo: o item vem junto e o `customerId` é o dele (BR-12). */
+  function saleWithCustomer(customerId: string | null): SaleView {
+    return {
+      id: 'sale-1',
+      items: [
+        { productId: 'p1', name: 'Arroz 5kg', unit: 'UN', quantity: 1, unitPrice: 24.9, lineTotal: 24.9 },
+      ],
+      subtotal: 24.9,
+      discountAmount: 0,
+      total: 24.9,
+      customerId,
+    };
+  }
+
+  /** Venda com um item: o F6 só abre o modal quando a venda já existe (1109). */
+  async function reachSaleWithItem(api: TerminalApi) {
+    const ui = render(<App api={api} />);
+    await reachSale(ui);
+    ui.stdin.write('7891000100103\r');
+    await expectFrame(ui.lastFrame, '› 1 x Arroz 5kg — R$ 24,90');
+
+    return ui;
+  }
+
+  /** Abre o modal pelo F6 do canal cru. */
+  async function openCustomer(ui: {
+    stdin: { write: (data: string) => void };
+    lastFrame: () => string | undefined;
+  }): Promise<void> {
+    ui.stdin.write('\u001b[17~'); // F6: o `useInput` do Ink não entrega as teclas F
+    await expectFrame(ui.lastFrame, 'Cliente na venda (F6)');
+  }
+
+  /** Digita o termo no campo de busca esperando o frame; o ENTER que busca é do teste. */
+  async function typeTerm(
+    ui: { stdin: { write: (data: string) => void }; lastFrame: () => string | undefined },
+    term: string,
+  ): Promise<void> {
+    ui.stdin.write(term);
+    await expectFrame(ui.lastFrame, `Busca: ${term}`);
+  }
+
+  test('F6 abre o modal sobre a venda: o corpo da venda sai de cena', async () => {
+    const ui = await reachSaleWithItem(apiStub());
+
+    await openCustomer(ui);
+
+    expect(ui.lastFrame()).toContain('digite o nome ou o CPF e ENTER busca');
+    expect(ui.lastFrame()).not.toContain('Subtotal:'); // a venda fica escondida com o modal à vista
+  });
+
+  test('F6 sem venda criada não abre nada: não há onde vincular cliente antes do primeiro bipe', async () => {
+    const searchCustomers = vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [MARIA] }),
+    );
+    const ui = render(<App api={apiStub({ searchCustomers })} />);
+    await reachSale(ui);
+
+    ui.stdin.write('\u001b[17~');
+
+    await expectFrame(ui.lastFrame, 'bipar o primeiro item para iniciar a venda');
+    expect(ui.lastFrame()).not.toContain('Cliente na venda (F6)');
+    expect(searchCustomers).not.toHaveBeenCalled();
+  });
+
+  test('a busca lista os clientes e o ENTER vincula: o nome aparece no cabeçalho da venda', async () => {
+    const searchCustomers = vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [MARIA, ANA] }),
+    );
+    const linkCustomer = vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: saleWithCustomer(MARIA.id) }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ searchCustomers, linkCustomer }));
+    await openCustomer(ui);
+
+    await typeTerm(ui, 'maria');
+    ui.stdin.write('\r'); // busca no servidor
+
+    await expectFrame(ui.lastFrame, '› Maria Silva — 123.456.789-00');
+    expect(ui.lastFrame()).toContain('Ana Souza');
+    expect(searchCustomers).toHaveBeenCalledWith('maria');
+
+    ui.stdin.write('\r'); // vincula o selecionado
+
+    await expectFrame(ui.lastFrame, 'Cliente: Maria Silva');
+    expect(linkCustomer).toHaveBeenCalledWith('sale-1', 'c1');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90'); // a venda voltou à cena
+    expect(ui.lastFrame()).not.toContain('Cliente na venda (F6)');
+  });
+
+  test('com cliente vinculado o F6 mostra o atual e o DEL remove: o cabeçalho limpa', async () => {
+    const searchCustomers = vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [MARIA] }),
+    );
+    const linkCustomer = vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: saleWithCustomer(MARIA.id) }),
+    );
+    const unlinkCustomer = vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: saleWithCustomer(null) }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ searchCustomers, linkCustomer, unlinkCustomer }));
+
+    // primeiro o vínculo (é como o PDV chega no F6 com cliente)
+    await openCustomer(ui);
+    await typeTerm(ui, 'maria');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, '› Maria Silva — 123.456.789-00');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, 'Cliente: Maria Silva');
+
+    // F6 de novo: o modal mostra o atual e o DEL remove
+    await openCustomer(ui);
+    expect(ui.lastFrame()).toContain('Cliente atual: Maria Silva');
+
+    ui.stdin.write('\x1b[3~'); // DEL remove
+
+    // o modal sai de cena com a venda que o servidor devolveu (sem o cliente)
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Cliente na venda (F6)');
+    });
+    expect(unlinkCustomer).toHaveBeenCalledWith('sale-1');
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90'); // a venda segue, anônima de novo
+    expect(ui.lastFrame()).not.toContain('Cliente: Maria Silva'); // o cabeçalho limpou
+  });
+
+  test('422 CUSTOMER_INACTIVE mostra a mensagem no modal e não vincula', async () => {
+    const searchCustomers = vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [MARIA] }),
+    );
+    const linkCustomer = vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({
+        ok: false,
+        kind: 'rejected',
+        message: 'cliente desativado no cadastro — escolha outro',
+      }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ searchCustomers, linkCustomer }));
+    await openCustomer(ui);
+
+    await typeTerm(ui, 'maria');
+    ui.stdin.write('\r');
+    await expectFrame(ui.lastFrame, '› Maria Silva — 123.456.789-00');
+    ui.stdin.write('\r');
+
+    await expectFrame(ui.lastFrame, 'cliente desativado no cadastro — escolha outro');
+    expect(ui.lastFrame()).toContain('Cliente na venda (F6)'); // o modal segue aberto
+    expect(ui.lastFrame()).not.toContain('Cliente: Maria Silva');
+  });
+
+  test('ESC fecha o modal sem chamar a API e sem mexer na venda', async () => {
+    const searchCustomers = vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [MARIA] }),
+    );
+    const linkCustomer = vi.fn(
+      async (): Promise<CustomerSaleOutcome> => ({ ok: true, sale: saleWithCustomer(MARIA.id) }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ searchCustomers, linkCustomer }));
+    await openCustomer(ui);
+    await typeTerm(ui, 'maria');
+
+    ui.stdin.write('\u001b'); // ESC pelo canal cru fecha o modal (§11.3)
+
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).not.toContain('Cliente na venda (F6)');
+    });
+    expect(ui.lastFrame()).toContain('TOTAL: R$ 24,90'); // a venda intacta
+    expect(ui.lastFrame()).not.toContain('Cliente:');
+    expect(searchCustomers).not.toHaveBeenCalled();
+    expect(linkCustomer).not.toHaveBeenCalled();
+  });
+
+  test('bipe com o modal aberto não vira item: a rajada entra no campo de busca', async () => {
+    const addSaleItem = vi.fn(
+      async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleWithCustomer(null) }),
+    );
+    const searchCustomers = vi.fn(
+      async (): Promise<SearchCustomersOutcome> => ({ ok: true, customers: [] }),
+    );
+    const ui = await reachSaleWithItem(apiStub({ addSaleItem, searchCustomers }));
+    expect(addSaleItem).toHaveBeenCalledTimes(1); // o bipe que criou a venda com o item
+
+    await openCustomer(ui);
+
+    ui.stdin.write('7891000100103\r'); // rajada com o modal à vista
+    await expectFrame(ui.lastFrame, 'Busca: 7891000100103');
+
+    ui.stdin.write('\r'); // o terminador vira busca do código, nunca vínculo nem item
+
+    await vi.waitFor(() => {
+      expect(searchCustomers).toHaveBeenCalledWith('7891000100103');
+    });
+    expect(addSaleItem).toHaveBeenCalledTimes(1); // o bipe não virou item: a venda saiu de cena
+    expect(ui.lastFrame()).toContain('Cliente na venda (F6)');
+  });
+
+  test('com o modal aberto os demais atalhos ficam bloqueados', async () => {
+    const ui = await reachSaleWithItem(apiStub());
+    await openCustomer(ui);
+
+    ui.stdin.write('\u001b[15~'); // F5 (desconto) com o cliente aberto: bloqueado
+
+    await expectFrame(ui.lastFrame, 'Cliente na venda (F6)');
+    expect(ui.lastFrame()).not.toContain('Desconto na venda (F5)');
   });
 });
