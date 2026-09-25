@@ -1125,14 +1125,20 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** cancelamento com motivo e falha sem perder a venda; sangria/suprimento com valor e motivo, recusa e retry; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): porta cancelamento e gaveta`
 
-- [ ] **1127 — Pagamento, sucesso e fechamento**
-  **Objetivo:** portar o fim da venda e o fechamento de caixa. **Depende:** 1126d
-  **Implementar:** `PaymentScreen`, `SaleSuccessScreen` (troco em destaque) e `ClosingCashScreen` (contado/diferença).
-  **Testes/aceite:** pagamento parcial/múltiplo, troco, bloqueio por venda aberta, ENTER da próxima venda; gate do 1121 verde.
-  **Commit:** `feat(tui): migra pagamento e fechamento para OpenTUI`
+- [ ] **1127a — Pagamento e sucesso**
+  **Objetivo:** fechar a venda na UI nova. **Depende:** 1126d
+  **Implementar:** `PaymentScreen` (F9) com pagamento parcial/múltiplo, métodos e troco calculado pelo servidor (BR-12), `SaleSuccessScreen` com o troco em destaque e o ENTER da próxima venda, e a rota `paying` no shell. Passo dividido do 1127 original; o fechamento é o 1127b.
+  **Testes/aceite:** pagamento parcial/múltiplo, troco, ENTER da próxima venda, recusa e retry; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): porta pagamento e sucesso`
+
+- [ ] **1127b — Fechamento de caixa**
+  **Objetivo:** fechar o turno na UI nova. **Depende:** 1127a
+  **Implementar:** `ClosingCashScreen` (F10) com o valor contado mascarado, a diferença do servidor e o bloqueio enquanto houver venda aberta.
+  **Testes/aceite:** contado/diferença, bloqueio por venda aberta, falha sem perder o caixa; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
+  **Commit:** `feat(tui): porta fechamento de caixa`
 
 - [ ] **1128 — Cadastro rápido — modal (F-02)**
-  **Objetivo:** cadastrar o produto desconhecido sem sair da venda. **Depende:** 1122, 1127
+  **Objetivo:** cadastrar o produto desconhecido sem sair da venda. **Depende:** 1122, 1127b
   **Implementar:** no 404 do bipe/linha digitada, abrir o modal com o código travado usando o endpoint do 1122; no sucesso, reenviar o bipe; recusa no modal.
   **Testes/aceite:** teste do fluxo "desconhecido → cadastra → item na venda"; E2E estendido; gate do 1121 verde.
   **Commit:** `feat(tui): cadastra produto rapido pelo PDV`
