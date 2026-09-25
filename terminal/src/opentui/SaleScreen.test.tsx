@@ -11,6 +11,7 @@ import type {
   CreateSaleOutcome,
   CustomerOption,
   ProductOption,
+  ProductStockOutcome,
   SearchProductsOutcome,
   SendFailure,
   SaleItemIntent,
@@ -1324,11 +1325,17 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
   /** Venda como o servidor a devolveu depois do desconto (BR-12): desconto de R$ 5,00 e total novo. */
   const discounted = saleOf([ARROZ], { subtotal: 24.9, discountAmount: 5, total: 19.9 })
 
-  test("F2 abre a consulta: o código conhecido mostra nome, preço e unidade e a venda não muda", async () => {
+  test("F2 abre a consulta: o código conhecido mostra nome, preço, unidade e saldo sem mexer na venda", async () => {
     const resolveBarcode = mock(
       async (): Promise<BarcodeLookupOutcome> => ({
         ok: true,
         product: { ...ARROZ_PRODUCT, quantity: null },
+      }),
+    )
+    const productStock = mock(
+      async (): Promise<ProductStockOutcome> => ({
+        ok: true,
+        stock: { quantity: 3, minQuantity: 5, lowStock: true },
       }),
     )
     const searchProducts = mock(
@@ -1341,7 +1348,7 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
       async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleOf([]) }),
     )
     const setup = await renderHarness(
-      apiStub({ resolveBarcode, searchProducts, addSaleItem, removeSaleItem }),
+      apiStub({ resolveBarcode, productStock, searchProducts, addSaleItem, removeSaleItem }),
       stateWith(saleOf([ARROZ])),
     )
 
@@ -1357,10 +1364,12 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
       await typeHuman(setup, BARCODE)
       await pressEnter(setup)
 
-      const detail = await expectFrame(setup, "Produto: Arroz 5kg")
+      const detail = await expectFrame(setup, "Saldo: 3 · mínimo 5 · ESTOQUE BAIXO")
 
+      expect(detail).toContain("Produto: Arroz 5kg")
       expect(detail).toContain("Preço: R$ 24,90 · UN")
       expect(resolveBarcode).toHaveBeenCalledWith(BARCODE) // o código vai bruto ao servidor (BR-14)
+      expect(productStock).toHaveBeenCalledWith("p1") // o saldo é o do produto que ele devolveu
       expect(searchProducts).not.toHaveBeenCalled() // código conhecido não vira busca por nome
       expectLayout(detail, 80, 24)
 
@@ -1377,7 +1386,7 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
     }
   })
 
-  test("o código desconhecido cai na busca por nome: lista com setas e ENTER no selecionado", async () => {
+  test("o código desconhecido cai na busca por nome: lista com setas e o saldo refeito no selecionado", async () => {
     const resolveBarcode = mock(
       async (): Promise<BarcodeLookupOutcome> => ({
         ok: false,
@@ -1391,11 +1400,21 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
         products: [ARROZ_PRODUCT, FEIJAO_PRODUCT],
       }),
     )
+    // o saldo é por produto: trocar a seleção tem de refazer a consulta (aceite do 1126b)
+    const productStock = mock(
+      async (productId: string): Promise<ProductStockOutcome> => ({
+        ok: true,
+        stock:
+          productId === ARROZ_PRODUCT.id
+            ? { quantity: 12, minQuantity: 5, lowStock: false }
+            : { quantity: 2, minQuantity: 5, lowStock: true },
+      }),
+    )
     const addSaleItem = mock(
       async (): Promise<AddSaleItemOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
     )
     const setup = await renderHarness(
-      apiStub({ resolveBarcode, searchProducts, addSaleItem }),
+      apiStub({ resolveBarcode, searchProducts, productStock, addSaleItem }),
       stateWith(saleOf([ARROZ])),
     )
 
@@ -1412,7 +1431,16 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
       expect(list).toContain("↑↓ escolhe · ENTER consulta · ESC fecha")
       expect(resolveBarcode).toHaveBeenCalledWith("arroz") // o termo vai como o operador digitou
       expect(searchProducts).toHaveBeenCalledWith("arroz")
+      expect(productStock).not.toHaveBeenCalled() // a lista ainda não consultou saldo de ninguém
       expectLayout(list, 80, 24)
+
+      await pressEnter(setup)
+
+      const first = await expectFrame(setup, "Saldo: 12 · mínimo 5")
+
+      expect(first).toContain("Produto: Arroz 5kg")
+      expect(first).not.toContain("ESTOQUE BAIXO") // saldo acima do mínimo
+      expect(productStock).toHaveBeenCalledWith("p1")
 
       await pressArrow(setup, "down")
 
@@ -1422,9 +1450,11 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
 
       await pressEnter(setup)
 
-      const detail = await expectFrame(setup, "Produto: Feijão 1kg")
+      const detail = await expectFrame(setup, "Saldo: 2 · mínimo 5 · ESTOQUE BAIXO")
 
+      expect(detail).toContain("Produto: Feijão 1kg")
       expect(detail).toContain("Preço: R$ 8,50 · KG")
+      expect(productStock).toHaveBeenCalledWith("p2") // o saldo foi refeito para o novo selecionado
 
       await pressEscape(setup)
 
@@ -1432,6 +1462,60 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
 
       expect(back).toContain("TOTAL: R$ 24,90")
       expect(addSaleItem).not.toHaveBeenCalled()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("recusa e falha transitória do saldo ficam no modal; o ENTER refaz a consulta", async () => {
+    const resolveBarcode = mock(
+      async (): Promise<BarcodeLookupOutcome> => ({
+        ok: true,
+        product: { ...FEIJAO_PRODUCT, quantity: null },
+      }),
+    )
+    let attempts = 0
+    const productStock = mock(async (): Promise<ProductStockOutcome> => {
+      attempts += 1
+
+      if (attempts === 1) {
+        return sendFailure()
+      }
+
+      return attempts === 2
+        ? { ok: false, kind: "rejected", message: "produto não encontrado — faça a consulta de novo" }
+        : { ok: true, stock: { quantity: 7, minQuantity: 5, lowStock: false } }
+    })
+    const setup = await renderHarness(apiStub({ resolveBarcode, productStock }), stateWith(saleOf([ARROZ])))
+
+    try {
+      await pressNamed(setup, KeyCodes.F2)
+      await typeHuman(setup, "7891000100103")
+      await pressEnter(setup)
+
+      const transient = await expectFrame(setup, "falha ao consultar o saldo — ENTER tenta de novo")
+
+      expect(transient).toContain("Consulta de preço (F2)") // o modal segue aberto
+      expect(transient).not.toContain("Saldo:")
+
+      await pressEnter(setup) // retry: recomeça pela consulta do código, que é idempotente
+
+      const rejected = await expectFrame(setup, "produto não encontrado — faça a consulta de novo")
+
+      expect(rejected).toContain("Consulta de preço (F2)") // a recusa também não fecha o modal
+      expect(productStock).toHaveBeenCalledTimes(2)
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "Saldo: 7 · mínimo 5")
+
+      expect(frame).toContain("Produto: Feijão 1kg")
+      expect(resolveBarcode).toHaveBeenCalledTimes(3) // cada retry recomeça pelo termo do campo
+      expect(productStock).toHaveBeenCalledTimes(3)
+
+      await pressEscape(setup)
+
+      await expectFrame(setup, "› 1 x Arroz 5kg — R$ 24,90")
     } finally {
       setup.renderer.destroy()
     }
@@ -1455,7 +1539,7 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
 
       expect(opened).toContain("› Valor: R$ 0,00")
       expect(opened).toContain("digite o valor em centavos: 1250 vira R$ 12,50")
-      expect(opened).toContain("TAB troca o campo · ENTER aplica · ESC cancela")
+      expect(opened).toContain("TAB troca o campo · ←/→ no tipo · ENTER aplica · ESC cancela")
 
       // ENTER sem nada: valor e motivo são obrigatórios (BR-04) e nada vai à API
       await pressEnter(setup)
@@ -1489,6 +1573,70 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
       expect(frame).not.toContain("Desconto na venda (F5)") // o modal saiu de cena
       expect(frame).toContain("TOTAL: R$ 19,90") // os totais são os do servidor (BR-12)
       expectLayout(frame, 80, 24)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("F5 alterna VALOR/PERCENTUAL no tipo (TAB e ←/→) e aplica PERCENTUAL com o inteiro", async () => {
+    const percent = saleOf([ARROZ], { subtotal: 24.9, discountAmount: 2.49, total: 22.41 })
+    const applyDiscount = mock(async (): Promise<ApplyDiscountOutcome> => ({ ok: true, sale: percent }))
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ applyDiscount }),
+      stateWith(saleOf([ARROZ])),
+      (action) => actions.push(action),
+    )
+
+    try {
+      await pressNamed(setup, KeyCodes.F5)
+
+      const opened = await expectFrame(setup, "Tipo: [VALOR] · PERCENTUAL")
+
+      expect(opened).toContain("› Valor: R$ 0,00") // abre no VALOR, com a máscara de centavos
+      expect(opened).toContain("TAB troca o campo · ←/→ no tipo · ENTER aplica · ESC cancela")
+
+      await pressTab(setup) // valor → motivo
+      await pressTab(setup) // motivo → tipo
+      await expectFrame(setup, "› Tipo: [VALOR] · PERCENTUAL")
+
+      await pressNamed(setup, KeyCodes.ARROW_RIGHT)
+
+      await expectFrame(setup, "› Tipo: VALOR · [PERCENTUAL]")
+
+      await pressNamed(setup, KeyCodes.ARROW_LEFT) // ← volta para VALOR
+
+      await expectFrame(setup, "› Tipo: [VALOR] · PERCENTUAL")
+
+      await pressNamed(setup, KeyCodes.ARROW_RIGHT) // → para PERCENTUAL de novo
+
+      await expectFrame(setup, "› Tipo: VALOR · [PERCENTUAL]")
+
+      await pressTab(setup) // tipo → valor
+
+      const percentField = await expectFrame(setup, "› Valor: 0%") // a máscara do tipo muda
+
+      expect(percentField).toContain("digite o percentual inteiro: 10 vira 10%")
+
+      await typeHuman(setup, "10")
+      await expectFrame(setup, "› Valor: 10%")
+
+      await pressTab(setup) // valor → motivo
+      await typeHuman(setup, "promo")
+      await expectFrame(setup, "› Motivo: promo")
+
+      await pressEnter(setup)
+
+      const frame = await expectFrame(setup, "desconto: R$ 2,49 — total R$ 22,41")
+
+      expect(applyDiscount).toHaveBeenCalledWith(SALE_ID, {
+        type: "PERCENT",
+        value: 10, // no PERCENTUAL os dígitos já são o inteiro (a máscara é a do servidor, BR-12)
+        reason: "promo",
+      })
+      expect(actions).toContainEqual({ type: "saleUpdated", sale: percent })
+      expect(frame).not.toContain("Desconto na venda (F5)")
+      expect(frame).toContain("TOTAL: R$ 22,41")
     } finally {
       setup.renderer.destroy()
     }
@@ -1649,9 +1797,10 @@ describe("SaleScreen: modais — consulta de preço e desconto (1126b)", () => {
       await expectFrame(setup, "Desconto na venda (F5)")
 
       // o motivo é digitado antes: se o terminador do bipe aplicasse, a API seria chamada
-      await pressTab(setup)
+      await pressTab(setup) // valor → motivo
       await typeHuman(setup, "cliente antigo")
-      await pressTab(setup)
+      await pressTab(setup) // motivo → tipo
+      await pressTab(setup) // tipo → valor (o bipe cai no campo do valor)
       await waitMs(60) // o operador parou de digitar: o primeiro caractere do bipe não é rajada
 
       await act(async () => {

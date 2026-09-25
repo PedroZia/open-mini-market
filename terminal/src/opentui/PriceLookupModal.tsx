@@ -2,7 +2,12 @@
 import { TextAttributes, type KeyEvent } from "@opentui/core"
 import { useRef, useState } from "react"
 
-import type { ProductOption, SendFailure, TerminalApi } from "../api/terminalApi"
+import type {
+  ProductOption,
+  SendFailure,
+  StockBalanceView,
+  TerminalApi,
+} from "../api/terminalApi"
 import { formatAmount } from "../core/money"
 import type { ApiProblem } from "../core/state"
 import { isPrintable } from "./adapters/scanner"
@@ -18,16 +23,19 @@ import { theme } from "./theme"
  * O termo é o que o operador digitou ou bipou — código **bruto** ou trecho do nome (BR-14) — e o
  * ENTER consulta: o servidor decide se é um código (`GET /products/barcode/{termo}`) e, quando ele
  * não o conhece (404/422), o mesmo termo vale como nome (`GET /products?search=`, passos 409/404).
- * Nada é calculado na TUI (BR-12): nome, preço e unidade são os que o servidor devolveu.
+ * O produto encontrado é exibido com o preço e a unidade, e o saldo vem do módulo de estoque
+ * (`GET /stock/{productId}`, passo 704) — quantidade, mínimo e o aviso de estoque baixo são do
+ * servidor (BR-12), a TUI só exibe. Nada é calculado aqui.
  *
- * Na lista (busca por nome) as setas escolhem com clamp nas pontas e o ENTER mostra o selecionado
- * no detalhe; mexer no termo invalida a lista e o detalhe antigos, então o ENTER nunca consulta um
- * resultado que não é mais o que está escrito no campo. Uma consulta por vez: com a resposta em voo
- * o ENTER repetido não dispara outra.
+ * Na lista (busca por nome) as setas escolhem com clamp nas pontas e o ENTER busca o saldo do
+ * selecionado — dá para conferir outro resultado sem digitar de novo; mexer no termo invalida a
+ * lista e o detalhe antigos, então o ENTER nunca consulta um resultado que não é mais o que está
+ * escrito no campo. Uma consulta por vez: com a resposta em voo o ENTER repetido não dispara outra.
  *
- * A recusa do servidor (403 sem `product.read`) fica **no próprio modal**, sem fechá-lo, e a falha
- * transitória (rede/5xx) pede o ENTER de novo; a bloqueante é da tela de venda, que fecha o modal e
- * leva o problema para a tela de erro (`onFailed`, §11.4). ESC fecha sem chamar nada.
+ * A recusa do servidor (403 sem `product.read`/`stock.read`, 404 do produto que sumiu) fica **no
+ * próprio modal**, sem fechá-lo, e a falha transitória (rede/5xx) pede o ENTER de novo; a
+ * bloqueante é da tela de venda, que fecha o modal e leva o problema para a tela de erro
+ * (`onFailed`, §11.4). ESC fecha sem chamar nada.
  *
  * O teclado é **deste** modal (o padrão do `LoginScreen`/1126a): o `prependListener` do hook global
  * põe o listener mais novo na frente, então a tecla chega aqui antes do listener da venda — que, com
@@ -51,12 +59,20 @@ type Message = { kind: "hint" | "rejected" | "retry"; text: string }
 /** O que sobra do desfecho da API depois do sucesso: recusa do modal, retry manual ou bloqueante. */
 type Refusal = { ok: false; kind: "rejected"; message: string } | SendFailure
 
+/** Produto consultado com o saldo que o servidor devolveu: o que o detalhe exibe. */
+type LookupDetail = {
+  product: ProductOption
+  /** Saldo e aviso de estoque baixo, calculados pelo servidor (BR-12). */
+  stock: StockBalanceView
+}
+
 const FORM_HINT = "digite o código de barras ou o nome e ENTER consulta"
 const MISSING_TERM = "informe o código de barras ou o nome do produto"
 const NO_RESULTS = "nenhum produto encontrado"
 
 const BARCODE_RETRY = "falha ao consultar — ENTER tenta de novo"
 const SEARCH_RETRY = "falha ao buscar — ENTER tenta de novo"
+const STOCK_RETRY = "falha ao consultar o saldo — ENTER tenta de novo"
 
 const CONSULTING = "consultando…"
 const FORM_HINTS = "ENTER consulta · ESC fecha"
@@ -77,8 +93,8 @@ export function PriceLookupModal({ api, onCancel, onFailed }: PriceLookupModalPr
   const [results, setResults] = useState<ProductOption[] | null>(null)
   /** Seleção na lista: clamp nas pontas, como na lista da venda (1108/1110). */
   const [cursor, setCursor] = useState(0)
-  /** Produto que o servidor devolveu para a consulta: nome, preço e unidade (BR-12). */
-  const [detail, setDetail] = useState<ProductOption | null>(null)
+  /** Produto e saldo que o servidor devolveu: nome, preço, unidade e estoque (BR-12). */
+  const [detail, setDetail] = useState<LookupDetail | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<Message | null>(null)
 
@@ -109,11 +125,11 @@ export function PriceLookupModal({ api, onCancel, onFailed }: PriceLookupModalPr
     }
 
     if (event.name === "return") {
-      // com a lista à vista o ENTER mostra o selecionado; sem lista, consulta o que está no campo
+      // com a lista à vista o ENTER consulta o saldo do selecionado; sem lista, consulta o campo
       if (chosen === null) {
         void consult(termRef.current)
       } else {
-        showDetail(chosen)
+        void loadStock(chosen)
       }
 
       return true
@@ -154,7 +170,7 @@ export function PriceLookupModal({ api, onCancel, onFailed }: PriceLookupModalPr
 
   /**
    * ENTER no campo: o código vai **bruto** ao servidor (BR-14) e é ele quem decide o que o termo é.
-   * Código conhecido → detalhe; 404/422 dele → o mesmo termo vale como nome; o resto é recusa/falha.
+   * Código conhecido → saldo; 404/422 dele → o mesmo termo vale como nome; o resto é recusa/falha.
    */
   async function consult(query: string): Promise<void> {
     const trimmed = query.trim()
@@ -174,7 +190,7 @@ export function PriceLookupModal({ api, onCancel, onFailed }: PriceLookupModalPr
     setBusy(false)
 
     if (outcome.ok) {
-      setDetail({
+      await loadStock({
         id: outcome.product.id,
         name: outcome.product.name,
         price: outcome.product.price,
@@ -211,10 +227,26 @@ export function PriceLookupModal({ api, onCancel, onFailed }: PriceLookupModalPr
     refuse(outcome, SEARCH_RETRY)
   }
 
-  /** ENTER no resultado selecionado: o detalhe é o do servidor, sem outra chamada (BR-12). */
-  function showDetail(product: ProductOption): void {
+  /**
+   * Saldo do produto escolhido (`GET /stock/{productId}`, passo 704): quantidade, mínimo e o aviso
+   * de estoque baixo são do servidor (BR-12). É o mesmo caminho do código resolvido e do resultado
+   * escolhido na lista — selecionar outro refaz o saldo. 403/404 ficam no modal; rede/5xx pedem o
+   * ENTER de novo (que volta a consultar o termo do campo).
+   */
+  async function loadStock(product: ProductOption): Promise<void> {
     setMessage(null)
-    setDetail(product)
+    setBusy(true)
+
+    const outcome = await api.productStock(product.id)
+
+    setBusy(false)
+
+    if (outcome.ok) {
+      setDetail({ product, stock: outcome.stock })
+      return
+    }
+
+    refuse(outcome, STOCK_RETRY)
   }
 
   /**
@@ -261,14 +293,7 @@ export function PriceLookupModal({ api, onCancel, onFailed }: PriceLookupModalPr
           {FORM_HINT}
         </text>
       ) : null}
-      {detail === null ? null : (
-        <>
-          <text attributes={TextAttributes.BOLD} wrapMode="none">
-            {`Produto: ${detail.name}`}
-          </text>
-          <text wrapMode="none">{`Preço: ${formatAmount(detail.price)} · ${detail.unit}`}</text>
-        </>
-      )}
+      {detail === null ? null : <DetailRows detail={detail} />}
       {results === null
         ? null
         : results.map((option, position) => (
@@ -300,4 +325,27 @@ function ResultRow({ option, selected }: { option: ProductOption; selected: bool
       {`${selected ? "›" : " "} ${option.name} — ${formatAmount(option.price)}`}
     </text>
   )
+}
+
+/** Detalhe da consulta: produto, preço e o saldo do servidor, com o alerta de estoque baixo. */
+function DetailRows({ detail }: { detail: LookupDetail }) {
+  const { product, stock } = detail
+  const balance = `Saldo: ${formatQuantity(stock.quantity)} · mínimo ${formatQuantity(stock.minQuantity)}`
+
+  return (
+    <>
+      <text attributes={TextAttributes.BOLD} wrapMode="none">
+        {`Produto: ${product.name}`}
+      </text>
+      <text wrapMode="none">{`Preço: ${formatAmount(product.price)} · ${product.unit}`}</text>
+      <text fg={stock.lowStock ? theme.warning : theme.text} wrapMode="none">
+        {stock.lowStock ? `${balance} · ESTOQUE BAIXO` : balance}
+      </text>
+    </>
+  )
+}
+
+/** Quantidade em pt-BR, como a lista da venda (1108): inteira como `2`, fracionária como `0,750`. */
+function formatQuantity(quantity: number): string {
+  return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(3).replace(".", ",")
 }

@@ -2,7 +2,7 @@
 import type { KeyEvent } from "@opentui/core"
 import { useRef, useState } from "react"
 
-import type { SaleDiscountIntent } from "../api/terminalApi"
+import type { DiscountType, SaleDiscountIntent } from "../api/terminalApi"
 import { centsToAmount, digitsToCents, formatBRL } from "../core/money"
 import { isPrintable } from "./adapters/scanner"
 import { BURST_MAX_INTERVAL_MS, useGlobalKeyboard } from "./keyboard"
@@ -10,15 +10,17 @@ import { ModalFrame } from "./ModalFrame"
 import { theme } from "./theme"
 
 /**
- * Desconto na venda (F5, passo 1111 portado no 1126b): modal bloqueante sobre a venda com o valor e
- * o motivo (BR-04) no `ModalFrame`. A TUI **não calcula desconto nenhum** (BR-12): manda o valor que
- * o operador digitou e o motivo ao servidor (`PUT /sales/{id}/discount`, passos 810/811b, pela
- * `runMutation` da tela de venda) e fica com a venda inteira que ele devolveu, com subtotal,
- * desconto e total recalculados.
+ * Desconto na venda (F5, passo 1111 portado no 1126b): modal bloqueante sobre a venda com o tipo
+ * (valor ou percentual), o valor e o motivo (BR-04) no `ModalFrame`. A TUI **não calcula desconto
+ * nenhum** (BR-12): manda o que o operador informou e o motivo ao servidor (`PUT
+ * /sales/{id}/discount`, passos 810/811b, pela `runMutation` da tela de venda) e fica com a venda
+ * inteira que ele devolveu, com subtotal, desconto e total recalculados.
  *
- * O valor é mascarado em centavos, como a abertura de caixa: os dígitos viram reais (`1250` →
- * `R$ 12,50`) e vão como `12.5` no corpo; o motivo é texto livre e obrigatório — vazio (ou valor
- * vazio) não chama a API e a dica fica no próprio formulário. TAB troca o campo (valor → motivo).
+ * O valor é mascarado em centavos no VALOR, como a abertura de caixa (`1250` → `R$ 12,50`, que vai
+ * como `12.5` no corpo), e em dígitos inteiros no PERCENTUAL (`10` → `10%`, que vai como `10`); o
+ * motivo é texto livre e obrigatório — vazio (ou valor vazio) não chama a API e a dica fica no
+ * próprio formulário. O TAB percorre os campos (valor → motivo → tipo) e, com o foco no tipo,
+ * ←/→ alternam entre os dois — os dois ficam à vista, com o ativo entre colchetes.
  *
  * Quem recusa é o servidor: limite da loja (422), permissão `sale.discount.apply` (403) e
  * forma/motivo (400) voltam como mensagem **no próprio modal**, sem fechá-lo, para o operador
@@ -54,10 +56,13 @@ export type DiscountApplyResult =
   | { kind: "failed" }
 
 /** Campos do formulário, na ordem em que o TAB os percorre. */
-type Field = "value" | "reason"
+type Field = "value" | "reason" | "type"
 
-/** Dica do valor: a mesma máscara de centavos da abertura de caixa. */
+const FIELD_ORDER: readonly Field[] = ["value", "reason", "type"]
+
+/** Dicas do valor por tipo: a máscara de cada um, na linha de baixo do campo. */
 const VALUE_HINT = "digite o valor em centavos: 1250 vira R$ 12,50"
+const PERCENT_HINT = "digite o percentual inteiro: 10 vira 10%"
 
 /** Validação de forma, só do formulário: o limite da loja e o resto são do servidor (BR-12). */
 const MISSING_VALUE = "informe o valor do desconto"
@@ -65,12 +70,13 @@ const MISSING_REASON = "informe o motivo do desconto"
 
 const APPLYING = "aplicando…"
 const RETRY_NOTICE = "falha ao aplicar o desconto — ENTER tenta de novo"
-const KEY_HINT = "TAB troca o campo · ENTER aplica · ESC cancela"
+const KEY_HINT = "TAB troca o campo · ←/→ no tipo · ENTER aplica · ESC cancela"
 
 /** Rodapé do modal: dica do formulário, recusa do servidor ou falha transitória. */
 type Message = { kind: "hint" | "rejected" | "retry"; text: string }
 
 export function DiscountModal({ onApply, onCancel }: DiscountModalProps) {
+  const [type, setType] = useState<DiscountType>("VALUE")
   /** Dígitos do campo do valor, sem máscara: `1250` é o estado; `R$ 12,50` é o que se vê. */
   const [digits, setDigits] = useState("")
   const [reason, setReason] = useState("")
@@ -106,7 +112,14 @@ export function DiscountModal({ onApply, onCancel }: DiscountModalProps) {
     }
 
     if (event.name === "tab") {
-      setField((current) => (current === "value" ? "reason" : "value"))
+      setField(nextField)
+      return true
+    }
+
+    if (field === "type" && (event.name === "left" || event.name === "right")) {
+      // os dois tipos ficam à vista; a seta alterna e o ativo vai entre colchetes
+      setMessage(null)
+      setType((current) => (current === "VALUE" ? "PERCENT" : "VALUE"))
       return true
     }
 
@@ -114,7 +127,7 @@ export function DiscountModal({ onApply, onCancel }: DiscountModalProps) {
       setMessage(null)
       if (field === "value") {
         setDigits((current) => current.slice(0, -1))
-      } else {
+      } else if (field === "reason") {
         setReason((current) => current.slice(0, -1))
       }
 
@@ -156,16 +169,18 @@ export function DiscountModal({ onApply, onCancel }: DiscountModalProps) {
       if (typed !== "") {
         setDigits((current) => current + typed)
       }
-    } else {
+    } else if (field === "reason") {
       setReason((current) => current + event.sequence)
     }
+    // no campo do tipo não há texto: quem escolhe é a ←/→
 
     return true
   }
 
   /**
-   * Aplica o desconto com o que o operador digitou: o valor vai em reais (centavos → reais na
-   * máscara) e o motivo como texto; a venda recalculada é a que a tela de venda devolveu (BR-12).
+   * Aplica o desconto com o que o operador informou: o valor vai como ele o digitou (centavos →
+   * reais no VALOR, inteiro no PERCENTUAL) e o motivo como texto; a venda recalculada é a que a
+   * tela de venda devolveu (BR-12).
    */
   async function apply(valueDigits: string, reasonText: string): Promise<void> {
     if (valueDigits === "") {
@@ -182,8 +197,8 @@ export function DiscountModal({ onApply, onCancel }: DiscountModalProps) {
     setBusy(true)
 
     const outcome = await onApply({
-      type: "VALUE",
-      value: centsToAmount(digitsToCents(valueDigits)),
+      type,
+      value: discountValue(type, valueDigits),
       reason: reasonText,
     })
 
@@ -202,14 +217,17 @@ export function DiscountModal({ onApply, onCancel }: DiscountModalProps) {
     // deixam nada à vista: o modal sai de cena pelas mãos da tela de venda
   }
 
-  const masked = formatBRL(digitsToCents(digits))
+  const masked = maskedValue(type, digits)
 
   return (
     <ModalFrame title="Desconto na venda (F5)" hints={KEY_HINT}>
+      <text fg={field === "type" ? theme.accent : theme.text} wrapMode="none">
+        {`${field === "type" ? "›" : " "} Tipo: ${type === "VALUE" ? "[VALOR]" : "VALOR"} · ${type === "PERCENT" ? "[PERCENTUAL]" : "PERCENTUAL"}`}
+      </text>
       <text wrapMode="none">{`${field === "value" ? "›" : " "} Valor: ${masked}`}</text>
       {digits === "" ? (
         <text fg={theme.muted} wrapMode="none">
-          {VALUE_HINT}
+          {type === "VALUE" ? VALUE_HINT : PERCENT_HINT}
         </text>
       ) : null}
       <text wrapMode="none">{`${field === "reason" ? "›" : " "} Motivo: ${reason}`}</text>
@@ -222,6 +240,26 @@ export function DiscountModal({ onApply, onCancel }: DiscountModalProps) {
       )}
     </ModalFrame>
   )
+}
+
+/** Próximo campo no ciclo do TAB: valor → motivo → tipo → valor. */
+function nextField(field: Field): Field {
+  const index = FIELD_ORDER.indexOf(field)
+  return FIELD_ORDER[(index + 1) % FIELD_ORDER.length] ?? "value"
+}
+
+/**
+ * Valor do corpo da API: no VALOR, centavos → reais (`1000` → `10`, a máscara da abertura de
+ * caixa); no PERCENTUAL, os dígitos já são o inteiro (`10` → 10%). Nenhuma conta além da máscara
+ * (BR-12).
+ */
+function discountValue(type: DiscountType, digits: string): number {
+  return type === "VALUE" ? centsToAmount(digitsToCents(digits)) : digitsToCents(digits)
+}
+
+/** Máscara de exibição do valor digitado, por tipo: `R$ 12,50` no VALOR e `10%` no PERCENTUAL. */
+function maskedValue(type: DiscountType, digits: string): string {
+  return type === "VALUE" ? formatBRL(digitsToCents(digits)) : `${digitsToCents(digits)}%`
 }
 
 /** Rodapé: amarelo na falha transitória (retry) e vermelho na dica e na recusa do servidor. */
