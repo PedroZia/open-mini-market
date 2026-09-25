@@ -133,6 +133,7 @@ class RouteSecurityTest {
           new Route("DELETE", "/api/v1/categories/{id}"),
           new Route("GET", "/api/v1/products"),
           new Route("POST", "/api/v1/products"),
+          new Route("POST", "/api/v1/products/quick"),
           new Route("GET", "/api/v1/products/{id}"),
           new Route("PUT", "/api/v1/products/{id}"),
           new Route("PATCH", "/api/v1/products/{id}/price"),

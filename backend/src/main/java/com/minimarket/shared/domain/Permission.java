@@ -15,6 +15,7 @@ public enum Permission {
   ROLE_WRITE("role.write"),
   PRODUCT_READ("product.read"),
   PRODUCT_WRITE("product.write"),
+  PRODUCT_QUICK_CREATE("product.quick_create"),
   PRICE_WRITE("price.write"),
   CATEGORY_WRITE("category.write"),
   STOCK_READ("stock.read"),

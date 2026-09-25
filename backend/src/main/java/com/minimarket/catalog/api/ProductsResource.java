@@ -12,6 +12,8 @@ import com.minimarket.catalog.application.GetProductUseCase;
 import com.minimarket.catalog.application.ListProductsUseCase;
 import com.minimarket.catalog.application.ProductPage;
 import com.minimarket.catalog.application.ProductSummary;
+import com.minimarket.catalog.application.QuickCreateProductCommand;
+import com.minimarket.catalog.application.QuickCreateProductUseCase;
 import com.minimarket.catalog.application.UpdateProductCommand;
 import com.minimarket.catalog.application.UpdateProductUseCase;
 import com.minimarket.shared.api.PageResponse;
@@ -37,6 +39,7 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import java.net.URI;
 import java.util.UUID;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
@@ -47,7 +50,8 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
  * regra de negócio aqui.
  *
  * <p>A escrita exige {@code product.write}: sem a permissão o interceptor do {@code
- * RequirePermission} responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar. A edição
+ * RequirePermission} responde 403 {@code ACCESS_DENIED} antes de o corpo do método rodar. O
+ * cadastro rápido (passo 1122) exige a permissão própria {@code product.quick_create}; a edição
  * (passo 410) exige ainda o {@code If-Match} com a versão lida no detalhe — é o contrato do lock
  * otimista (§9.4) —, a alteração de preço (passo 411) exige {@code price.write} e o motivo no corpo
  * e o ciclo de vida (passo 412) desativa e reativa com os mesmos 200 do detalhe.
@@ -62,6 +66,8 @@ public class ProductsResource {
   public static final String PATH = "/api/v1/products";
 
   @Inject CreateProductUseCase createProductUseCase;
+
+  @Inject QuickCreateProductUseCase quickCreateProductUseCase;
 
   @Inject ListProductsUseCase listProductsUseCase;
 
@@ -111,6 +117,34 @@ public class ProductsResource {
     return Response.created(uriInfo.getAbsolutePathBuilder().path(created.id().toString()).build())
         .entity(toResponse(created))
         .build();
+  }
+
+  /**
+   * Cadastro rápido do PDV (F-02, passo 1122): cria o produto desconhecido sem sair da venda, com a
+   * permissão própria {@code product.quick_create} — o OPERADOR cadastra o essencial sem ganhar o
+   * {@code product.write}. Leva só nome, código lido (obrigatório e travado no modal), preço e
+   * unidade; descrição, categoria, código interno e mínimo nascem nulos. Barcode já usado por
+   * produto vivo → 409 {@code BARCODE_ALREADY_EXISTS}; unidade fora da whitelist, preço inválido ou
+   * código vazio depois da normalização → 400 {@code VALIDATION_ERROR} do caso de uso (a forma é da
+   * bean validation). A resposta é o mesmo {@link ProductResponse} do cadastro completo, com o
+   * {@code Location} do detalhe (o segmento literal {@code quick} tem prioridade sobre {@code
+   * /{id}} no JAX-RS).
+   */
+  @POST
+  @Path("/quick")
+  @RequirePermission(Permission.PRODUCT_QUICK_CREATE)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  @APIResponse(
+      responseCode = "201",
+      description = "Produto criado pelo cadastro rápido",
+      content = @Content(schema = @Schema(implementation = ProductResponse.class)))
+  public Response quickCreate(@Valid QuickCreateProductRequest request) {
+    ProductSummary created =
+        quickCreateProductUseCase.execute(
+            new QuickCreateProductCommand(
+                request.name(), request.barcode(), request.price(), request.unit()));
+    return Response.created(detailLocation(created.id())).entity(toResponse(created)).build();
   }
 
   /**
@@ -255,6 +289,15 @@ public class ProductsResource {
   @Produces(MediaType.APPLICATION_JSON)
   public ProductBarcodeResponse getByBarcode(@PathParam("barcode") String barcode) {
     return toBarcodeResponse(getProductByBarcodeUseCase.execute(barcode));
+  }
+
+  /**
+   * {@code Location} do detalhe do produto (passo 408). O cadastro rápido (1122) não pode usar o
+   * caminho absoluto da requisição — seria {@code /products/quick/{id}} —, então o URI sai do base
+   * mais o caminho do recurso, como no {@code stockDetailLocation} do estoque.
+   */
+  private URI detailLocation(UUID id) {
+    return uriInfo.getBaseUriBuilder().path(PATH).path(id.toString()).build();
   }
 
   private static ProductResponse toResponse(ProductSummary product) {

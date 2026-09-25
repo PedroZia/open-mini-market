@@ -23,10 +23,14 @@ import org.junit.jupiter.api.Test;
 @QuarkusTest
 class PermissionRepositoryTest extends IntegrationTestBase {
 
-  /** Mapa inicial de §4.5 para OPERADOR, o mesmo semeado por {@code V3__rbac.sql}. */
+  /**
+   * Mapa de OPERADOR para §4.5, o mesmo semeado por {@code V3__rbac.sql} e completado com o
+   * cadastro rápido do passo 1122 ({@code V22__product_quick_create_permission.sql}).
+   */
   private static final Set<String> OPERADOR_PERMISSIONS =
       Set.of(
           "product.read",
+          "product.quick_create",
           "sale.create",
           "payment.add",
           "sale.complete",
@@ -46,26 +50,26 @@ class PermissionRepositoryTest extends IntegrationTestBase {
   @Test
   @TestTransaction
   @DisplayName(
-      "effectivePermissions de um OPERADOR é exatamente o conjunto de 10 permissões da role")
+      "effectivePermissions de um OPERADOR é exatamente o conjunto de 11 permissões da role")
   void resolvesOperatorEffectivePermissions() {
     UserEntity operator = insertUser("operador.permissoes");
     roleRepository.assignRoles(operator.getId(), List.of("OPERADOR"));
 
     Set<String> effective = permissionRepository.effectivePermissions(operator.getId());
 
-    assertThat(effective).containsExactlyInAnyOrderElementsOf(OPERADOR_PERMISSIONS).hasSize(10);
+    assertThat(effective).containsExactlyInAnyOrderElementsOf(OPERADOR_PERMISSIONS).hasSize(11);
     assertThat(List.copyOf(effective)).isSorted();
   }
 
   @Test
   @TestTransaction
-  @DisplayName("effectivePermissions une OPERADOR e GERENTE sem repetir (22 distintas)")
+  @DisplayName("effectivePermissions une OPERADOR e GERENTE sem repetir (23 distintas)")
   void unionsPermissionsOfMultipleRoles() {
     UserEntity user = insertUser("dois.papeis");
     roleRepository.assignRoles(user.getId(), List.of("OPERADOR", "GERENTE"));
 
     assertThat(permissionRepository.effectivePermissions(user.getId()))
-        .hasSize(22)
+        .hasSize(23)
         .containsAll(OPERADOR_PERMISSIONS)
         .contains("sale.discount.apply", "audit.read", "report.read");
   }
@@ -82,11 +86,11 @@ class PermissionRepositoryTest extends IntegrationTestBase {
 
   @Test
   @TestTransaction
-  @DisplayName("permissionsOf devolve as 10 permissões do OPERADOR e falha para role inexistente")
+  @DisplayName("permissionsOf devolve as 11 permissões do OPERADOR e falha para role inexistente")
   void listsPermissionsOfRole() {
     Set<String> permissions = permissionRepository.permissionsOf("OPERADOR");
 
-    assertThat(permissions).containsExactlyInAnyOrderElementsOf(OPERADOR_PERMISSIONS).hasSize(10);
+    assertThat(permissions).containsExactlyInAnyOrderElementsOf(OPERADOR_PERMISSIONS).hasSize(11);
     assertThat(List.copyOf(permissions)).isSorted();
     assertThatThrownBy(() -> permissionRepository.permissionsOf("FANTASMA"))
         .isInstanceOf(NotFoundException.class)
@@ -160,9 +164,9 @@ class PermissionRepositoryTest extends IntegrationTestBase {
         .containsExactlyInAnyOrderElementsOf(OPERADOR_PERMISSIONS)
         .isSorted();
 
-    assertThat(roleOf(roles, "GERENTE").permissions()).hasSize(22).isSorted();
+    assertThat(roleOf(roles, "GERENTE").permissions()).hasSize(23).isSorted();
     assertThat(roleOf(roles, "ADMIN").permissions())
-        .hasSize(26)
+        .hasSize(27)
         .contains("role.write", "user.session.revoke")
         .isSorted();
   }
@@ -176,7 +180,7 @@ class PermissionRepositoryTest extends IntegrationTestBase {
             role -> {
               assertThat(role.name()).isEqualTo("Gerente");
               assertThat(role.system()).isTrue();
-              assertThat(role.permissions()).hasSize(22).isSorted();
+              assertThat(role.permissions()).hasSize(23).isSorted();
             });
     assertThat(permissionRepository.findRole("FANTASMA")).isEmpty();
   }

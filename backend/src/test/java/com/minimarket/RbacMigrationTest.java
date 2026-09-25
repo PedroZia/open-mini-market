@@ -12,6 +12,12 @@ import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+/**
+ * RBAC do banco contra PostgreSQL real (Dev Services): o catálogo de permissões e o mapa inicial
+ * role→permissão das migrations V3 (papéis) e V22 (cadastro rápido do PDV). O teste confere os
+ * conjuntos por inteiro, com {@code containsExactlyInAnyOrderElementsOf}: permissão nova na
+ * migration quebra aqui até ser semeada nas três roles.
+ */
 @QuarkusTest
 class RbacMigrationTest extends IntegrationTestBase {
 
@@ -22,6 +28,7 @@ class RbacMigrationTest extends IntegrationTestBase {
           "role.write",
           "product.read",
           "product.write",
+          "product.quick_create",
           "price.write",
           "category.write",
           "stock.read",
@@ -47,6 +54,7 @@ class RbacMigrationTest extends IntegrationTestBase {
   private static final Set<String> OPERADOR_PERMISSIONS =
       Set.of(
           "product.read",
+          "product.quick_create",
           "sale.create",
           "payment.add",
           "sale.complete",
@@ -60,6 +68,7 @@ class RbacMigrationTest extends IntegrationTestBase {
   private static final Set<String> GERENTE_PERMISSIONS =
       Set.of(
           "product.read",
+          "product.quick_create",
           "sale.create",
           "payment.add",
           "sale.complete",
@@ -83,7 +92,7 @@ class RbacMigrationTest extends IntegrationTestBase {
           "audit.read");
 
   @Test
-  @DisplayName("a migration V3 semeia as 3 roles de sistema e as 26 permissões do catálogo")
+  @DisplayName("as migrations V3/V22 semeiam as 3 roles de sistema e as 27 permissões do catálogo")
   void seedsRolesAndPermissionCatalog() throws Exception {
     assertThat(roleCodes())
         .as("roles de §4.5")
@@ -97,19 +106,19 @@ class RbacMigrationTest extends IntegrationTestBase {
   }
 
   @Test
-  @DisplayName("OPERADOR tem exatamente as 10 permissões do mapa inicial")
+  @DisplayName("OPERADOR tem exatamente as 11 permissões do mapa (V3 + cadastro rápido do V22)")
   void operadorHasInitialMap() throws Exception {
     assertThat(permissionsOf("OPERADOR")).containsExactlyInAnyOrderElementsOf(OPERADOR_PERMISSIONS);
   }
 
   @Test
-  @DisplayName("GERENTE tem as 22 permissões do mapa inicial (OPERADOR + 12)")
+  @DisplayName("GERENTE tem as 23 permissões do mapa (OPERADOR + 12)")
   void gerenteHasInitialMap() throws Exception {
     assertThat(permissionsOf("GERENTE")).containsExactlyInAnyOrderElementsOf(GERENTE_PERMISSIONS);
   }
 
   @Test
-  @DisplayName("ADMIN possui todas as 26 permissões do catálogo")
+  @DisplayName("ADMIN possui todas as 27 permissões do catálogo")
   void adminHasAllPermissions() throws Exception {
     assertThat(permissionsOf("ADMIN")).containsExactlyInAnyOrderElementsOf(PERMISSION_CATALOG);
   }

@@ -8,7 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Trava o catálogo do enum contra o de §4.5 — o mesmo que a migration V3 semeia e o {@code
+ * Trava o catálogo do enum contra o de §4.5 — o mesmo que as migrations V3/V22 semeiam e o {@code
  * RbacMigrationTest} confere no banco. Um código com erro de digitação aqui viraria 403 silencioso
  * em produção, sem nenhum outro teste reclamar.
  */
@@ -21,6 +21,7 @@ class PermissionTest {
           "role.write",
           "product.read",
           "product.write",
+          "product.quick_create",
           "price.write",
           "category.write",
           "stock.read",
@@ -44,7 +45,7 @@ class PermissionTest {
           "user.session.revoke");
 
   @Test
-  @DisplayName("o enum tem exatamente os 26 códigos de §4.5, sem duplicatas")
+  @DisplayName("o enum tem exatamente os 27 códigos de §4.5, sem duplicatas")
   void matchesCatalog() {
     assertThat(Arrays.stream(Permission.values()).map(Permission::code).toList())
         .containsExactlyInAnyOrderElementsOf(CATALOG);

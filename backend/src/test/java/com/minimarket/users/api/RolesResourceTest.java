@@ -27,10 +27,14 @@ class RolesResourceTest extends IntegrationTestBase {
   /** Índice de OPERADOR no GET: o catálogo é ordenado por código (ADMIN, GERENTE, OPERADOR). */
   private static final int OPERADOR_INDEX = 2;
 
-  /** As 10 permissões de OPERADOR no mapa de §4.5, o mesmo semeado por {@code V3__rbac.sql}. */
+  /**
+   * As 11 permissões de OPERADOR no mapa de §4.5 — as 10 do {@code V3__rbac.sql} mais o cadastro
+   * rápido do passo 1122 ({@code V22}).
+   */
   private static final Set<String> OPERADOR_PERMISSIONS =
       Set.of(
           "product.read",
+          "product.quick_create",
           "sale.create",
           "payment.add",
           "sale.complete",
@@ -56,12 +60,12 @@ class RolesResourceTest extends IntegrationTestBase {
         .isEqualTo("Acesso total ao sistema");
     assertThat(response.jsonPath().getBoolean("[0].system")).isTrue();
     assertThat(response.jsonPath().getList("[0].permissions", String.class))
-        .hasSize(26)
+        .hasSize(27)
         .contains("role.write", "user.session.revoke", "user.read")
         .isSorted();
 
     assertThat(response.jsonPath().getList("[1].permissions", String.class))
-        .hasSize(22)
+        .hasSize(23)
         .contains("sale.discount.apply", "sale.refund", "audit.read", "report.read")
         .isSorted();
 

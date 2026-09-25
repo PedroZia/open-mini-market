@@ -1052,7 +1052,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** os 6 critérios com evidência: (a) instalação/start no Windows do caixa; (b) frames em 80×24 e 120×40; (c) F-keys e rajada do leitor; (d) `testRender` sob o runner escolhido; (e) venda de 50 itens fluida; (f) plano de rollback. Critério falho ou ambíguo = **no-go**: não entra no main, a fase para e o dono decide (Anexo A).
   **Commit:** `chore(tui): avalia OpenTUI com spike no caixa` (branch/worktree; não entra no main sem go)
 
-- [ ] **1122 — Cadastro rápido — backend**
+- [x] **1122 — Cadastro rápido — backend**
   **Objetivo:** permitir que o PDV cadastre produto quando o código não existe (F-02). **Depende:** 406
   **Implementar:** `POST /api/v1/products/quick` (`name`, `barcode`, `price`, `unit`); permissão nova `product.quick_create` para OPERADOR (migration `V22` + seed RBAC); auditoria `PRODUCT_QUICK_CREATED` na mesma transação; rota nova na lista do `RouteSecurityTest`; `packages/api-client/src/schema.d.ts` regenerado do OpenAPI.
   **Testes/aceite:** RestAssured 201 (OPERADOR com a permissão), 403 (sem permissão), 409 `BARCODE_ALREADY_EXISTS`, 400 validações + auditoria registrada; `./mvnw verify` verde.

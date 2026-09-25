@@ -1170,6 +1170,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/products/quick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Quick Create */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["QuickCreateProductRequest"];
+                };
+            };
+            responses: {
+                /** @description Produto criado pelo cadastro rápido */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/products/{id}": {
         parameters: {
             query?: never;
@@ -2798,6 +2845,12 @@ export interface components {
             version?: number;
             createdAt?: components["schemas"]["Instant"];
             updatedAt?: components["schemas"]["Instant"];
+        };
+        QuickCreateProductRequest: {
+            name: string;
+            barcode: string;
+            price: number;
+            unit: string;
         };
         ReplaceRolePermissionsRequest: {
             permissions: string[];
