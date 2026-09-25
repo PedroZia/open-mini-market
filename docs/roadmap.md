@@ -1095,7 +1095,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** bipe adiciona item e abre a venda, digitação manual funciona, `3*` vira quantidade 3, produto não encontrado avisa, falha transitória guarda o bipe e o ENTER refaz; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.
   **Commit:** `feat(tui): vende por codigo na UI nova`
 
-- [ ] **1125c — Quantidade do item selecionado**
+- [x] **1125c — Quantidade do item selecionado**
   **Objetivo:** corrigir a quantidade sem sair da venda. **Depende:** 1125b
   **Implementar:** `+`/`-` no item selecionado com `PATCH` absoluto, passo 1 em `UN` e 0,1 em `KG` (BR-12), uma mutação por vez e `-` que zeraria vira aviso para usar o DEL (a remoção é o 1126).
   **Testes/aceite:** `+`/`-`, granularidade de KG, `-` no limite vira aviso, falha transitória refaz; `bun test src/opentui`, `tsc --noEmit` e `npm test` verdes.

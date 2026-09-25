@@ -9,20 +9,26 @@ import {
 import { useRenderer, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useRef, useState, type Dispatch } from "react"
 
-import type { CustomerOption, SendFailure, TerminalApi } from "../api/terminalApi"
+import type {
+  CustomerOption,
+  SaleItemMutationOutcome,
+  SendFailure,
+  TerminalApi,
+} from "../api/terminalApi"
 import { formatAmount } from "../core/money"
 import type { Action } from "../core/reducer"
-import { moveSelection, selectionIndex, touchedItem } from "../core/sale"
+import { moveSelection, nextQuantity, selectionIndex, touchedItem } from "../core/sale"
 import { createScanner, type Scanner, type ScannerEvent } from "../core/scanner"
 import type { SaleItemView, SaleOpenState, SaleView, ScanIntent } from "../core/state"
+import { keyEventToKeyName } from "./adapters/keys"
 import { useGlobalKeyboard } from "./keyboard"
 import { theme } from "./theme"
 
 /**
- * Tela de venda (passos 1108 a 1110, §11.3) montada na UI nova (1125a/1125b): o layout do operador —
+ * Tela de venda (passos 1108 a 1110, §11.3) montada na UI nova (1125a–1125c): o layout do operador —
  * cabeçalho com loja, caixa, operador, hora e cliente, lista dos itens com o selecionado destacado,
  * campo de leitura sempre visível, painel de totais e barra de status — e a operação do F-01: vender
- * pelo código, bipado ou digitado.
+ * pelo código, bipado ou digitado, e corrigir a quantidade pelo `+`/`-` (1125c).
  *
  * A tela não calcula nada (BR-12): subtotal, desconto e total saem de `state.sale`, como o servidor
  * mandou; antes do primeiro bipe a venda é `null` e a tela mostra os zeros de exibição com o convite
@@ -35,18 +41,26 @@ import { theme } from "./theme"
  *
  * Teclado (§11.3): a rajada do leitor é interceptada pelo **hook global** (1123b) antes de qualquer
  * campo focado e chega pelo `onBarcode` com o código **bruto** e a quantidade do multiplicador
- * (BR-14); desta tela, o `onKey` consome as setas e o ENTER do retry, e o resto segue o caminho
- * normal do hook. O campo de leitura é a leitura **manual**: o ENTER entrega o texto ao mesmo
- * `core/scanner` como uma rajada sintética (caracteres + `\r` no mesmo instante, com o `n*` valendo
- * como multiplicador), então digitar o código vale tanto quanto bipá-lo. O que a rajada do leitor
- * deixou no campo é limpo no bipe — o primeiro caractere chega antes de o `\r` fechar a leitura.
+ * (BR-14); desta tela, o `onKey` consome as setas, o `+`/`-` da quantidade e o ENTER do retry, e o
+ * resto segue o caminho normal do hook. O campo de leitura é a leitura **manual**: o ENTER entrega o
+ * texto ao mesmo `core/scanner` como uma rajada sintética (caracteres + `\r` no mesmo instante, com o
+ * `n*` valendo como multiplicador), então digitar o código vale tanto quanto bipá-lo. O que a rajada
+ * do leitor deixou no campo é limpo no bipe — o primeiro caractere chega antes de o `\r` fechar a
+ * leitura.
  *
  * O envio é uma fila local (`queueRef`) drenada pelo `pump`, um bipe por vez, na ordem em que
  * chegaram: sem venda criada, o primeiro bipe abre a venda (`POST /sales`) e o item entra em
  * seguida; sucesso vira `saleUpdated`, com a confirmação no rodapé e o bell; 404/422 avisam e o bipe
  * é consumido (`scanDismissed`); falha transitória mantém o bipe no topo e o ENTER refaz; bloqueante
- * vai para a tela de erro (`apiFailed`). A trava de mutação de item e o cadastro rápido do 404 são
- * dos passos seguintes (1125c/1126/1128).
+ * vai para a tela de erro (`apiFailed`).
+ *
+ * A quantidade do item selecionado (1125c) é uma mutação por vez (`mutatingRef`, com a mesma trava
+ * do envio): o `+`/`-` manda a quantidade **absoluta** no `PATCH` (nada de soma local — BR-12) e a
+ * resposta do servidor vira `saleUpdated`; `-` que zeraria não vai à API e avisa para usar o DEL
+ * (a remoção é o 1126). Enquanto há mutação ou bipe em voo o rodapé mostra "enviando…" e a tecla não
+ * empilha chamada; no `finally` a trava cai e o `pump` drena o bipe que chegou no meio — nenhum bipe
+ * se perde e a venda não é mexida por duas chamadas ao mesmo tempo. O DEL com confirmação, os modais
+ * e o cadastro rápido do 404 são dos passos seguintes (1126/1128).
  *
  * A lista é do `<scrollbox>` (F-04): em vez do `slice(-10)` da Ink — onde a seleção podia sair da
  * área visível e `+`/`-`/DEL agiam em item invisível —, a janela rola atrás do item selecionado e o
@@ -103,6 +117,15 @@ const SHORTCUT_ROWS = [
 /** Falha transitória do envio: o bipe fica na fila e o ENTER refaz (§11.3, retry manual). */
 const SEND_FAILURE_NOTICE = "falha ao enviar o bipe — ENTER tenta de novo"
 
+/** Falha transitória da mutação: o item fica como está e a mesma tecla refaz — não há fila de mutação. */
+const QUANTITY_FAILURE_NOTICE = "falha ao falar com o servidor — +/- tenta de novo"
+
+/** `-` que zeraria a quantidade não vai à API: quem remove o item é o DEL (com confirmação, 1126). */
+const REMOVE_HINT = "use DEL para remover o item"
+
+/** Item que sumiu entre a leitura e a ação (404 `SALE_ITEM_NOT_FOUND`): a venda segue como está. */
+const missingItem = (name: string) => `item já não está na venda: ${name}`
+
 /** Dica do campo de leitura: o bipe não precisa ser digitado, mas o campo é o caminho manual (F-01). */
 const MANUAL_PLACEHOLDER = "bipe ou digite o código e ENTER"
 
@@ -137,23 +160,29 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
   const queueRef = useRef<ScanIntent[]>([])
   /** Um envio por vez; quem já está enviando pega a fila atualizada, não empilha chamadas. */
   const sendingRef = useRef(false)
+  /** Mutação de item em voo (`PATCH`): trava `+`/`-` (e o DEL do 1126) e põe "enviando…" no rodapé. */
+  const mutatingRef = useRef(false)
   /** Estado da última render: o `pump` roda fora do render e lê o id da venda daqui. */
   const latest = useRef(state)
   /** Texto do campo de leitura manual: o bipe e o ENTER o limpam (o renderable também é zerado). */
   const [manual, setManual] = useState("")
   /** Desfecho da última operação no rodapé: verde no sucesso, amarelo no aviso, vermelho na falha. */
   const [feedback, setFeedback] = useState<Feedback | null>(null)
+  /** Espelho de `mutatingRef` para o rodapé: a trava em si é do ref (lida fora do render). */
+  const [mutating, setMutating] = useState(false)
 
   useEffect(() => {
     latest.current = state
   })
 
-  /** Teclado da tela no hook global: as setas (seleção) e o ENTER do retry; o bipe chega no `onBarcode`. */
+  /** Teclado da tela no hook global: setas (seleção), `+`/`-` (quantidade) e ENTER do retry; o bipe chega no `onBarcode`. */
   useGlobalKeyboard({ onBarcode: handleBarcode, onKey: handleKey })
 
   const sale = state.sale
   const items = sale?.items ?? []
   const selectedIndex = selectionIndex(selected, items.length)
+  /** Item que o `+`/`-` (1125c) e o DEL (1126) usam como alvo: fora da lista não há alvo. */
+  const selectedItem = selectedIndex < 0 ? null : (items[selectedIndex] ?? null)
   /**
    * Nome do cliente no cabeçalho: o vínculo real é o `customerId` que o servidor devolveu; o nome é
    * a anotação local que o shell capturou na busca (1112) — sem os dois casando, a venda é anônima
@@ -181,27 +210,31 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
   }, [renderer, top])
 
   /**
-   * Teclado da venda (1125a/1125b): as setas movem a seleção com clamp nas pontas — consumidas, não
-   * chegam ao campo de leitura — e o ENTER refaz o bipe que ficou na fila depois de uma falha
-   * transitória. O resto devolve `false` e segue o caminho normal do hook global: o texto do campo
-   * (a leitura manual) e a rajada do leitor.
+   * Teclado da venda (1125a–1125c): as setas movem a seleção com clamp nas pontas e o `+`/`-` mexem
+   * na quantidade do item selecionado — consumidos, não chegam ao campo de leitura —, e o ENTER
+   * refaz o bipe que ficou na fila depois de uma falha transitória. O resto devolve `false` e segue o
+   * caminho normal do hook global: o texto do campo (a leitura manual) e a rajada do leitor.
    */
   function handleKey(event: KeyEvent): boolean {
-    if (event.eventType === "release") {
-      return false
-    }
+    const keyName = keyEventToKeyName(event)
 
-    if (event.name === "up" || event.name === "down") {
+    if (keyName === "UP" || keyName === "DOWN") {
       if (items.length === 0) {
         return true // lista vazia: não há seleção a mover (o `moveSelection` do core devolveria -1)
       }
 
-      setSelected((current) => moveSelection(current, event.name === "up" ? -1 : 1, items.length))
+      setSelected((current) => moveSelection(current, keyName === "UP" ? -1 : 1, items.length))
+      return true
+    }
+
+    // quantidade do item selecionado (1125c): a tecla é do mapa, nunca vira leitura nem texto no campo
+    if (keyName === "PLUS" || keyName === "MINUS") {
+      void changeQuantity(keyName === "PLUS" ? 1 : -1)
       return true
     }
 
     // com uma falha de envio à vista, o ENTER refaz a chamada do bipe que ficou na fila
-    if (event.name === "return" && feedback?.kind === "failure") {
+    if (keyName === "ENTER" && feedback?.kind === "failure") {
       void pump()
       return true
     }
@@ -257,6 +290,83 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
     enqueue({ barcode: scan.barcode, quantity: scan.quantity })
   }
 
+  /** Uma mutação por vez: com o `PATCH` ou um bipe em voo, `+`/`-` (e o DEL do 1126) não disparam nada. */
+  function busy(): boolean {
+    return mutatingRef.current || sendingRef.current
+  }
+
+  /**
+   * `+`/`-` no item selecionado (1125c): a quantidade nova vai **absoluta** no `PATCH` (o `{itemId}`
+   * do contrato é o `productId`, decisão do 802/809b) e quem recalcula a linha e os totais é o
+   * servidor (BR-01, BR-12) — a resposta vira `saleUpdated`. O passo é por unidade do produto: 1 em
+   * `UN` e 0,1 em `KG` (`nextQuantity` do core — granularidade de entrada, não cálculo). `-` que
+   * levaria a ≤ 0 não chama a API: quem remove o item é o DEL (1126).
+   */
+  async function changeQuantity(direction: 1 | -1): Promise<void> {
+    const item = selectedItem
+
+    if (item === null || busy()) {
+      return
+    }
+
+    const quantity = nextQuantity(item.quantity, item.unit, direction)
+
+    if (quantity <= 0) {
+      setFeedback({ kind: "notice", text: REMOVE_HINT })
+      return
+    }
+
+    await runMutation(
+      (saleId) => api.changeSaleItemQuantity(saleId, item.productId, quantity),
+      item,
+      (sale) => describeQuantity(touchedItem(latest.current.sale, sale)),
+      QUANTITY_FAILURE_NOTICE,
+    )
+  }
+
+  /**
+   * Uma mutação de item por vez: marca o "enviando…", chama a API e traduz o desfecho — sucesso vira
+   * `saleUpdated` com a venda que o servidor recalculou, 404 avisa e a venda fica como está, o resto
+   * é falha (transitória avisa e a tecla refaz; bloqueante vai para a tela de erro). O `finally`
+   * libera a trava e drena a fila de bipes que chegou durante a chamada.
+   */
+  async function runMutation(
+    send: (saleId: string) => Promise<SaleItemMutationOutcome>,
+    item: SaleItemView,
+    success: (sale: SaleView) => string,
+    failureNotice: string,
+  ): Promise<void> {
+    const saleId = latest.current.sale?.id ?? null
+
+    if (saleId === null) {
+      return
+    }
+
+    mutatingRef.current = true
+    setMutating(true)
+
+    try {
+      const outcome = await send(saleId)
+
+      if (outcome.ok) {
+        dispatch({ type: "saleUpdated", sale: outcome.sale })
+        setFeedback({ kind: "success", text: success(outcome.sale) })
+        return
+      }
+
+      if (outcome.kind === "notFound") {
+        setFeedback({ kind: "notice", text: missingItem(item.name) })
+        return
+      }
+
+      sendFailed(outcome, failureNotice)
+    } finally {
+      mutatingRef.current = false
+      setMutating(false)
+      void pump() // bipes que chegaram durante a mutação esperam aqui
+    }
+  }
+
   /**
    * Envia a fila de bipes, um por vez, na ordem em que chegaram:
    *
@@ -273,8 +383,8 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
    *   idempotência/concorrência fica na tela e quem relê o estado é o shell (1117).
    */
   async function pump(): Promise<void> {
-    if (sendingRef.current) {
-      return // já tem envio em andamento: ele pega o que está na fila
+    if (sendingRef.current || mutatingRef.current) {
+      return // já tem envio (ou mutação) em andamento: ele pega o que está na fila
     }
 
     sendingRef.current = true
@@ -341,9 +451,9 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
   }
 
   /** Falha de envio: transitória segura a operação para o retry; bloqueante vai para a tela de erro. */
-  function sendFailed(failure: SendFailure): void {
+  function sendFailed(failure: SendFailure, notice = SEND_FAILURE_NOTICE): void {
     if (failure.kind === "retryable") {
-      setFeedback({ kind: "failure", text: SEND_FAILURE_NOTICE })
+      setFeedback({ kind: "failure", text: notice })
       return
     }
 
@@ -397,9 +507,18 @@ export function SaleScreen({ state, now, api, dispatch, customer, store, online 
       <text attributes={TextAttributes.BOLD} wrapMode="none">
         {`TOTAL: ${formatAmount(sale?.total ?? 0)}`}
       </text>
-      {/* rodapé de uma linha: o desfecho da última operação (bipe aceito, 404/422, falha de envio);
-          a linha fica reservada mesmo sem feedback para o quadro não dançar quando ele aparece */}
-      {feedback === null ? <text> </text> : <FeedbackRow feedback={feedback} />}
+      {/* rodapé de uma linha: "enviando…" com mutação em voo, senão o desfecho da última operação
+          (bipe aceito, 404/422, falha de envio); a linha fica reservada mesmo sem feedback para o
+          quadro não dançar quando ele aparece */}
+      {mutating ? (
+        <text fg={theme.muted} wrapMode="none">
+          enviando…
+        </text>
+      ) : feedback === null ? (
+        <text> </text>
+      ) : (
+        <FeedbackRow feedback={feedback} />
+      )}
       {/* barra de status base: conexão, caixa/operador/hora (1117) e, abaixo, os atalhos da operação */}
       <text fg={online ? theme.success : theme.danger} wrapMode="none">
         {`Conexão: ${online ? "conectado" : "SEM CONEXÃO"} · ${state.register.name} · ${state.operator.name} · ${formatTime(now)}`}
@@ -432,6 +551,15 @@ function describeAdded(item: SaleItemView | null): string {
   }
 
   return `adicionado: ${formatQuantity(item.quantity)} x ${item.name} — ${formatAmount(item.lineTotal)}`
+}
+
+/** Confirmação do `+`/`-` (1125c): a quantidade que o servidor aplicou, nunca a conta da TUI (BR-12). */
+function describeQuantity(item: SaleItemView | null): string {
+  if (item === null) {
+    return "quantidade alterada"
+  }
+
+  return `quantidade: ${formatQuantity(item.quantity)} x ${item.name} — ${formatAmount(item.lineTotal)}`
 }
 
 /**

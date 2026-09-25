@@ -9,6 +9,7 @@ import type {
   CustomerOption,
   SendFailure,
   SaleItemIntent,
+  SaleItemMutationOutcome,
   TerminalApi,
 } from "../api/terminalApi"
 import type { Action } from "../core/reducer"
@@ -18,9 +19,10 @@ import { SaleScreen } from "./SaleScreen"
 
 /**
  * Tela de venda: o layout do 1125a (o quadro em 80×24 e 120×40, a janela que segue a seleção, os
- * totais que vêm do `state.sale` — BR-12 — e a hora que entra por prop) e a operação do 1125b — o
+ * totais que vêm do `state.sale` — BR-12 — e a hora que entra por prop), a operação do 1125b — o
  * bipe do leitor, a leitura digitada no campo, o multiplicador `3*`, o 404/422 com aviso, a falha
- * transitória com retry no ENTER e o bell.
+ * transitória com retry no ENTER e o bell — e a quantidade do item selecionado do 1125c (`+`/`-`
+ * com `PATCH` absoluto, passo de `UN`/`KG`, uma mutação por vez e o aviso do DEL no limite).
  *
  * O harness tem o reducer real (1103) por trás da tela, como o shell, e a camada de API dublada com
  * `mock` (o runner do `src/opentui` é o `bun:test`): o que se testa é a operação da tela, nunca o
@@ -51,6 +53,26 @@ const ARROZ: SaleItemView = {
 
 /** O mesmo produto com o multiplicador `3*` aplicado pelo servidor. */
 const ARROZ_3: SaleItemView = { ...ARROZ, quantity: 3, lineTotal: 74.7 }
+
+/** Segundo produto, para provar que a fila do bipe andou depois da mutação (1125c). */
+const FEIJAO: SaleItemView = {
+  productId: "p2",
+  name: "Feijão 1kg",
+  unit: "UN",
+  quantity: 1,
+  unitPrice: 8.9,
+  lineTotal: 8.9,
+}
+
+/** Banana a granel (`KG`): o `+`/`-` nela anda de 0,1, não de 1 (1125c). */
+const BANANA: SaleItemView = {
+  productId: "p3",
+  name: "Banana prata",
+  unit: "KG",
+  quantity: 1.2,
+  unitPrice: 5.99,
+  lineTotal: 7.19,
+}
 
 /** Texto do campo de leitura vazio (o placeholder do `<input>`), como o operador o vê. */
 const MANUAL_PLACEHOLDER = "bipe ou digite o código e ENTER"
@@ -265,6 +287,13 @@ function itemLines(frame: string): string[] {
 async function pressArrow(setup: Setup, direction: "up" | "down"): Promise<void> {
   await act(async () => {
     setup.mockInput.pressArrow(direction)
+  })
+}
+
+/** `+`/`-` da quantidade (1125c): a tecla do mapa que o `onKey` da tela consome. */
+async function pressQuantity(setup: Setup, key: "+" | "-"): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressKey(key)
   })
 }
 
@@ -696,6 +725,230 @@ describe("SaleScreen: bipe e leitura manual (1125b)", () => {
       expect(bells()).toBe(1) // o aviso não toca o bell
     } finally {
       bell.mockRestore()
+      setup.renderer.destroy()
+    }
+  })
+})
+
+describe("SaleScreen: quantidade do item selecionado (1125c)", () => {
+  test("`+` manda o PATCH com a quantidade absoluta e aplica a venda do servidor", async () => {
+    const servidor = saleOf([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }])
+    const changeSaleItemQuantity = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: servidor }),
+    )
+    const actions: Action[] = []
+    const setup = await renderHarness(
+      apiStub({ changeSaleItemQuantity }),
+      stateWith(saleOf([ARROZ])),
+      (action) => actions.push(action),
+    )
+
+    try {
+      await pressQuantity(setup, "+")
+
+      const frame = await expectFrame(setup, "quantidade: 2 x Arroz 5kg — R$ 49,80")
+
+      expect(changeSaleItemQuantity).toHaveBeenCalledWith(SALE_ID, "p1", 2)
+      expect(actions).toContainEqual({ type: "saleUpdated", sale: servidor })
+      expect(frame).toContain("› 2 x Arroz 5kg — R$ 49,80")
+      expect(frame).toContain("TOTAL: R$ 49,80") // os totais são os da resposta, não a conta local
+      expectLayout(frame, 80, 24)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("`-` manda a quantidade menor, também absoluta, com passo 1 em UN e 0,1 em KG", async () => {
+    const unitStep = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({
+        ok: true,
+        sale: saleOf([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }]),
+      }),
+    )
+    const setupUnit = await renderHarness(
+      apiStub({ changeSaleItemQuantity: unitStep }),
+      stateWith(saleOf([ARROZ_3])),
+    )
+
+    try {
+      await pressQuantity(setupUnit, "-")
+
+      await expectFrame(setupUnit, "quantidade: 2 x Arroz 5kg — R$ 49,80")
+      expect(unitStep).toHaveBeenCalledWith(SALE_ID, "p1", 2)
+    } finally {
+      setupUnit.renderer.destroy()
+    }
+
+    // a granel o passo é 0,1 e a quantidade vai sem ruído de ponto flutuante (1,2 → 1,1)
+    const kgStep = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({
+        ok: true,
+        sale: saleOf([{ ...BANANA, quantity: 1.1, lineTotal: 6.59 }]),
+      }),
+    )
+    const setupKg = await renderHarness(
+      apiStub({ changeSaleItemQuantity: kgStep }),
+      stateWith(saleOf([BANANA])),
+    )
+
+    try {
+      await pressQuantity(setupKg, "-")
+
+      const frame = await expectFrame(setupKg, "quantidade: 1,100 x Banana prata — R$ 6,59")
+
+      expect(kgStep).toHaveBeenCalledWith(SALE_ID, "p3", 1.1)
+      expect(frame).toContain("› 1,100 x Banana prata — R$ 6,59")
+    } finally {
+      setupKg.renderer.destroy()
+    }
+  })
+
+  test("`-` que zeraria não chama a API: avisa para usar o DEL (a remoção é o 1126)", async () => {
+    const changeSaleItemQuantity = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: true, sale: saleOf([ARROZ]) }),
+    )
+    const setup = await renderHarness(
+      apiStub({ changeSaleItemQuantity }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressQuantity(setup, "-")
+
+      const frame = await expectFrame(setup, "use DEL para remover o item")
+
+      expect(changeSaleItemQuantity).not.toHaveBeenCalled()
+      expect(frame).toContain("› 1 x Arroz 5kg — R$ 24,90") // o item fica como estava
+      expect(frame).toContain("TOTAL: R$ 24,90")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("404 do item que sumiu avisa e mantém a venda como está", async () => {
+    const changeSaleItemQuantity = mock(
+      async (): Promise<SaleItemMutationOutcome> => ({ ok: false, kind: "notFound" }),
+    )
+    const setup = await renderHarness(
+      apiStub({ changeSaleItemQuantity }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressQuantity(setup, "+")
+
+      const frame = await expectFrame(setup, "item já não está na venda: Arroz 5kg")
+
+      expect(frame).toContain("› 1 x Arroz 5kg — R$ 24,90")
+      expect(frame).toContain("TOTAL: R$ 24,90")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("falha transitória avisa e a mesma tecla refaz", async () => {
+    let attempts = 0
+    const changeSaleItemQuantity = mock(async (): Promise<SaleItemMutationOutcome> => {
+      attempts += 1
+
+      return attempts === 1
+        ? sendFailure()
+        : { ok: true, sale: saleOf([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }]) }
+    })
+    const setup = await renderHarness(
+      apiStub({ changeSaleItemQuantity }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressQuantity(setup, "+")
+
+      const failed = await expectFrame(setup, "falha ao falar com o servidor — +/- tenta de novo")
+
+      expect(changeSaleItemQuantity).toHaveBeenCalledTimes(1) // sem retry automático: a tecla é sob demanda
+      expect(failed).toContain("› 1 x Arroz 5kg — R$ 24,90")
+
+      await pressQuantity(setup, "+")
+
+      await expectFrame(setup, "quantidade: 2 x Arroz 5kg — R$ 49,80")
+      expect(changeSaleItemQuantity).toHaveBeenCalledTimes(2)
+      expect(changeSaleItemQuantity).toHaveBeenLastCalledWith(SALE_ID, "p1", 2)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("uma mutação por vez: com o PATCH em voo a tecla é ignorada e o rodapé mostra enviando…", async () => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const changeSaleItemQuantity = mock(async (): Promise<SaleItemMutationOutcome> => {
+      await pending
+      return { ok: true, sale: saleOf([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }]) }
+    })
+    const setup = await renderHarness(
+      apiStub({ changeSaleItemQuantity }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressQuantity(setup, "+")
+      await expectFrame(setup, "enviando…")
+
+      await pressQuantity(setup, "+") // segunda tecla com a primeira ainda em voo
+      expect(changeSaleItemQuantity).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        release()
+      })
+
+      const frame = await expectFrame(setup, "quantidade: 2 x Arroz 5kg — R$ 49,80")
+
+      expect(changeSaleItemQuantity).toHaveBeenCalledTimes(1)
+      expect(frame).not.toContain("enviando…")
+      expect(frame).toContain("› 2 x Arroz 5kg — R$ 49,80")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("um bipe que chega durante a mutação é drenado no pump do finally", async () => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const changeSaleItemQuantity = mock(async (): Promise<SaleItemMutationOutcome> => {
+      await pending
+      return { ok: true, sale: saleOf([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }]) }
+    })
+    const addSaleItem = mock(
+      async (): Promise<AddSaleItemOutcome> => ({
+        ok: true,
+        sale: saleOf([{ ...ARROZ, quantity: 2, lineTotal: 49.8 }, FEIJAO]),
+      }),
+    )
+    const setup = await renderHarness(
+      apiStub({ changeSaleItemQuantity, addSaleItem }),
+      stateWith(saleOf([ARROZ])),
+    )
+
+    try {
+      await pressQuantity(setup, "+")
+      await expectFrame(setup, "enviando…")
+
+      await scanReader(setup, BARCODE) // o bipe chega com a mutação em voo
+      expect(addSaleItem).not.toHaveBeenCalled() // a fila espera a mutação terminar
+
+      await act(async () => {
+        release()
+      })
+
+      const frame = await expectFrame(setup, "adicionado: 1 x Feijão 1kg — R$ 8,90")
+
+      expect(addSaleItem).toHaveBeenCalledWith(SALE_ID, { barcode: BARCODE, quantity: 1 })
+      expect(frame).toContain("› 1 x Feijão 1kg — R$ 8,90")
+    } finally {
       setup.renderer.destroy()
     }
   })
