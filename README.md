@@ -20,6 +20,7 @@ O backend concentra **toda** a regra de negócio. TUI e Web são clientes finos.
 | [`docs/plano-tecnico.md`](docs/plano-tecnico.md) | arquitetura, módulos, domínio, banco, segurança, auditoria, API, TUI, React, testes, escalabilidade, decisões (ADR) e MVP |
 | [`docs/roadmap.md`](docs/roadmap.md) | roadmap granular (passos numerados com objetivo, dependências, testes, aceite e commit) |
 | [`AGENTS.md`](AGENTS.md) | regras de trabalho para o coding agent (um passo por vez, DoD, convenções) |
+| [`docs/como-trabalhamos.md`](docs/como-trabalhamos.md) | como as sessões de agente trabalham (mestre → fase → passo): orquestração, prompts de handoff e checklist para outro PC |
 | [`docs/referencias.md`](docs/referencias.md) | fontes de verdade por biblioteca — doc oficial a consultar antes de escrever API |
 | [`docs/leitores.md`](docs/leitores.md) | guia de configuração do leitor de código de barras (sufixo, prefixo, simbologias, etiqueta de balança) e do autoteste `F11` |
 | [`terminal/README.md`](terminal/README.md) | instalação e execução do PDV (TUI): Bun 1.3+ (Node 22+ para os testes), `MINIMARKET_API_URL` e atalho do Windows |
