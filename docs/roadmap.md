@@ -1243,11 +1243,17 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** troca de permissões na UI; sem `role.write` não edita.
   **Commit:** `feat(web): adiciona tela de papeis e permissoes`
 
-- [ ] **1209 — Vendas**
-  **Objetivo:** consultar e cancelar vendas. **Depende:** 1203, 813
-  **Implementar:** lista com filtros de período/status/operador, detalhe com itens, pagamentos e trilha de auditoria; cancelar venda aberta; (estorno é SHOULD, passo 1301).
-  **Testes/aceite:** filtros funcionam; detalhe mostra auditoria da venda.
-  **Commit:** `feat(web): adiciona consulta de vendas`
+- [ ] **1209a — Vendas: lista com filtros**
+  **Objetivo:** consultar vendas por período/status/operador. **Depende:** 1203, 813
+  **Implementar:** rota e item de navegação `Vendas` (só com `report.read`); lista `GET /api/v1/sales` com filtros `from`/`to` (ISO-8601 com offset), `status` (`OPEN|COMPLETED|CANCELLED`) e `operatorUserId` (picker apenas com `user.read`) e paginação no `DataTable` (a rota não tem `sort`); colunas número, situação, data, operador, itens e total. Passo dividido do 1209 (diff estimado acima de ~300 linhas); detalhe, trilha e cancelamento são o 1209b.
+  **Testes/aceite:** filtros funcionam e aparecem na query; menu só com `report.read`.
+  **Commit:** `feat(web): adiciona lista de vendas`
+
+- [ ] **1209b — Vendas: detalhe, auditoria e cancelamento**
+  **Objetivo:** investigar e cancelar venda aberta. **Depende:** 1209a
+  **Implementar:** detalhe `GET /api/v1/sales/{id}` com itens, pagamentos, desconto e situação; cancelamento com motivo (`POST /{id}/cancel`, `sale.cancel`) — só `OPEN`, 409 `SALE_ALREADY_COMPLETED` com mensagem clara; trilha de auditoria da venda (`GET /api/v1/audit-events?entityType=SALE&entityId={id}&sort=occurredat,asc&size=100`), visível só com `audit.read`.
+  **Testes/aceite:** filtros funcionam; detalhe mostra a auditoria da venda.
+  **Commit:** `feat(web): adiciona detalhe e cancelamento de venda`
 
 - [ ] **1210 — Caixa**
   **Objetivo:** supervisionar caixas. **Depende:** 1203, 909
