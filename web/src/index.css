@@ -1,1 +1,44 @@
 @import 'tailwindcss';
+
+/*
+ * Tokens de tema da retaguarda (Tailwind 4, `@theme`). Cor semântica mora só aqui: nenhum
+ * componente carrega valor literal. Tema claro fixo — o público é o operador no balcão, que é
+ * iluminado, e o 1201b não prevê alternância; quando houver tema escuro, muda só este bloco.
+ *
+ * Contraste WCAG AA conferido nos pares usados (valores do tema padrão do Tailwind):
+ * ink/surface 17,8:1 · ink-muted/surface 7,6:1 · nav-ink/nav 16,3:1 · texto do item ativo 10,4:1 ·
+ * foco/superfície clara 5,3:1 · foco/nav 16,3:1 · indicador do item ativo 6,8:1.
+ *
+ * `static` mantém as variáveis no CSS final mesmo quando só o `var()` do CSS base as consome.
+ */
+@theme static {
+  --color-canvas: oklch(96.8% 0.007 247.896); /* slate-100: fundo da aplicação */
+  --color-surface: oklch(100% 0 0); /* cabeçalho, cartões */
+  --color-ink: oklch(20.8% 0.042 265.755); /* slate-900: texto principal */
+  --color-ink-muted: oklch(44.6% 0.043 257.281); /* slate-600: texto secundário */
+  --color-line: oklch(92.9% 0.013 255.508); /* slate-200: bordas e divisores */
+  --color-brand: oklch(54.6% 0.245 262.881); /* blue-600: marca */
+  --color-nav: oklch(20.8% 0.042 265.755); /* slate-900: fundo da navegação */
+  --color-nav-ink: oklch(96.8% 0.007 247.896); /* slate-100: foco sobre a navegação */
+  --color-nav-ink-muted: oklch(86.9% 0.022 252.894); /* slate-300: item inativo */
+  --color-nav-active: oklch(37.9% 0.146 265.522); /* blue-900: item ativo */
+  --color-nav-indicator: oklch(70.7% 0.165 254.624); /* blue-400: marca do item ativo */
+  --color-focus: oklch(54.6% 0.245 262.881); /* blue-600: anel de foco */
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+  }
+
+  /* O operador navega por teclado: foco sempre visível, 2px com folga do elemento. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+}

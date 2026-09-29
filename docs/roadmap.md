@@ -1177,7 +1177,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** `npm test`, `npx tsc --noEmit`, `npm run lint` e `npm run build` verdes.
   **Commit:** `chore(web): cria projeto React com Vite`
 
-- [ ] **1201b — Layout base com navegação lateral**
+- [x] **1201b — Layout base com navegação lateral**
   **Objetivo:** casca visual única da retaguarda. **Depende:** 1201a
   **Implementar:** `app/layout` com navegação lateral (tema, cabeçalho, `Outlet`), rota inicial renderizando o layout e teste de renderização; decisões visuais com a skill `ui-ux-pro-max`.
   **Testes/aceite:** rota inicial renderiza o layout com a navegação lateral; gate do web verde.

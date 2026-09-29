@@ -76,6 +76,7 @@ Versões fixadas: **Quarkus 3.33 LTS · Java 25 · PostgreSQL 18 · OpenTUI 0.5 
 | Fonte | Quando consultar |
 | --- | --- |
 | [React](https://react.dev/) | hooks, estado, efeitos, padrões de componente |
+| [React Router 7](https://reactrouter.com/) | rotas de dados, `Outlet`/`NavLink`, layout e navegação |
 | [TanStack Query v5](https://tanstack.com/query/latest/docs/framework/react/overview) | queries, mutations, invalidação, `staleTime` |
 | [React Hook Form](https://react-hook-form.com/docs) | formulários, validação, integração com Zod |
 | [Zod](https://zod.dev/) | schemas de validação e inferência de tipos |
