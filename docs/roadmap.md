@@ -1249,7 +1249,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** filtros funcionam e aparecem na query; menu só com `report.read`.
   **Commit:** `feat(web): adiciona lista de vendas`
 
-- [ ] **1209b — Vendas: detalhe, auditoria e cancelamento**
+- [x] **1209b — Vendas: detalhe, auditoria e cancelamento**
   **Objetivo:** investigar e cancelar venda aberta. **Depende:** 1209a
   **Implementar:** detalhe `GET /api/v1/sales/{id}` com itens, pagamentos, desconto e situação; cancelamento com motivo (`POST /{id}/cancel`, `sale.cancel`) — só `OPEN`, 409 `SALE_ALREADY_COMPLETED` com mensagem clara; trilha de auditoria da venda (`GET /api/v1/audit-events?entityType=SALE&entityId={id}&sort=occurredat,asc&size=100`), visível só com `audit.read`.
   **Testes/aceite:** filtros funcionam; detalhe mostra a auditoria da venda.

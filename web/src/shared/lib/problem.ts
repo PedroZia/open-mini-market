@@ -19,6 +19,8 @@ const CODE_MESSAGES: Record<string, string> = {
   CATEGORY_NAME_ALREADY_EXISTS: 'Já existe uma categoria com este nome.',
   INSUFFICIENT_STOCK:
     'Estoque insuficiente: a operação deixaria o saldo negativo e a loja não permite.',
+  // O `detail` do servidor carrega o id da venda e o instante; o operador lê o recado, não o rastro.
+  SALE_ALREADY_COMPLETED: 'Esta venda já foi concluída e não pode ser cancelada.',
   IDEMPOTENCY_KEY_REUSED: 'Esta operação já foi registrada antes. Atualize a lista.',
   IDEMPOTENCY_KEY_REQUIRED: 'A operação não pôde ser repetida com segurança. Tente de novo.',
   SESSION_EXPIRED: 'A sessão expirou. Entre de novo.',
@@ -102,4 +104,12 @@ export function isConcurrentModification(error: unknown): boolean {
  */
 export function isConflict(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'CONFLICT';
+}
+
+/**
+ * `true` para 409 `SALE_ALREADY_COMPLETED`: outro operador concluiu a venda antes do cancelamento.
+ * Quem chama relê o detalhe — a situação na tela é que estava velha.
+ */
+export function isSaleAlreadyCompleted(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'SALE_ALREADY_COMPLETED';
 }

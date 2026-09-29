@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import { AuthContext, type AuthContextValue } from '../../auth/AuthContext';
 import { SalesPage } from './SalesPage';
@@ -198,14 +199,19 @@ function sessionWith(permissions: string[]): AuthContextValue {
   };
 }
 
-/** Monta a página com sessão e cache próprios; `retry` desligado para o 403 não repetir. */
+/**
+ * Monta a página com sessão e cache próprios; `retry` desligado para o 403 não repetir. O
+ * `MemoryRouter` existe pelo link do número para o detalhe (1209b) — o resto da tela não navega.
+ */
 function renderPage(permissions: string[] = ['report.read', 'user.read']) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
     <QueryClientProvider client={client}>
       <AuthContext.Provider value={sessionWith(permissions)}>
-        <SalesPage />
+        <MemoryRouter>
+          <SalesPage />
+        </MemoryRouter>
       </AuthContext.Provider>
     </QueryClientProvider>,
   );
@@ -250,6 +256,12 @@ describe('SalesPage — lista', () => {
 
     // Cancelada é situação, não cor: o texto do selo diz o que aconteceu.
     expect(within(rowOf(10)).getByRole('cell', { name: 'Cancelada' })).toBeInTheDocument();
+
+    // O número leva ao detalhe (1209b): é o caminho da lista para a trilha e o cancelamento.
+    expect(within(rowOf(12)).getByRole('link', { name: '12' })).toHaveAttribute(
+      'href',
+      '/sales/s1',
+    );
 
     // O servidor não tem `sort`: nenhum cabeçalho é botão de ordenação.
     expect(screen.queryByRole('button', { name: /^Ordenar por/ })).toBeNull();

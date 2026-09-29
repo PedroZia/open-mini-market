@@ -8,6 +8,17 @@ export type PageResponseSaleSummaryResponse =
 export type SaleStatus = components['schemas']['SaleStatus'];
 export type UserResponse = components['schemas']['UserResponse'];
 export type PageResponseUserResponse = components['schemas']['PageResponseUserResponse'];
+export type SaleDetailResponse = components['schemas']['SaleDetailResponse'];
+export type SaleItemResponse = components['schemas']['SaleItemResponse'];
+export type PaymentResponse = components['schemas']['PaymentResponse'];
+export type PaymentMethod = components['schemas']['PaymentMethod'];
+export type PaymentStatus = components['schemas']['PaymentStatus'];
+export type DiscountType = components['schemas']['DiscountType'];
+export type SaleCancelRequest = components['schemas']['SaleCancelRequest'];
+export type AuditEventResponse = components['schemas']['AuditEventResponse'];
+export type PageResponseAuditEventResponse =
+  components['schemas']['PageResponseAuditEventResponse'];
+export type OperationSource = components['schemas']['OperationSource'];
 
 /**
  * Filtros de `GET /sales` (passo 813), como o contrato os aceita: `from` inclusivo e `to` exclusivo,
@@ -31,9 +42,13 @@ export interface SaleQuery {
 
 const PATH = '/api/v1/sales';
 const USERS_PATH = '/api/v1/users';
+const AUDIT_EVENTS_PATH = '/api/v1/audit-events';
 
 /** Teto de `size` do servidor (§9.1): o picker de operador não pagina, pede o máximo de uma vez. */
 const OPERATOR_PAGE_SIZE = 100;
+
+/** Teto de `size` do servidor (§9.1): a trilha de uma venda cabe numa página só. */
+const AUDIT_PAGE_SIZE = 100;
 
 /**
  * Histórico paginado (`GET /sales`, exige `report.read` no servidor — é visão de loja, não do caixa,
@@ -70,4 +85,41 @@ export function listSales(query: SaleQuery = {}): Promise<PageResponseSaleSummar
  */
 export function listOperators(): Promise<PageResponseUserResponse> {
   return api.get<PageResponseUserResponse>(`${USERS_PATH}?size=${OPERATOR_PAGE_SIZE}`);
+}
+
+/**
+ * Detalhe da venda (`GET /sales/{id}`, passo 812): cabeçalho, itens, desconto e pagamentos. A rota
+ * é `@Authenticated` — a sessão lê a venda do seu caixa e quem tem `report.read` lê a de qualquer
+ * caixa; venda de outro caixa sem a permissão é 403 e id desconhecido é 404 `SALE_NOT_FOUND`.
+ */
+export function getSale(saleId: string): Promise<SaleDetailResponse> {
+  return api.get<SaleDetailResponse>(`${PATH}/${saleId}`);
+}
+
+/**
+ * Cancela a venda aberta (`POST /sales/{id}/cancel`, passo 813) com o motivo obrigatório e devolve
+ * a venda como ela ficou. Exige `sale.cancel`: OPERADOR opera a venda, mas não a cancela. Operação
+ * de dinheiro idempotente por contrato (§8) — o client manda a `Idempotency-Key` sozinho; venda já
+ * concluída é 409 `SALE_ALREADY_COMPLETED` e repetir o cancelamento da cancelada é no-op 200.
+ */
+export function cancelSale(
+  saleId: string,
+  body: SaleCancelRequest,
+): Promise<SaleDetailResponse> {
+  return api.post<SaleDetailResponse>(`${PATH}/${saleId}/cancel`, body);
+}
+
+/**
+ * Trilha de auditoria da venda (`GET /audit-events`, passo 1001) — o detalhe não traz a auditoria
+ * embutida. Fixa o alvo (`entityType=SALE`, `entityId`) e pede a linha do tempo em ordem crescente,
+ * que é como a investigação se lê. Exige `audit.read`: a tela só chama com a permissão na sessão.
+ */
+export function listSaleAuditEvents(saleId: string): Promise<PageResponseAuditEventResponse> {
+  const params = new URLSearchParams({
+    entityType: 'SALE',
+    entityId: saleId,
+    sort: 'occurredat,asc',
+    size: String(AUDIT_PAGE_SIZE),
+  });
+  return api.get<PageResponseAuditEventResponse>(`${AUDIT_EVENTS_PATH}?${params.toString()}`);
 }

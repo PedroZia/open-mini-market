@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { formatDateTime, localDateTimeToInstant } from '../../../shared/lib/datetime';
 import { formatMoney } from '../../../shared/lib/money';
 import { normalizePage } from '../../../shared/lib/page';
@@ -24,8 +25,7 @@ import { useOperators, useSales } from '../hooks/useSales';
  * operador lê `GET /users` e só existe com `user.read` — sem a permissão, o filtro não aparece e a
  * coluna mostra o id curto do operador; nome de usuário é dado que a tela não tem e não inventa.
  *
- * O detalhe, a trilha de auditoria e o cancelamento são o 1209b: aqui nenhuma linha leva a lugar
- * nenhum.
+ * O número da venda leva ao detalhe (`/sales/{id}`, 1209b), onde ficam a trilha e o cancelamento.
  */
 
 /** Tamanho de página da lista, o mesmo default do servidor (§9.1). */
@@ -128,7 +128,21 @@ export function SalesPage() {
     {
       id: 'number',
       header: 'Número',
-      render: (sale) => (sale.number === undefined ? '—' : String(sale.number)),
+      // O número é o caminho para o detalhe (1209b): sem `id` na resposta não há rota a seguir.
+      render: (sale) => {
+        const number = sale.number === undefined ? '—' : String(sale.number);
+        if (sale.id === undefined) {
+          return number;
+        }
+        return (
+          <Link
+            to={`/sales/${sale.id}`}
+            className="font-medium text-brand underline underline-offset-2 transition-colors duration-150 ease-out hover:text-ink motion-reduce:transition-none"
+          >
+            {number}
+          </Link>
+        );
+      },
     },
     {
       id: 'status',

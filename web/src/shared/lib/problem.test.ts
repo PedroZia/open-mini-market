@@ -6,6 +6,7 @@ import {
   isConcurrentModification,
   isConflict,
   isForbidden,
+  isSaleAlreadyCompleted,
   isUnauthorized,
 } from './problem';
 
@@ -121,5 +122,28 @@ describe('isConflict', () => {
     expect(isConflict(new ApiError(409, { code: 'CONFLICT' }))).toBe(true);
     expect(isConflict(new ApiError(409, { code: 'CONCURRENT_MODIFICATION' }))).toBe(false);
     expect(isConflict(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('isSaleAlreadyCompleted', () => {
+  it('reconhece o 409 da venda concluída e não confunde com os outros conflitos', () => {
+    expect(isSaleAlreadyCompleted(new ApiError(409, { code: 'SALE_ALREADY_COMPLETED' }))).toBe(
+      true,
+    );
+    expect(isSaleAlreadyCompleted(new ApiError(409, { code: 'CONFLICT' }))).toBe(false);
+    expect(isSaleAlreadyCompleted(new Error('boom'))).toBe(false);
+  });
+
+  it('não vaza o id e o instante do detalhe técnico do servidor', () => {
+    const error = new ApiError(409, {
+      code: 'SALE_ALREADY_COMPLETED',
+      detail: 'venda 0198f3a2-4c1d-7a2e-9b3f-000000000001 já foi concluída em 2026-09-28T23:00:00Z',
+    });
+
+    const message = errorMessage(error);
+
+    expect(message).toMatch(/já foi concluída/i);
+    expect(message).not.toContain('0198f3a2');
+    expect(message).not.toContain('2026-09-28T23:00:00Z');
   });
 });
