@@ -1219,7 +1219,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** lista filtra/pagina e o filtro de estoque baixo envia `lowStock=true`; item abre o detalhe.
   **Commit:** `feat(web): adiciona lista de saldos de estoque`
 
-- [ ] **1206b — Estoque: movimentos, ajuste e entrada**
+- [x] **1206b — Estoque: movimentos, ajuste e entrada**
   **Objetivo:** corrigir saldo com rastro. **Depende:** 1206a
   **Implementar:** detalhe com os movimentos embutidos de `GET /stock/{productId}` (tipo, delta, saldo após, motivo, data); modal de ajuste (`POST /stock/{productId}/adjustments` com `quantityDelta` e `reason`) e de entrada (`POST /{productId}/receipts` com `quantity`, `unitCost?`, `reason?`); `stock.adjust`/`stock.receive` escondem as ações; `422 INSUFFICIENT_STOCK` com mensagem clara; invalidar saldo/detalhe após mutação.
   **Testes/aceite:** ajuste reflete no saldo e no histórico; permissão respeitada.

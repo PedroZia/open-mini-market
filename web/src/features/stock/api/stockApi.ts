@@ -5,6 +5,12 @@ import { api } from '../../../api/client';
 export type StockItemResponse = components['schemas']['StockItemResponse'];
 export type StockDetailResponse = components['schemas']['StockDetailResponse'];
 export type PageResponseStockItemResponse = components['schemas']['PageResponseStockItemResponse'];
+export type StockMovementResponse = components['schemas']['StockMovementResponse'];
+export type StockMovementType = components['schemas']['StockMovementType'];
+export type StockAdjustmentRequest = components['schemas']['StockAdjustmentRequest'];
+export type StockAdjustmentResponse = components['schemas']['StockAdjustmentResponse'];
+export type StockReceiptRequest = components['schemas']['StockReceiptRequest'];
+export type StockReceiptResponse = components['schemas']['StockReceiptResponse'];
 
 /**
  * Busca, filtro e paginação de `GET /stock` (passo 704), como o contrato os aceita (§9.3). O
@@ -51,4 +57,30 @@ export function listStock(query: StockQuery = {}): Promise<PageResponseStockItem
  */
 export function getStock(productId: string): Promise<StockDetailResponse> {
   return api.get<StockDetailResponse>(`${PATH}/${productId}`);
+}
+
+/**
+ * Ajuste manual de estoque (`POST /stock/{productId}/adjustments`, passo 705): corrige a
+ * divergência do saldo com rastro. O `quantityDelta` é assinado — positivo soma, negativo reduz —
+ * e o motivo é obrigatório porque o ajuste é auditado. Operação idempotente por contrato (§8): o
+ * client manda a `Idempotency-Key` sozinho e o recurso não exige `If-Match`.
+ */
+export function adjustStock(
+  productId: string,
+  body: StockAdjustmentRequest,
+): Promise<StockAdjustmentResponse> {
+  return api.post<StockAdjustmentResponse>(`${PATH}/${productId}/adjustments`, body);
+}
+
+/**
+ * Entrada de mercadoria (`POST /stock/{productId}/receipts`, passo 706): repõe o saldo como
+ * `PURCHASE_IN` e, quando o custo unitário vem informado, atualiza o custo do produto. `unitCost` e
+ * `reason` são opcionais; a quantidade é validada pelo servidor de novo. Idempotente pelo mesmo
+ * contrato do ajuste.
+ */
+export function receiveStock(
+  productId: string,
+  body: StockReceiptRequest,
+): Promise<StockReceiptResponse> {
+  return api.post<StockReceiptResponse>(`${PATH}/${productId}/receipts`, body);
 }

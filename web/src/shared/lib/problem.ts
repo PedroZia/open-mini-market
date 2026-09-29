@@ -17,6 +17,8 @@ const CODE_MESSAGES: Record<string, string> = {
   CONCURRENT_MODIFICATION: 'Alguém alterou este registro antes de você. Recarregue e tente de novo.',
   CONFLICT: 'A operação não cabe no estado atual do registro. Recarregue e tente de novo.',
   CATEGORY_NAME_ALREADY_EXISTS: 'Já existe uma categoria com este nome.',
+  INSUFFICIENT_STOCK:
+    'Estoque insuficiente: a operação deixaria o saldo negativo e a loja não permite.',
   IDEMPOTENCY_KEY_REUSED: 'Esta operação já foi registrada antes. Atualize a lista.',
   IDEMPOTENCY_KEY_REQUIRED: 'A operação não pôde ser repetida com segurança. Tente de novo.',
   SESSION_EXPIRED: 'A sessão expirou. Entre de novo.',

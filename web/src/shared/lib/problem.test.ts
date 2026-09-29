@@ -28,11 +28,23 @@ describe('errorMessage', () => {
 
   it('sem tradução própria, mostra o detail escrito para humano', () => {
     const error = new ApiError(422, {
-      code: 'INSUFFICIENT_STOCK',
-      detail: 'Estoque insuficiente para 3 un. de Arroz.',
+      code: 'PRODUCT_INACTIVE',
+      detail: 'O produto está desativado.',
     });
 
-    expect(errorMessage(error)).toBe('Estoque insuficiente para 3 un. de Arroz.');
+    expect(errorMessage(error)).toBe('O produto está desativado.');
+  });
+
+  it('estoque insuficiente vira recado claro, sem vazar o detalhe técnico do servidor', () => {
+    const error = new ApiError(422, {
+      code: 'INSUFFICIENT_STOCK',
+      detail: 'produto 019... ficaria com saldo -1.5 (delta -3) e a loja não permite estoque negativo',
+    });
+
+    const message = errorMessage(error);
+
+    expect(message).toMatch(/estoque insuficiente/i);
+    expect(message).not.toContain('019...');
   });
 
   it('não vaza detalhe técnico de 5xx', () => {

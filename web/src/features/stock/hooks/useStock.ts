@@ -1,5 +1,14 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { getStock, listStock, type StockQuery } from '../api/stockApi';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { showToast } from '../../../shared/ui/Toast';
+import {
+  adjustStock,
+  getStock,
+  listStock,
+  receiveStock,
+  type StockAdjustmentRequest,
+  type StockQuery,
+  type StockReceiptRequest,
+} from '../api/stockApi';
 
 /**
  * Prefixo do cache de estoque. As mutações do 1206b invalidam por ele, alcançando lista **e**
@@ -36,4 +45,42 @@ export function useStockDetail(productId: string) {
     queryFn: () => getStock(productId),
     staleTime: 0,
   });
+}
+
+/**
+ * Ajuste (705) e entrada (706) compartilham o ciclo da escrita (1206b): o erro fica no modal, que
+ * o mostra no banner — o toast global só o repetiria — e o sucesso invalida o prefixo `stock`: o
+ * saldo e o histórico saem do servidor, nunca do que o cliente montou (BR-12).
+ */
+function useStockOperationMutation<TVariables, TResult>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
+  successMessage: string,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: stockQueryKey });
+      showToast(successMessage, 'success');
+    },
+  });
+}
+
+/** Ajuste manual com motivo (`stock.adjust` no servidor); delta zero e motivo vazio são 400. */
+export function useAdjustStock() {
+  return useStockOperationMutation(
+    (variables: { productId: string; body: StockAdjustmentRequest }) =>
+      adjustStock(variables.productId, variables.body),
+    'Ajuste registrado.',
+  );
+}
+
+/** Entrada de mercadoria (`stock.receive` no servidor); quantidade não positiva é 400. */
+export function useReceiveStock() {
+  return useStockOperationMutation(
+    (variables: { productId: string; body: StockReceiptRequest }) =>
+      receiveStock(variables.productId, variables.body),
+    'Entrada registrada.',
+  );
 }
