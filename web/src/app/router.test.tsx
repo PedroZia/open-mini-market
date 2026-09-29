@@ -417,6 +417,63 @@ describe('rota inicial', () => {
     expect(screen.getByRole('link', { name: 'Vendas' })).toHaveAttribute('aria-current', 'page');
     expect(router.state.location.pathname).toBe('/sales');
   });
+
+  it('navega para Auditoria pelo item lateral e renderiza a consulta (1211a)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith('/api/v1/audit-events')) {
+          return jsonFetchResponse({
+            items: [
+              {
+                id: 2,
+                occurredAt: '2026-09-28T22:21:54Z',
+                action: 'SALE_COMPLETED',
+                entityType: 'SALE',
+                entityId: '0198f9c4-5b6d-7e8f-9a0b-000000000010',
+                actorUsername: 'bruno',
+                source: 'TUI',
+                reason: 'Fechamento do turno',
+              },
+            ],
+            page: 0,
+            size: 20,
+            totalItems: 1,
+            totalPages: 1,
+          });
+        }
+        return jsonFetchResponse({
+          user: { id: 'u1', username: 'ana', displayName: 'Ana' },
+          roles: [],
+          permissions: ['audit.read'],
+        });
+      }),
+    );
+
+    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('heading', { name: 'Início' });
+    // O item só aparece com `audit.read` na sessão (GERENTE/ADMIN).
+    fireEvent.click(screen.getByRole('link', { name: 'Auditoria' }));
+
+    expect(await screen.findByRole('heading', { name: 'Auditoria' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: 'SALE_COMPLETED' })).toBeInTheDocument();
+
+    // Rota real (sem link morto): o item fica ativo e a URL muda para /audit.
+    expect(screen.getByRole('link', { name: 'Auditoria' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(router.state.location.pathname).toBe('/audit');
+  });
 });
 
 /** Resposta mínima do `fetch` para as rotas do teste — mesmo formato que o client consome. */

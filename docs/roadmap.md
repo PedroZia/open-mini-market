@@ -1267,7 +1267,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** ações exigem a permissão correta; resumo reflete o movimento.
   **Commit:** `feat(web): adiciona sangria, suprimento e fechamento de caixa`
 
-- [ ] **1211a — Auditoria: consulta com filtros**
+- [x] **1211a — Auditoria: consulta com filtros**
   **Objetivo:** investigar pela UI. **Depende:** 1203, 1002
   **Implementar:** rota e item de navegação `Auditoria` (`audit.read`); consulta `GET /api/v1/audit-events` com filtros combináveis `entityType`/`entityId`/`actorUserId`/`action`/`cashSessionId`/`from`/`to` (ISO-8601 com offset; `from` inclusivo, `to` exclusivo), ordenação só `occurredat` (default desc) e paginação no `DataTable`; colunas instante, ação, autor, entidade, origem e motivo; OPERADOR não vê o menu e 403 → estado sem permissão. Passo dividido do 1211 (diff estimado acima de ~300 linhas); a visualização de `details` e o histórico por entidade são o 1211b.
   **Testes/aceite:** filtros combinados; OPERADOR não acessa.

@@ -5,10 +5,11 @@ import { AuthContext, type AuthContextValue } from '../../features/auth/AuthCont
 import { SidebarNav } from './SidebarNav';
 
 /**
- * Navegação com permissão (1208a/1208b/1209a): "Usuários" e "Papéis" só existem para quem tem
- * `user.read` na sessão e "Vendas" só com `report.read` — é assim que GERENTE e OPERADOR não veem a
- * administração de acessos e o OPERADOR não vê o histórico. Sem permissão declarada, o item continua
- * aparecendo para todo mundo. O servidor é quem barra de verdade (403 na rota).
+ * Navegação com permissão (1208a/1208b/1209a/1211a): "Usuários" e "Papéis" só existem para quem tem
+ * `user.read` na sessão, "Vendas" só com `report.read` e "Auditoria" só com `audit.read` — é assim
+ * que GERENTE e OPERADOR não veem a administração de acessos e o OPERADOR não vê o histórico nem o
+ * log. Sem permissão declarada, o item continua aparecendo para todo mundo. O servidor é quem barra
+ * de verdade (403 na rota).
  */
 
 function sessionWith(permissions: string[]): AuthContextValue {
@@ -85,5 +86,17 @@ describe('SidebarNav — itens com permissão', () => {
     renderNav(['product.read', 'report.read']);
 
     expect(screen.queryByRole('link', { name: 'Caixa' })).toBeNull();
+  });
+
+  it('mostra Auditoria para quem tem audit.read (GERENTE/ADMIN)', () => {
+    renderNav(['audit.read', 'report.read']);
+
+    expect(screen.getByRole('link', { name: 'Auditoria' })).toHaveAttribute('href', '/audit');
+  });
+
+  it('esconde Auditoria do OPERADOR sem audit.read', () => {
+    renderNav(['sale.create', 'product.read', 'cash.read']);
+
+    expect(screen.queryByRole('link', { name: 'Auditoria' })).toBeNull();
   });
 });

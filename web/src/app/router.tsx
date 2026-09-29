@@ -1,4 +1,5 @@
 import { createBrowserRouter, type RouteObject } from 'react-router';
+import { AuditPage } from '../features/audit/pages/AuditPage';
 import { AuthProvider } from '../features/auth/AuthProvider';
 import { RequireAuth } from '../features/auth/RequireAuth';
 import { LoginPage } from '../features/auth/pages/LoginPage';
@@ -45,6 +46,7 @@ export const routes: RouteObject[] = [
               { path: 'customers', element: <CustomersPage /> },
               { path: 'sales', element: <SalesPage /> },
               { path: 'sales/:id', element: <SaleDetailPage /> },
+              { path: 'audit', element: <AuditPage /> },
               { path: 'cash-registers', element: <CashRegistersPage /> },
               { path: 'cash-registers/:id', element: <CashRegisterDetailPage /> },
               { path: 'cash-sessions/:id', element: <CashSessionDetailPage /> },
