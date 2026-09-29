@@ -173,6 +173,53 @@ describe('rota inicial', () => {
     expect(screen.getByRole('link', { name: 'Estoque' })).toHaveAttribute('aria-current', 'page');
     expect(router.state.location.pathname).toBe('/stock');
   });
+
+  it('navega para Clientes pelo item lateral e renderiza a lista (1207)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith('/api/v1/customers')) {
+          return jsonFetchResponse({
+            items: [
+              { id: 'cli1', name: 'Ana Souza', taxId: '52998224725', phone: '11999990000' },
+            ],
+            page: 0,
+            size: 20,
+            totalItems: 1,
+            totalPages: 1,
+          });
+        }
+        return jsonFetchResponse({
+          user: { id: 'u1', username: 'ana', displayName: 'Ana' },
+          roles: [],
+          permissions: ['customer.read'],
+        });
+      }),
+    );
+
+    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('heading', { name: 'Início' });
+    fireEvent.click(screen.getByRole('link', { name: 'Clientes' }));
+
+    expect(await screen.findByRole('heading', { name: 'Clientes' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: 'Ana Souza' })).toBeInTheDocument();
+
+    // Rota real (sem link morto): o item fica ativo e a URL muda para /customers.
+    expect(screen.getByRole('link', { name: 'Clientes' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(router.state.location.pathname).toBe('/customers');
+  });
 });
 
 /** Resposta mínima do `fetch` para as rotas do teste — mesmo formato que o client consome. */

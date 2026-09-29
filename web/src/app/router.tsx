@@ -3,6 +3,7 @@ import { AuthProvider } from '../features/auth/AuthProvider';
 import { RequireAuth } from '../features/auth/RequireAuth';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { CategoriesPage } from '../features/categories/pages/CategoriesPage';
+import { CustomersPage } from '../features/customers/pages/CustomersPage';
 import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
 import { ProductsPage } from '../features/products/pages/ProductsPage';
 import { StockDetailPage } from '../features/stock/pages/StockDetailPage';
@@ -34,6 +35,7 @@ export const routes: RouteObject[] = [
               { path: 'stock', element: <StockListPage /> },
               { path: 'stock/:productId', element: <StockDetailPage /> },
               { path: 'categories', element: <CategoriesPage /> },
+              { path: 'customers', element: <CustomersPage /> },
             ],
           },
         ],

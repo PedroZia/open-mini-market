@@ -9,6 +9,7 @@ const navigationItems = [
   { to: '/products', label: 'Produtos' },
   { to: '/stock', label: 'Estoque' },
   { to: '/categories', label: 'Categorias' },
+  { to: '/customers', label: 'Clientes' },
 ] as const;
 
 const itemClassName =

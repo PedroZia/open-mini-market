@@ -1225,7 +1225,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** ajuste reflete no saldo e no histórico; permissão respeitada.
   **Commit:** `feat(web): adiciona movimentos e ajustes de estoque`
 
-- [ ] **1207 — Clientes**
+- [x] **1207 — Clientes**
   **Objetivo:** manter clientes. **Depende:** 1203, 502
   **Implementar:** lista com busca, formulário, desativar.
   **Testes/aceite:** CRUD na UI; validação de CPF.
