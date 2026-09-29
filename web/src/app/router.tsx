@@ -5,6 +5,8 @@ import { LoginPage } from '../features/auth/pages/LoginPage';
 import { CategoriesPage } from '../features/categories/pages/CategoriesPage';
 import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
 import { ProductsPage } from '../features/products/pages/ProductsPage';
+import { StockDetailPage } from '../features/stock/pages/StockDetailPage';
+import { StockListPage } from '../features/stock/pages/StockListPage';
 import { AppLayout } from './layout/AppLayout';
 
 /**
@@ -29,6 +31,8 @@ export const routes: RouteObject[] = [
             children: [
               { index: true, element: <DashboardPage /> },
               { path: 'products', element: <ProductsPage /> },
+              { path: 'stock', element: <StockListPage /> },
+              { path: 'stock/:productId', element: <StockDetailPage /> },
               { path: 'categories', element: <CategoriesPage /> },
             ],
           },

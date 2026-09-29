@@ -138,6 +138,41 @@ describe('rota inicial', () => {
     );
     expect(router.state.location.pathname).toBe('/categories');
   });
+
+  it('navega para Estoque pelo item lateral e renderiza a lista (1206a)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith('/api/v1/stock')) {
+          return jsonFetchResponse({ items: [], page: 0, size: 20, totalItems: 0, totalPages: 0 });
+        }
+        return jsonFetchResponse({
+          user: { id: 'u1', username: 'ana', displayName: 'Ana' },
+          roles: [],
+          permissions: ['stock.read'],
+        });
+      }),
+    );
+
+    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('heading', { name: 'Início' });
+    fireEvent.click(screen.getByRole('link', { name: 'Estoque' }));
+
+    expect(await screen.findByRole('heading', { name: 'Estoque' })).toBeInTheDocument();
+
+    // Rota real (sem link morto): o item fica ativo e a URL muda para /stock.
+    expect(screen.getByRole('link', { name: 'Estoque' })).toHaveAttribute('aria-current', 'page');
+    expect(router.state.location.pathname).toBe('/stock');
+  });
 });
 
 /** Resposta mínima do `fetch` para as rotas do teste — mesmo formato que o client consome. */

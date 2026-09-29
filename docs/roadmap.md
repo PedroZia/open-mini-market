@@ -1213,7 +1213,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** CRUD na UI; erro de nome duplicado tratado.
   **Commit:** `feat(web): adiciona gestao de categorias`
 
-- [ ] **1206a — Estoque: lista de saldos**
+- [x] **1206a — Estoque: lista de saldos**
   **Objetivo:** acompanhar saldos e chegar ao detalhe. **Depende:** 1203, 706
   **Implementar:** rota e item de navegação `Estoque`; lista `GET /api/v1/stock` com `search`, filtro `lowStock` e paginação no `DataTable` (a rota não tem `sort`); indicador de estoque baixo; navegação para o detalhe (`/stock/{productId}`) com o resumo do produto. Passo dividido do 1206 (diff estimado acima de ~300 linhas); movimentos e ajustes são o 1206b.
   **Testes/aceite:** lista filtra/pagina e o filtro de estoque baixo envia `lowStock=true`; item abre o detalhe.
