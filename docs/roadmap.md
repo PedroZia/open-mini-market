@@ -1231,11 +1231,17 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** CRUD na UI; validação de CPF.
   **Commit:** `feat(web): adiciona gestao de clientes`
 
-- [ ] **1208 — Usuários e papéis**
+- [ ] **1208a — Usuários**
   **Objetivo:** administrar acessos. **Depende:** 1203, 114
-  **Implementar:** lista/criação/edição de usuários, atribuição de papéis, reset de senha, desativar, revogar sessões; tela de papéis com permissões.
-  **Testes/aceite:** ADMIN gerencia; GERENTE/OPERADOR não veem o menu; permissões aplicadas na UI e no servidor.
-  **Commit:** `feat(web): adiciona gestao de usuarios e papeis`
+  **Implementar:** rota e item de navegação `Usuários` (só com `user.read`); lista `GET /users` com `search`, filtro `active` (`true`/`false`), `sort` (`username|displayname|createdat`) e paginação; criar/editar com os papéis de `GET /roles`; desativar/habilitar; reset de senha (`POST /{id}/password-reset`, mínimo 8) e revogar sessões (`DELETE /{id}/sessions`, `user.session.revoke`); último ADMIN ativo protegido pelo servidor (409 `CONFLICT`) com mensagem clara. Passo dividido do 1208 (diff estimado acima de ~300 linhas); a tela de papéis é o 1208b.
+  **Testes/aceite:** ADMIN gerencia; GERENTE/OPERADOR não veem o menu; permissões aplicadas na UI.
+  **Commit:** `feat(web): adiciona gestao de usuarios`
+
+- [ ] **1208b — Papéis e permissões**
+  **Objetivo:** editar o mapa de permissões. **Depende:** 1208a
+  **Implementar:** rota e tela `Papéis` (menu só com `user.read`); lista `GET /roles` com as permissões de cada papel; edição com `PUT /roles/{code}/permissions` (`role.write`) usando o catálogo derivado da união das permissões de `GET /roles`; `400 UNKNOWN_PERMISSION` tratado.
+  **Testes/aceite:** troca de permissões na UI; sem `role.write` não edita.
+  **Commit:** `feat(web): adiciona tela de papeis e permissoes`
 
 - [ ] **1209 — Vendas**
   **Objetivo:** consultar e cancelar vendas. **Depende:** 1203, 813
