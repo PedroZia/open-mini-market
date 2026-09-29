@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "terminal"
+    "terminal",
+    "web"
   ],
   "engines": {
     "node": ">=22"

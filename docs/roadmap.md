@@ -1171,7 +1171,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 12 — React Web (retaguarda) — *SHOULD HAVE*
 
-- [ ] **1201a — Projeto web: workspace e tooling**
+- [x] **1201a — Projeto web: workspace e tooling**
   **Objetivo:** SPA de administração com o tooling verde. **Depende:** 001
   **Implementar:** adicionar `web` aos workspaces da raiz; `web/` com Vite + React + TS + Tailwind + React Router + TanStack Query v5 + Vitest/RTL (jsdom) + ESLint flat config; scripts `test`/`typecheck`/`lint`/`build`; proxy do Vite `/api` → `http://localhost:8081`; estrutura `web/src` de §10.2 e `npm install` na raiz. Passo dividido do 1201 (diff estimado acima de ~300 linhas); o layout com navegação lateral é o 1201b.
   **Testes/aceite:** `npm test`, `npx tsc --noEmit`, `npm run lint` e `npm run build` verdes.
