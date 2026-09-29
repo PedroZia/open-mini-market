@@ -1,0 +1,90 @@
+import { ApiError, ApiNetworkError, ApiTimeoutError } from '@minimarket/api-client';
+import { describe, expect, it } from 'vitest';
+import { errorMessage, fieldErrors, isForbidden, isUnauthorized } from './problem';
+
+describe('errorMessage', () => {
+  it('usa a mensagem do código estável, não o detalhe do servidor', () => {
+    const error = new ApiError(403, {
+      code: 'ACCESS_DENIED',
+      title: 'Acesso negado',
+      detail: 'missing authority product.write',
+    });
+
+    expect(errorMessage(error)).toBe('Você não tem permissão para esta operação.');
+  });
+
+  it('403 tem mensagem clara e sem detalhe técnico', () => {
+    const message = errorMessage(new ApiError(403, { code: 'ACCESS_DENIED', detail: 'missing authority' }));
+
+    expect(message).toMatch(/permissão/i);
+    expect(message).not.toContain('missing authority');
+  });
+
+  it('registro que sumiu vira recado para atualizar a lista', () => {
+    const error = new ApiError(404, { code: 'PRODUCT_NOT_FOUND', detail: 'produto 019... não encontrado' });
+
+    expect(errorMessage(error)).toBe('O registro não existe mais. Atualize a lista.');
+  });
+
+  it('sem tradução própria, mostra o detail escrito para humano', () => {
+    const error = new ApiError(422, {
+      code: 'INSUFFICIENT_STOCK',
+      detail: 'Estoque insuficiente para 3 un. de Arroz.',
+    });
+
+    expect(errorMessage(error)).toBe('Estoque insuficiente para 3 un. de Arroz.');
+  });
+
+  it('não vaza detalhe técnico de 5xx', () => {
+    const error = new ApiError(500, {
+      code: 'INTERNAL_ERROR',
+      detail: 'java.lang.IllegalStateException: pool exhausted',
+    });
+
+    expect(errorMessage(error)).toBe('O servidor falhou ao responder. Tente de novo em instantes.');
+  });
+
+  it('resposta fora do contrato não devolve o HTTP cru do client', () => {
+    expect(errorMessage(new ApiError(502, {}))).toBe('A resposta do servidor veio fora do padrão. Tente de novo.');
+  });
+
+  it('cobre timeout, rede e falha inesperada', () => {
+    expect(errorMessage(new ApiTimeoutError(10_000))).toContain('não respondeu a tempo');
+    expect(errorMessage(new ApiNetworkError(new Error('offline')))).toContain(
+      'Não foi possível falar com o servidor',
+    );
+    expect(errorMessage(new Error('boom'))).toBe('Não foi possível concluir a operação. Tente de novo.');
+  });
+});
+
+describe('fieldErrors', () => {
+  it('mapeia errors[] por campo para o formulário', () => {
+    const error = new ApiError(400, {
+      code: 'VALIDATION_ERROR',
+      errors: [
+        { field: 'name', message: 'não pode ser vazio' },
+        { field: 'price', message: 'deve ser maior que zero' },
+        { field: 'name', message: 'já existe' },
+      ],
+    });
+
+    expect(fieldErrors(error)).toEqual({
+      name: 'não pode ser vazio',
+      price: 'deve ser maior que zero',
+    });
+  });
+
+  it('vazio quando o erro não trouxe validação de campo', () => {
+    expect(fieldErrors(new ApiError(500, {}))).toEqual({});
+    expect(fieldErrors(new Error('boom'))).toEqual({});
+  });
+});
+
+describe('isUnauthorized e isForbidden', () => {
+  it('separam o que é da sessão (401) do que é permissão (403)', () => {
+    expect(isUnauthorized(new ApiError(401, { code: 'SESSION_EXPIRED' }))).toBe(true);
+    expect(isForbidden(new ApiError(403, { code: 'ACCESS_DENIED' }))).toBe(true);
+    expect(isUnauthorized(new ApiError(403, { code: 'ACCESS_DENIED' }))).toBe(false);
+    expect(isForbidden(new Error('boom'))).toBe(false);
+  });
+});

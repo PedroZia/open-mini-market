@@ -1189,7 +1189,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** login navega ao dashboard; refresh mantém sessão; 401 desloga e redireciona.
   **Commit:** `feat(web): adiciona autenticacao e guarda de rotas`
 
-- [ ] **1203 — Componentes compartilhados e erros**
+- [x] **1203 — Componentes compartilhados e erros**
   **Objetivo:** base visual única. **Depende:** 1202
   **Implementar:** `DataTable` (paginação, ordenação, vazio, loading), `Modal`, `Toast`, `usePermission`, tratamento global de `problem+json`.
   **Testes/aceite:** testes de `DataTable` e do mapeamento de erro; 403 exibe mensagem clara.
