@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
  * fica escondido.
  */
 
-export type ToastTone = 'success' | 'error' | 'info';
+export type ToastTone = 'success' | 'error' | 'info' | 'warning';
 
 /** Tempo que o toast fica na tela antes de sair sozinho. */
 export const TOAST_TIMEOUT_MS = 6_000;
@@ -40,6 +40,7 @@ const TONE_CLASS: Record<ToastTone, string> = {
   success: 'border-success/40 text-success',
   error: 'border-danger/40 text-danger',
   info: 'border-line text-ink',
+  warning: 'border-warning/40 text-warning',
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {

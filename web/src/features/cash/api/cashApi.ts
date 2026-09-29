@@ -7,6 +7,9 @@ export type CashSessionStatus = components['schemas']['CashSessionStatus'];
 export type CurrentCashSessionResponse = components['schemas']['CurrentCashSessionResponse'];
 export type CashSessionDetailResponse = components['schemas']['CashSessionDetailResponse'];
 export type CashSessionSummaryResponse = components['schemas']['CashSessionSummaryResponse'];
+export type CashMovementRequest = components['schemas']['CashMovementRequest'];
+export type CashMovementResponse = components['schemas']['CashMovementResponse'];
+export type CloseCashSessionRequest = components['schemas']['CloseCashSessionRequest'];
 export type CashMovementType = components['schemas']['CashMovementType'];
 export type PaymentMethod = components['schemas']['PaymentMethod'];
 
@@ -50,4 +53,45 @@ export function getCashSession(sessionId: string): Promise<CashSessionDetailResp
  */
 export function getCashSessionSummary(sessionId: string): Promise<CashSessionSummaryResponse> {
   return api.get<CashSessionSummaryResponse>(`${SESSIONS_PATH}/${sessionId}/summary`);
+}
+
+/**
+ * Sangria (`POST /cash-registers/{id}/withdrawals`, passo 609): retira dinheiro da sessão aberta com
+ * motivo obrigatório e devolve o movimento gravado. Exige `cash.withdrawal` no servidor e é operação
+ * de dinheiro idempotente por contrato (§8) — o client manda a `Idempotency-Key` sozinho.
+ *
+ * Caixa sem sessão aberta é 404 `CASH_SESSION_NOT_OPEN`. O `aboveExpected` do corpo é do servidor
+ * (BR-12): quando `true`, a sangria passou do esperado — o movimento **foi registrado** e a tela
+ * alerta o operador, nunca trata como erro.
+ */
+export function recordWithdrawal(
+  cashRegisterId: string,
+  body: CashMovementRequest,
+): Promise<CashMovementResponse> {
+  return api.post<CashMovementResponse>(`${REGISTERS_PATH}/${cashRegisterId}/withdrawals`, body);
+}
+
+/**
+ * Suprimento (`POST /cash-registers/{id}/supplies`, passo 610): coloca dinheiro na sessão aberta,
+ * com a mesma forma e o mesmo contrato de idempotência da sangria, mas exigindo `cash.supply`.
+ * O `aboveExpected` do corpo é sempre `false` — o suprimento só aumenta o esperado.
+ */
+export function recordSupply(
+  cashRegisterId: string,
+  body: CashMovementRequest,
+): Promise<CashMovementResponse> {
+  return api.post<CashMovementResponse>(`${REGISTERS_PATH}/${cashRegisterId}/supplies`, body);
+}
+
+/**
+ * Fechamento (`POST /cash-registers/{id}/close`, passos 611/612): confere o valor contado — o
+ * esperado e a diferença são do servidor (BR-12) — e devolve 200 com a sessão fechada. Exige
+ * `cash.close` e é idempotente pela mesma chave (§8). Caixa sem sessão aberta ou já fechado é 409
+ * `CASH_SESSION_ALREADY_CLOSED` e venda `OPEN` na sessão é 409 `SESSION_HAS_OPEN_SALES`.
+ */
+export function closeCashSession(
+  cashRegisterId: string,
+  body: CloseCashSessionRequest,
+): Promise<CashSessionDetailResponse> {
+  return api.post<CashSessionDetailResponse>(`${REGISTERS_PATH}/${cashRegisterId}/close`, body);
 }

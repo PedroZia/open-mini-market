@@ -1261,7 +1261,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** resumo confere com os movimentos; 403 → sem permissão.
   **Commit:** `feat(web): adiciona caixas e resumo de sessao`
 
-- [ ] **1210b — Caixa: sangria, suprimento e fechamento**
+- [x] **1210b — Caixa: sangria, suprimento e fechamento**
   **Objetivo:** operar o caixa pela retaguarda. **Depende:** 1210a
   **Implementar:** sangria (`POST /api/v1/cash-registers/{id}/withdrawals {amount,reason}`, `cash.withdrawal`) com alerta de `aboveExpected`; suprimento (`POST /{id}/supplies {amount,reason}`, `cash.supply`); fechamento (`POST /{id}/close {countedAmount,notes}`, `cash.close`); 404 `CASH_SESSION_NOT_OPEN` e 409 `CASH_SESSION_ALREADY_CLOSED`/`SESSION_HAS_OPEN_SALES` com mensagem clara; invalidação de sessão/resumo após mutação.
   **Testes/aceite:** ações exigem a permissão correta; resumo reflete o movimento.

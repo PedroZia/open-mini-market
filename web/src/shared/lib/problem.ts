@@ -21,6 +21,11 @@ const CODE_MESSAGES: Record<string, string> = {
     'Estoque insuficiente: a operação deixaria o saldo negativo e a loja não permite.',
   // O `detail` do servidor carrega o id da venda e o instante; o operador lê o recado, não o rastro.
   SALE_ALREADY_COMPLETED: 'Esta venda já foi concluída e não pode ser cancelada.',
+  // Movimentos de caixa (1210b): o `detail` também traz id de sessão/caixa; a tela fica com o recado.
+  CASH_SESSION_NOT_OPEN: 'Este caixa não tem sessão aberta. Atualize a tela.',
+  CASH_SESSION_ALREADY_CLOSED: 'Esta sessão de caixa já foi fechada. Atualize a tela.',
+  SESSION_HAS_OPEN_SALES:
+    'Há uma venda em andamento nesta sessão. Finalize ou cancele a venda antes de fechar o caixa.',
   IDEMPOTENCY_KEY_REUSED: 'Esta operação já foi registrada antes. Atualize a lista.',
   IDEMPOTENCY_KEY_REQUIRED: 'A operação não pôde ser repetida com segurança. Tente de novo.',
   SESSION_EXPIRED: 'A sessão expirou. Entre de novo.',
@@ -120,4 +125,20 @@ export function isSaleAlreadyCompleted(error: unknown): boolean {
  */
 export function isCashSessionNotOpen(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'CASH_SESSION_NOT_OPEN';
+}
+
+/**
+ * `true` para o 409 `CASH_SESSION_ALREADY_CLOSED`: a sessão do caixa já foi fechada (aqui ou em
+ * outro terminal). Quem chama relê a sessão — o estado na tela estava velho.
+ */
+export function isCashSessionAlreadyClosed(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'CASH_SESSION_ALREADY_CLOSED';
+}
+
+/**
+ * `true` para o 409 `SESSION_HAS_OPEN_SALES`: há venda em andamento na sessão e o caixa não fecha
+ * até ela terminar. Quem chama relê a sessão — a venda aberta nasceu fora da tela.
+ */
+export function isSessionHasOpenSales(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'SESSION_HAS_OPEN_SALES';
 }

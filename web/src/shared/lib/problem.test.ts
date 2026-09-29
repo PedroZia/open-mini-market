@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   errorMessage,
   fieldErrors,
+  isCashSessionAlreadyClosed,
   isCashSessionNotOpen,
   isConcurrentModification,
   isConflict,
   isForbidden,
   isSaleAlreadyCompleted,
+  isSessionHasOpenSales,
   isUnauthorized,
 } from './problem';
 
@@ -154,5 +156,58 @@ describe('isCashSessionNotOpen', () => {
     expect(isCashSessionNotOpen(new ApiError(404, { code: 'CASH_SESSION_NOT_OPEN' }))).toBe(true);
     expect(isCashSessionNotOpen(new ApiError(404, { code: 'CASH_SESSION_NOT_FOUND' }))).toBe(false);
     expect(isCashSessionNotOpen(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('movimentos de caixa (1210b)', () => {
+  const sessionId = '0198f5b2-5e6f-7a81-9c13-000000000002';
+
+  it('caixa sem sessão aberta explica o estado em vez de dizer que o registro sumiu', () => {
+    const error = new ApiError(404, {
+      code: 'CASH_SESSION_NOT_OPEN',
+      detail: `caixa ${sessionId} não tem sessão aberta`,
+    });
+
+    const message = errorMessage(error);
+
+    expect(message).toMatch(/não tem sessão aberta/i);
+    expect(message).not.toContain(sessionId);
+  });
+
+  it('sessão já fechada e venda em andamento têm recado claro, sem o id do servidor', () => {
+    const closed = new ApiError(409, {
+      code: 'CASH_SESSION_ALREADY_CLOSED',
+      detail: `sessão ${sessionId} já foi fechada em 2026-09-29T10:00:00Z`,
+    });
+    const openSales = new ApiError(409, {
+      code: 'SESSION_HAS_OPEN_SALES',
+      detail: `sessão ${sessionId} tem venda em andamento`,
+    });
+
+    expect(errorMessage(closed)).toMatch(/já foi fechada/i);
+    expect(errorMessage(closed)).not.toContain(sessionId);
+
+    expect(errorMessage(openSales)).toMatch(/venda em andamento/i);
+    expect(errorMessage(openSales)).toMatch(/finalize ou cancele a venda/i);
+    expect(errorMessage(openSales)).not.toContain(sessionId);
+  });
+});
+
+describe('isCashSessionAlreadyClosed e isSessionHasOpenSales', () => {
+  it('reconhecem cada 409 do fechamento e não confundem com outros conflitos', () => {
+    expect(
+      isCashSessionAlreadyClosed(new ApiError(409, { code: 'CASH_SESSION_ALREADY_CLOSED' })),
+    ).toBe(true);
+    expect(
+      isCashSessionAlreadyClosed(new ApiError(409, { code: 'SESSION_HAS_OPEN_SALES' })),
+    ).toBe(false);
+    expect(isSessionHasOpenSales(new ApiError(409, { code: 'SESSION_HAS_OPEN_SALES' }))).toBe(
+      true,
+    );
+    expect(isSessionHasOpenSales(new ApiError(404, { code: 'CASH_SESSION_NOT_OPEN' }))).toBe(
+      false,
+    );
+    expect(isCashSessionAlreadyClosed(new Error('boom'))).toBe(false);
+    expect(isSessionHasOpenSales(new Error('boom'))).toBe(false);
   });
 });

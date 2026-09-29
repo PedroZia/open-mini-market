@@ -1,9 +1,22 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { formatMoney } from '../../../shared/lib/money';
 import {
+  isCashSessionAlreadyClosed,
+  isCashSessionNotOpen,
+  isSessionHasOpenSales,
+} from '../../../shared/lib/problem';
+import { showToast, type ToastTone } from '../../../shared/ui/Toast';
+import {
+  closeCashSession,
   getCashSession,
   getCashSessionSummary,
   getCurrentCashSession,
   listCashRegisters,
+  recordSupply,
+  recordWithdrawal,
+  type CashMovementRequest,
+  type CashMovementResponse,
+  type CloseCashSessionRequest,
 } from '../api/cashApi';
 
 /** Prefixo do cache de caixa: as consultas da feature vivem todas sob ele. */
@@ -68,5 +81,101 @@ export function useCashSessionSummary(sessionId: string) {
     queryKey: cashSessionSummaryQueryKey(sessionId),
     queryFn: () => getCashSessionSummary(sessionId),
     staleTime: 0,
+  });
+}
+
+/**
+ * Recarrega o caixa quando a escrita falha por conflito de estado (1210b): sessão que fechou,
+ * caixa sem sessão aberta ou venda em andamento. A mensagem continua no modal; o que sai da tela é
+ * o estado velho — o resumo inválido é lido do servidor de novo.
+ */
+function reloadOnStateConflict(queryClient: QueryClient, error: unknown): void {
+  if (
+    isCashSessionNotOpen(error) ||
+    isCashSessionAlreadyClosed(error) ||
+    isSessionHasOpenSales(error)
+  ) {
+    void queryClient.invalidateQueries({ queryKey: cashQueryKey });
+  }
+}
+
+/** O recado da sangria: acima do esperado vira aviso, nunca erro — o movimento foi gravado (BR-12). */
+function withdrawalToast(movement: CashMovementResponse): { text: string; tone: ToastTone } {
+  if (movement.aboveExpected !== true) {
+    return { text: 'Sangria registrada.', tone: 'success' };
+  }
+  const expected = movement.expectedAfter;
+  return expected === undefined
+    ? {
+        text: 'Sangria registrada acima do esperado. Confira o dinheiro em caixa.',
+        tone: 'warning',
+      }
+    : {
+        text: `Sangria registrada acima do esperado: o esperado em caixa agora é ${formatMoney(expected)}.`,
+        tone: 'warning',
+      };
+}
+
+/**
+ * Sangria (1210b, `cash.withdrawal` no servidor): sucesso avisa no toast e invalida o prefixo
+ * `cash` — lista, sessão atual, detalhe e resumo saem do servidor de novo, porque o esperado mudou
+ * (BR-12). O erro fica no modal (o toast global só o repetiria) e o conflito de estado relê a tela.
+ */
+export function useRecordWithdrawal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (variables: { cashRegisterId: string; body: CashMovementRequest }) =>
+      recordWithdrawal(variables.cashRegisterId, variables.body),
+    meta: { suppressErrorToast: true },
+    onSuccess: (movement) => {
+      void queryClient.invalidateQueries({ queryKey: cashQueryKey });
+      const { text, tone } = withdrawalToast(movement);
+      showToast(text, tone);
+    },
+    onError: (error: unknown) => {
+      reloadOnStateConflict(queryClient, error);
+    },
+  });
+}
+
+/**
+ * Suprimento (1210b, `cash.supply` no servidor): mesma forma e mesmo ciclo da sangria — o
+ * `aboveExpected` do corpo é sempre `false`, então o sucesso é só confirmação.
+ */
+export function useRecordSupply() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (variables: { cashRegisterId: string; body: CashMovementRequest }) =>
+      recordSupply(variables.cashRegisterId, variables.body),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: cashQueryKey });
+      showToast('Suprimento registrado.', 'success');
+    },
+    onError: (error: unknown) => {
+      reloadOnStateConflict(queryClient, error);
+    },
+  });
+}
+
+/**
+ * Fechamento (1210b, `cash.close` no servidor): confere o contado e fecha a sessão; sucesso avisa e
+ * invalida o prefixo `cash` — a sessão atual passa a responder 404 `CASH_SESSION_NOT_OPEN` e a tela
+ * mostra o caixa sem sessão aberta. O 409 `SESSION_HAS_OPEN_SALES` mantém o modal com o recado e
+ * relê o estado, porque a venda aberta nasceu fora da tela.
+ */
+export function useCloseCashSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (variables: { cashRegisterId: string; body: CloseCashSessionRequest }) =>
+      closeCashSession(variables.cashRegisterId, variables.body),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: cashQueryKey });
+      showToast('Caixa fechado.', 'success');
+    },
+    onError: (error: unknown) => {
+      reloadOnStateConflict(queryClient, error);
+    },
   });
 }
