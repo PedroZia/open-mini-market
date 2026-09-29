@@ -1195,14 +1195,20 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes de `DataTable` e do mapeamento de erro; 403 exibe mensagem clara.
   **Commit:** `feat(web): adiciona componentes e tratamento de erros`
 
-- [ ] **1204 — Produtos**
-  **Objetivo:** manter catálogo pela retaguarda. **Depende:** 1203, 412
-  **Implementar:** lista com busca/filtros, formulário de criação/edição (com `If-Match`), alteração de preço com motivo, desativar/reativar.
+- [ ] **1204a — Produtos: lista, filtros e desativação**
+  **Objetivo:** consultar e tirar/voltar produto de linha. **Depende:** 1203, 412
+  **Implementar:** rota e item de navegação `Produtos`; lista com `search`, filtros `categoryId`/`active`, paginação e `sort` do servidor (`name,price,createdat`) no `DataTable`; desativar/reativar (`POST /products/{id}/disable` e `/enable`) com `product.write` escondendo/desabilitando ações; preço formatado pt-BR. Passo dividido do 1204 (diff estimado acima de ~300 linhas); cadastro/edição/preço são o 1204b.
+  **Testes/aceite:** lista renderiza/filtra/pagina/ordena e desativa/reativa; ações escondidas sem permissão.
+  **Commit:** `feat(web): adiciona lista de produtos`
+
+- [ ] **1204b — Produtos: cadastro, edição e preço**
+  **Objetivo:** manter o catálogo. **Depende:** 1204a
+  **Implementar:** formulário de criação/edição (RHF+Zod) com `PUT` e `If-Match` (extensão aditiva `ifMatch` em `RequestOptions` do `@minimarket/api-client`, com teste); barcode somente leitura na edição; alteração de preço com motivo (`PATCH /produtos/{id}/price`); conflito `CONCURRENT_MODIFICATION` mostra mensagem e recarrega; unidade `UN`/`KG`.
   **Testes/aceite:** CRUD completo na UI; conflito de versão mostra mensagem e recarrega.
-  **Commit:** `feat(web): adiciona gestao de produtos`
+  **Commit:** `feat(web): adiciona cadastro e edicao de produtos`
 
 - [ ] **1205 — Categorias**
-  **Objetivo:** organizar catálogo. **Depende:** 1204
+  **Objetivo:** organizar catálogo. **Depende:** 1204b
   **Implementar:** lista + formulário + desativar.
   **Testes/aceite:** CRUD na UI; erro de nome duplicado tratado.
   **Commit:** `feat(web): adiciona gestao de categorias`
