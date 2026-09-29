@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   errorMessage,
   fieldErrors,
+  isCashSessionNotOpen,
   isConcurrentModification,
   isConflict,
   isForbidden,
@@ -145,5 +146,13 @@ describe('isSaleAlreadyCompleted', () => {
     expect(message).toMatch(/já foi concluída/i);
     expect(message).not.toContain('0198f3a2');
     expect(message).not.toContain('2026-09-28T23:00:00Z');
+  });
+});
+
+describe('isCashSessionNotOpen', () => {
+  it('reconhece o 404 do caixa fechado e não confunde com outros erros', () => {
+    expect(isCashSessionNotOpen(new ApiError(404, { code: 'CASH_SESSION_NOT_OPEN' }))).toBe(true);
+    expect(isCashSessionNotOpen(new ApiError(404, { code: 'CASH_SESSION_NOT_FOUND' }))).toBe(false);
+    expect(isCashSessionNotOpen(new Error('boom'))).toBe(false);
   });
 });

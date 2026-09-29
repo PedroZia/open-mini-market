@@ -113,3 +113,11 @@ export function isConflict(error: unknown): boolean {
 export function isSaleAlreadyCompleted(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'SALE_ALREADY_COMPLETED';
 }
+
+/**
+ * `true` para o 404 `CASH_SESSION_NOT_OPEN`: o caixa está fechado, não é falha de leitura. A tela
+ * do caixa mostra o estado "sem sessão aberta" em vez do alerta de erro.
+ */
+export function isCashSessionNotOpen(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'CASH_SESSION_NOT_OPEN';
+}

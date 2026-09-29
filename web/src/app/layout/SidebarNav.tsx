@@ -14,6 +14,7 @@ const navigationItems = [
   { to: '/', label: 'Início' },
   { to: '/products', label: 'Produtos' },
   { to: '/stock', label: 'Estoque' },
+  { to: '/cash-registers', label: 'Caixa', permission: 'cash.read' },
   { to: '/categories', label: 'Categorias' },
   { to: '/customers', label: 'Clientes' },
   { to: '/sales', label: 'Vendas', permission: 'report.read' },

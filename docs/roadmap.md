@@ -1255,7 +1255,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** filtros funcionam; detalhe mostra a auditoria da venda.
   **Commit:** `feat(web): adiciona detalhe e cancelamento de venda`
 
-- [ ] **1210a — Caixa: caixas, sessão atual e resumo**
+- [x] **1210a — Caixa: caixas, sessão atual e resumo**
   **Objetivo:** enxergar os caixas e o resumo da sessão. **Depende:** 1203, 909
   **Implementar:** rota e item de navegação `Caixa` (`cash.read`); lista `GET /api/v1/cash-registers` (array, sem paginação) com código, nome, situação e operador; detalhe do caixa com a sessão atual (`GET /{id}/current-session`; 404 `CASH_SESSION_NOT_OPEN` = "sem sessão aberta") e a sessão `GET /api/v1/cash-sessions/{id}` + resumo `/{id}/summary` (esperado/contado/diferença, `totalsByType`, `paymentsByMethod`). Não existe endpoint de sessões por período nem `/reports/cash-session/{id}` (divergência roadmap × backend registrada; não criar backend). Passo dividido do 1210 (diff estimado acima de ~300 linhas); sangria/suprimento/fechamento são o 1210b.
   **Testes/aceite:** resumo confere com os movimentos; 403 → sem permissão.

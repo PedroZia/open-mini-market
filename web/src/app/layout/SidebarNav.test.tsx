@@ -71,4 +71,19 @@ describe('SidebarNav — itens com permissão', () => {
 
     expect(screen.queryByRole('link', { name: 'Vendas' })).toBeNull();
   });
+
+  it('mostra Caixa para quem tem cash.read (OPERADOR)', () => {
+    renderNav(['cash.read', 'cash.open']);
+
+    expect(screen.getByRole('link', { name: 'Caixa' })).toHaveAttribute(
+      'href',
+      '/cash-registers',
+    );
+  });
+
+  it('esconde Caixa de quem não tem cash.read', () => {
+    renderNav(['product.read', 'report.read']);
+
+    expect(screen.queryByRole('link', { name: 'Caixa' })).toBeNull();
+  });
 });

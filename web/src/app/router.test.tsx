@@ -320,6 +320,51 @@ describe('rota inicial', () => {
     expect(router.state.location.pathname).toBe('/roles');
   });
 
+  it('navega para Caixa pelo item lateral e renderiza a lista (1210a)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith('/api/v1/cash-registers')) {
+          return jsonFetchResponse([
+            {
+              id: '0198f5a1-3c4d-7e5f-8a91-000000000001',
+              code: 'C1',
+              name: 'Frente de loja',
+              status: 'OPEN',
+              operatorName: 'Ana Souza',
+            },
+          ]);
+        }
+        return jsonFetchResponse({
+          user: { id: 'u1', username: 'ana', displayName: 'Ana' },
+          roles: [],
+          permissions: ['cash.read'],
+        });
+      }),
+    );
+
+    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('heading', { name: 'Início' });
+    // O item só aparece com `cash.read` na sessão.
+    fireEvent.click(screen.getByRole('link', { name: 'Caixa' }));
+
+    expect(await screen.findByRole('heading', { name: 'Caixa' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: 'Frente de loja' })).toBeInTheDocument();
+
+    // Rota real (sem link morto): o item fica ativo e a URL muda para /cash-registers.
+    expect(screen.getByRole('link', { name: 'Caixa' })).toHaveAttribute('aria-current', 'page');
+    expect(router.state.location.pathname).toBe('/cash-registers');
+  });
+
   it('navega para Vendas pelo item lateral e renderiza a lista (1209a)', async () => {
     sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
     vi.stubGlobal(

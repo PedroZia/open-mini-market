@@ -2,6 +2,9 @@ import { createBrowserRouter, type RouteObject } from 'react-router';
 import { AuthProvider } from '../features/auth/AuthProvider';
 import { RequireAuth } from '../features/auth/RequireAuth';
 import { LoginPage } from '../features/auth/pages/LoginPage';
+import { CashRegisterDetailPage } from '../features/cash/pages/CashRegisterDetailPage';
+import { CashRegistersPage } from '../features/cash/pages/CashRegistersPage';
+import { CashSessionDetailPage } from '../features/cash/pages/CashSessionDetailPage';
 import { CategoriesPage } from '../features/categories/pages/CategoriesPage';
 import { CustomersPage } from '../features/customers/pages/CustomersPage';
 import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
@@ -42,6 +45,9 @@ export const routes: RouteObject[] = [
               { path: 'customers', element: <CustomersPage /> },
               { path: 'sales', element: <SalesPage /> },
               { path: 'sales/:id', element: <SaleDetailPage /> },
+              { path: 'cash-registers', element: <CashRegistersPage /> },
+              { path: 'cash-registers/:id', element: <CashRegisterDetailPage /> },
+              { path: 'cash-sessions/:id', element: <CashSessionDetailPage /> },
               { path: 'users', element: <UsersPage /> },
               { path: 'roles', element: <RolesPage /> },
             ],
