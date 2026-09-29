@@ -1213,11 +1213,17 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** CRUD na UI; erro de nome duplicado tratado.
   **Commit:** `feat(web): adiciona gestao de categorias`
 
-- [ ] **1206 — Estoque**
-  **Objetivo:** acompanhar e corrigir saldos. **Depende:** 1203, 706
-  **Implementar:** lista de saldos com filtro de estoque baixo, detalhe com movimentos, ajuste e entrada de mercadoria com motivo.
+- [ ] **1206a — Estoque: lista de saldos**
+  **Objetivo:** acompanhar saldos e chegar ao detalhe. **Depende:** 1203, 706
+  **Implementar:** rota e item de navegação `Estoque`; lista `GET /api/v1/stock` com `search`, filtro `lowStock` e paginação no `DataTable` (a rota não tem `sort`); indicador de estoque baixo; navegação para o detalhe (`/stock/{productId}`) com o resumo do produto. Passo dividido do 1206 (diff estimado acima de ~300 linhas); movimentos e ajustes são o 1206b.
+  **Testes/aceite:** lista filtra/pagina e o filtro de estoque baixo envia `lowStock=true`; item abre o detalhe.
+  **Commit:** `feat(web): adiciona lista de saldos de estoque`
+
+- [ ] **1206b — Estoque: movimentos, ajuste e entrada**
+  **Objetivo:** corrigir saldo com rastro. **Depende:** 1206a
+  **Implementar:** detalhe com os movimentos embutidos de `GET /stock/{productId}` (tipo, delta, saldo após, motivo, data); modal de ajuste (`POST /stock/{productId}/adjustments` com `quantityDelta` e `reason`) e de entrada (`POST /{productId}/receipts` com `quantity`, `unitCost?`, `reason?`); `stock.adjust`/`stock.receive` escondem as ações; `422 INSUFFICIENT_STOCK` com mensagem clara; invalidar saldo/detalhe após mutação.
   **Testes/aceite:** ajuste reflete no saldo e no histórico; permissão respeitada.
-  **Commit:** `feat(web): adiciona gestao de estoque`
+  **Commit:** `feat(web): adiciona movimentos e ajustes de estoque`
 
 - [ ] **1207 — Clientes**
   **Objetivo:** manter clientes. **Depende:** 1203, 502
