@@ -1171,14 +1171,20 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
 
 ## Fase 12 — React Web (retaguarda) — *SHOULD HAVE*
 
-- [ ] **1201 — Projeto web**
-  **Objetivo:** SPA de administração. **Depende:** 001
-  **Implementar:** Vite + React + TS + Tailwind + React Router + TanStack Query + Vitest/RTL; ESLint; layout base com navegação lateral.
-  **Testes/aceite:** build, lint e teste verdes; rota inicial renderiza layout.
+- [ ] **1201a — Projeto web: workspace e tooling**
+  **Objetivo:** SPA de administração com o tooling verde. **Depende:** 001
+  **Implementar:** adicionar `web` aos workspaces da raiz; `web/` com Vite + React + TS + Tailwind + React Router + TanStack Query v5 + Vitest/RTL (jsdom) + ESLint flat config; scripts `test`/`typecheck`/`lint`/`build`; proxy do Vite `/api` → `http://localhost:8081`; estrutura `web/src` de §10.2 e `npm install` na raiz. Passo dividido do 1201 (diff estimado acima de ~300 linhas); o layout com navegação lateral é o 1201b.
+  **Testes/aceite:** `npm test`, `npx tsc --noEmit`, `npm run lint` e `npm run build` verdes.
   **Commit:** `chore(web): cria projeto React com Vite`
 
+- [ ] **1201b — Layout base com navegação lateral**
+  **Objetivo:** casca visual única da retaguarda. **Depende:** 1201a
+  **Implementar:** `app/layout` com navegação lateral (tema, cabeçalho, `Outlet`), rota inicial renderizando o layout e teste de renderização; decisões visuais com a skill `ui-ux-pro-max`.
+  **Testes/aceite:** rota inicial renderiza o layout com a navegação lateral; gate do web verde.
+  **Commit:** `chore(web): adiciona layout base com navegacao lateral`
+
 - [ ] **1202 — Autenticação e guarda de rotas**
-  **Objetivo:** só gente autorizada entra. **Depende:** 1201, 207
+  **Objetivo:** só gente autorizada entra. **Depende:** 1201b, 207
   **Implementar:** tela de login, provider de auth (token em memória + `sessionStorage`), `GET /auth/me` na inicialização, interceptor `401`, guarda de rota, logout.
   **Testes/aceite:** login navega ao dashboard; refresh mantém sessão; 401 desloga e redireciona.
   **Commit:** `feat(web): adiciona autenticacao e guarda de rotas`
