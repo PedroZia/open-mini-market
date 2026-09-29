@@ -1207,7 +1207,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** CRUD completo na UI; conflito de versão mostra mensagem e recarrega.
   **Commit:** `feat(web): adiciona cadastro e edicao de produtos`
 
-- [ ] **1205 — Categorias**
+- [x] **1205 — Categorias**
   **Objetivo:** organizar catálogo. **Depende:** 1204b
   **Implementar:** lista + formulário + desativar.
   **Testes/aceite:** CRUD na UI; erro de nome duplicado tratado.

@@ -7,6 +7,7 @@ import { NavLink } from 'react-router';
 const navigationItems = [
   { to: '/', label: 'Início' },
   { to: '/products', label: 'Produtos' },
+  { to: '/categories', label: 'Categorias' },
 ] as const;
 
 const itemClassName =

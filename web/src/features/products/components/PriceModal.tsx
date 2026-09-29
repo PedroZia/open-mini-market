@@ -3,10 +3,10 @@ import { useForm, type UseFormSetError } from 'react-hook-form';
 import { z } from 'zod';
 import { formatMoney, parseDecimalInput } from '../../../shared/lib/money';
 import { errorMessage, fieldErrors } from '../../../shared/lib/problem';
+import { TextField } from '../../../shared/ui/FormFields';
 import { Modal } from '../../../shared/ui/Modal';
 import type { ProductResponse } from '../api/productsApi';
 import { useChangeProductPrice } from '../hooks/useProducts';
-import { TextField } from './ProductFields';
 
 /**
  * Alteração de preço com motivo (passo 411, `price.write`): o preço é a única forma de mudar o

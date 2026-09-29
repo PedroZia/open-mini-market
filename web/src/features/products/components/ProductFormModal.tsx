@@ -4,11 +4,11 @@ import { useForm, type UseFormSetError } from 'react-hook-form';
 import { z } from 'zod';
 import { parseDecimalInput } from '../../../shared/lib/money';
 import { errorMessage, fieldErrors, isConcurrentModification } from '../../../shared/lib/problem';
+import { SelectField, TextField } from '../../../shared/ui/FormFields';
 import { Modal } from '../../../shared/ui/Modal';
 import { useCategories } from '../../categories/hooks/useCategories';
 import type { CreateProductRequest, UpdateProductRequest } from '../api/productsApi';
 import { useCreateProduct, useProduct, useUpdateProduct } from '../hooks/useProducts';
-import { SelectField, TextField } from './ProductFields';
 
 /**
  * Cadastro e edição do produto (1204b) num formulário só: campos e validação iguais, `productId`

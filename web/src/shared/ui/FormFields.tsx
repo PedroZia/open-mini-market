@@ -2,8 +2,8 @@ import type { ReactNode } from 'react';
 import type { FieldError, UseFormRegisterReturn } from 'react-hook-form';
 
 /**
- * Campos dos formulários de produto (1204b): `label` sempre ligado ao controle, erro do schema (ou
- * do `errors[]` do servidor) anunciado abaixo do campo e foco visível pelo global de `index.css`.
+ * Campos de formulário da retaguarda: `label` sempre ligado ao controle, erro do schema (ou do
+ * `errors[]` do servidor) anunciado abaixo do campo e foco visível pelo global de `index.css`.
  * São só apresentação — quem valida é o Zod no formulário e o backend de novo (§10.3).
  */
 
@@ -58,8 +58,8 @@ export interface TextFieldProps {
   field: UseFormRegisterReturn;
   error?: FieldError | undefined;
   hint?: string | undefined;
-  /** `decimal` abre o teclado numérico no celular/tablet da retaguarda. */
-  inputMode?: 'text' | 'decimal';
+  /** `decimal`/`numeric` abrem o teclado adequado no celular/tablet da retaguarda. */
+  inputMode?: 'text' | 'decimal' | 'numeric';
   readOnly?: boolean;
 }
 

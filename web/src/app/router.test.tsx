@@ -99,6 +99,45 @@ describe('rota inicial', () => {
     expect(screen.getByRole('link', { name: 'Produtos' })).toHaveAttribute('aria-current', 'page');
     expect(router.state.location.pathname).toBe('/products');
   });
+
+  it('navega para Categorias pelo item lateral e renderiza a lista (1205)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith('/api/v1/categories')) {
+          return jsonFetchResponse([{ id: 'c1', name: 'Mercearia', active: true, sortOrder: 0 }]);
+        }
+        return jsonFetchResponse({
+          user: { id: 'u1', username: 'ana', displayName: 'Ana' },
+          roles: [],
+          permissions: ['product.read', 'category.write'],
+        });
+      }),
+    );
+
+    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('heading', { name: 'Início' });
+    fireEvent.click(screen.getByRole('link', { name: 'Categorias' }));
+
+    expect(await screen.findByRole('heading', { name: 'Categorias' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: 'Mercearia' })).toBeInTheDocument();
+
+    // Rota real (sem link morto): o item fica ativo e a URL muda para /categories.
+    expect(screen.getByRole('link', { name: 'Categorias' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(router.state.location.pathname).toBe('/categories');
+  });
 });
 
 /** Resposta mínima do `fetch` para as rotas do teste — mesmo formato que o client consome. */
