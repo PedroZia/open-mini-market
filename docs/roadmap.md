@@ -1267,11 +1267,17 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** ações exigem a permissão correta; resumo reflete o movimento.
   **Commit:** `feat(web): adiciona sangria, suprimento e fechamento de caixa`
 
-- [ ] **1211 — Auditoria**
+- [ ] **1211a — Auditoria: consulta com filtros**
   **Objetivo:** investigar pela UI. **Depende:** 1203, 1002
-  **Implementar:** consulta com filtros e visualização de `details` (antes/depois) e histórico por entidade.
+  **Implementar:** rota e item de navegação `Auditoria` (`audit.read`); consulta `GET /api/v1/audit-events` com filtros combináveis `entityType`/`entityId`/`actorUserId`/`action`/`cashSessionId`/`from`/`to` (ISO-8601 com offset; `from` inclusivo, `to` exclusivo), ordenação só `occurredat` (default desc) e paginação no `DataTable`; colunas instante, ação, autor, entidade, origem e motivo; OPERADOR não vê o menu e 403 → estado sem permissão. Passo dividido do 1211 (diff estimado acima de ~300 linhas); a visualização de `details` e o histórico por entidade são o 1211b.
   **Testes/aceite:** filtros combinados; OPERADOR não acessa.
   **Commit:** `feat(web): adiciona consulta de auditoria`
+
+- [ ] **1211b — Auditoria: details antes/depois e histórico por entidade**
+  **Objetivo:** enxergar o que mudou. **Depende:** 1211a
+  **Implementar:** visualização dos `details` (JSON livre) de forma legível, com `before`/`after` lado a lado e valores aninhados (arrays/objetos sem quebrar); atalho de histórico por entidade que fixa `entityType`+`entityId` na consulta a partir de um evento.
+  **Testes/aceite:** details aninhados legíveis; histórico por entidade filtra pelo par.
+  **Commit:** `feat(web): adiciona detalhes e historico por entidade`
 
 - [ ] **1212 — Relatórios e dashboard**
   **Objetivo:** visão do dia. **Depende:** 1203, 909
