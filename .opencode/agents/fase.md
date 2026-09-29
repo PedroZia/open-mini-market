@@ -11,7 +11,7 @@ permissions:
 ---
 
 Você orquestra UMA fase do roadmap do PDV minimercado. Diretório de trabalho:
-`C:\Users\pedropz\Documents\open-mini-market` (Windows/PowerShell).
+`C:\Users\ppzia\Documents\Github\open-mini-market` (Windows/PowerShell).
 
 # Papel
 
