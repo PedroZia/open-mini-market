@@ -10,3 +10,17 @@ const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' 
 export function formatMoney(value: number): string {
   return BRL.format(value);
 }
+
+/**
+ * Lê o decimal digitado pelo operador para o número cru do contrato — a conversão é de **entrada**,
+ * nunca de cálculo (BR-12): `"12,50"` e `"12.50"` viram `12.5` e nada é arredondado aqui. `null`
+ * quando o texto não é um decimal válido com a escala do contrato (preço 2 casas, quantidade 3).
+ */
+export function parseDecimalInput(input: string, fractions: 2 | 3 = 2): number | null {
+  const text = input.trim().replace(',', '.');
+  if (!new RegExp(`^\\d+(\\.\\d{1,${fractions}})?$`).test(text)) {
+    return null;
+  }
+  const value = Number(text);
+  return Number.isFinite(value) ? value : null;
+}

@@ -4,6 +4,9 @@ import { api } from '../../../api/client';
 /** Tipos do contrato OpenAPI — nada escrito à mão (§9.3). */
 export type ProductResponse = components['schemas']['ProductResponse'];
 export type PageResponseProductResponse = components['schemas']['PageResponseProductResponse'];
+export type CreateProductRequest = components['schemas']['CreateProductRequest'];
+export type UpdateProductRequest = components['schemas']['UpdateProductRequest'];
+export type ChangeProductPriceRequest = components['schemas']['ChangeProductPriceRequest'];
 
 /** Busca, filtros, ordenação e paginação de `GET /products`, como o contrato os aceita (§9.3). */
 export interface ProductQuery {
@@ -60,4 +63,44 @@ export function disableProduct(id: string): Promise<ProductResponse> {
 /** Reativa o produto (`POST /products/{id}/enable`, passo 412) e devolve-o já ativo. */
 export function enableProduct(id: string): Promise<ProductResponse> {
   return api.post<ProductResponse>(`${PATH}/${id}/enable`);
+}
+
+/**
+ * Detalhe do produto (`GET /products/{id}`, passo 408): é dele que sai o `version` do `If-Match` e
+ * os campos com que o formulário de edição é preenchido.
+ */
+export function getProduct(id: string): Promise<ProductResponse> {
+  return api.get<ProductResponse>(`${PATH}/${id}`);
+}
+
+/**
+ * Cadastra o produto (`POST /products`, passo 405): o servidor normaliza o barcode, valida unidade,
+ * categoria e preço e devolve o registro como o banco o guardou.
+ */
+export function createProduct(body: CreateProductRequest): Promise<ProductResponse> {
+  return api.post<ProductResponse>(PATH, body);
+}
+
+/**
+ * Edita o cadastro (`PUT /products/{id}`, passo 410) com o `If-Match` da versão lida no detalhe:
+ * quem gravou antes leva 409 `CONCURRENT_MODIFICATION` em vez de sobrescrever a outra edição (§9.4).
+ * Preço, barcode e situação não vão no corpo — cada um tem a operação própria.
+ */
+export function updateProduct(
+  id: string,
+  body: UpdateProductRequest,
+  version: number,
+): Promise<ProductResponse> {
+  return api.put<ProductResponse>(`${PATH}/${id}`, body, { ifMatch: String(version) });
+}
+
+/**
+ * Altera o preço com motivo (`PATCH /products/{id}/price`, passo 411): é a única forma de mudar
+ * preço e o motivo é obrigatório porque a alteração é auditada. O recurso não exige `If-Match`.
+ */
+export function changeProductPrice(
+  id: string,
+  body: ChangeProductPriceRequest,
+): Promise<ProductResponse> {
+  return api.patch<ProductResponse>(`${PATH}/${id}/price`, body);
 }

@@ -7,12 +7,15 @@ import { DataTable, type DataTableColumn } from '../../../shared/ui/DataTable';
 import { NoPermission } from '../../../shared/ui/NoPermission';
 import { useCategories } from '../../categories/hooks/useCategories';
 import type { ProductResponse } from '../api/productsApi';
+import { PriceModal } from '../components/PriceModal';
+import { ProductFormModal } from '../components/ProductFormModal';
 import { useDisableProduct, useEnableProduct, useProducts } from '../hooks/useProducts';
 
 /**
- * Lista de produtos (1204a): busca, filtros de categoria/situação, paginação e ordenação pelo
- * servidor, com desativar/reativar. Cadastro, edição e preço são o 1204b — esta tela só consulta e
- * muda a situação.
+ * Lista de produtos (1204a) e manutenção do catálogo (1204b): busca, filtros de categoria/situação,
+ * paginação e ordenação pelo servidor, com cadastro, edição (com `If-Match`), alteração de preço com
+ * motivo e desativar/reativar. Cada ação aparece só com a permissão que o servidor exige
+ * (`product.write`/`price.write`).
  *
  * A página é dona do estado da consulta (filtros, página e ordem) e o `DataTable` só desenha; o
  * servidor continua recalculando tudo (§4.4) — aqui nenhum valor é derivado de preço.
@@ -47,8 +50,12 @@ export function ProductsPage() {
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('all');
   const [sort, setSort] = useState<Sort | null>(null);
   const [page, setPage] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [pricing, setPricing] = useState<ProductResponse | null>(null);
 
   const canWrite = usePermission('product.write');
+  const canWritePrice = usePermission('price.write');
   const categories = useCategories();
   const products = useProducts({
     search,
@@ -108,8 +115,10 @@ export function ProductsPage() {
     },
   ];
 
-  // Sem `product.write` a coluna de ações nem existe: a permissão é do papel, não do clique.
-  if (canWrite) {
+  // Sem `product.write` nem `price.write` a coluna de ações nem existe: a permissão é do papel,
+  // não do clique. Produto desativado só aceita reativar — o detalhe, o PUT e o preço respondem 404
+  // para ele no servidor (o passo 412 é quem o traz de volta).
+  if (canWrite || canWritePrice) {
     columns.push({
       id: 'actions',
       header: 'Ações',
@@ -118,26 +127,58 @@ export function ProductsPage() {
           return null;
         }
         const id = product.id;
-        return product.active === false ? (
-          <button
-            type="button"
-            aria-label={`Reativar ${product.name ?? 'produto'}`}
-            disabled={pending}
-            onClick={() => enable.mutate(id)}
-            className={actionButtonClassName}
-          >
-            Reativar
-          </button>
-        ) : (
-          <button
-            type="button"
-            aria-label={`Desativar ${product.name ?? 'produto'}`}
-            disabled={pending}
-            onClick={() => disable.mutate(id)}
-            className={actionButtonClassName}
-          >
-            Desativar
-          </button>
+        const name = product.name ?? 'produto';
+
+        if (product.active === false) {
+          return canWrite ? (
+            <button
+              type="button"
+              aria-label={`Reativar ${name}`}
+              disabled={pending}
+              onClick={() => enable.mutate(id)}
+              className={actionButtonClassName}
+            >
+              Reativar
+            </button>
+          ) : null;
+        }
+
+        return (
+          <div className="flex flex-wrap gap-2">
+            {canWrite ? (
+              <button
+                type="button"
+                aria-label={`Editar ${name}`}
+                disabled={pending}
+                onClick={() => setEditingId(id)}
+                className={actionButtonClassName}
+              >
+                Editar
+              </button>
+            ) : null}
+            {canWritePrice ? (
+              <button
+                type="button"
+                aria-label={`Alterar preço de ${name}`}
+                disabled={pending}
+                onClick={() => setPricing(product)}
+                className={actionButtonClassName}
+              >
+                Preço
+              </button>
+            ) : null}
+            {canWrite ? (
+              <button
+                type="button"
+                aria-label={`Desativar ${name}`}
+                disabled={pending}
+                onClick={() => disable.mutate(id)}
+                className={actionButtonClassName}
+              >
+                Desativar
+              </button>
+            ) : null}
+          </div>
         );
       },
     });
@@ -145,13 +186,25 @@ export function ProductsPage() {
 
   return (
     <section aria-labelledby="titulo-produtos" className="mx-auto flex max-w-6xl flex-col gap-6">
-      <header className="flex flex-col gap-1">
-        <h1 id="titulo-produtos" className="text-2xl font-semibold">
-          Produtos
-        </h1>
-        <p className="text-sm text-ink-muted">
-          Consulte o catálogo e tire ou volte produtos de linha.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 id="titulo-produtos" className="text-2xl font-semibold">
+            Produtos
+          </h1>
+          <p className="text-sm text-ink-muted">
+            Consulte o catálogo, cadastre produtos e mantenha preços.
+          </p>
+        </div>
+
+        {canWrite ? (
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="min-h-10 rounded-md bg-brand px-4 text-sm font-semibold text-white transition-colors duration-150 ease-out hover:bg-brand/90 motion-reduce:transition-none"
+          >
+            Novo produto
+          </button>
+        ) : null}
       </header>
 
       <div className="grid gap-3 rounded-lg border border-line bg-surface p-4 sm:grid-cols-3">
@@ -238,6 +291,13 @@ export function ProductsPage() {
         }}
         emptyMessage="Nenhum produto encontrado."
       />
+
+      {/* Os modais vivem só enquanto abertos: cada abertura relê o detalhe (versão do `If-Match`). */}
+      {creating ? <ProductFormModal onClose={() => setCreating(false)} /> : null}
+      {editingId !== null ? (
+        <ProductFormModal productId={editingId} onClose={() => setEditingId(null)} />
+      ) : null}
+      {pricing !== null ? <PriceModal product={pricing} onClose={() => setPricing(null)} /> : null}
     </section>
   );
 }

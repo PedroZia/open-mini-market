@@ -1201,9 +1201,9 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** lista renderiza/filtra/pagina/ordena e desativa/reativa; ações escondidas sem permissão.
   **Commit:** `feat(web): adiciona lista de produtos`
 
-- [ ] **1204b — Produtos: cadastro, edição e preço**
+- [x] **1204b — Produtos: cadastro, edição e preço**
   **Objetivo:** manter o catálogo. **Depende:** 1204a
-  **Implementar:** formulário de criação/edição (RHF+Zod) com `PUT` e `If-Match` (extensão aditiva `ifMatch` em `RequestOptions` do `@minimarket/api-client`, com teste); barcode somente leitura na edição; alteração de preço com motivo (`PATCH /produtos/{id}/price`); conflito `CONCURRENT_MODIFICATION` mostra mensagem e recarrega; unidade `UN`/`KG`.
+  **Implementar:** formulário de criação/edição (RHF+Zod) com `PUT` e `If-Match` (extensão aditiva `ifMatch` em `RequestOptions` do `@minimarket/api-client`, com teste); barcode somente leitura na edição; alteração de preço com motivo (`PATCH /products/{id}/price`); conflito `CONCURRENT_MODIFICATION` mostra mensagem e recarrega; unidade `UN`/`KG`.
   **Testes/aceite:** CRUD completo na UI; conflito de versão mostra mensagem e recarrega.
   **Commit:** `feat(web): adiciona cadastro e edicao de produtos`
 

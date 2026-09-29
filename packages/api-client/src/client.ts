@@ -2,8 +2,8 @@ import { ApiError, ApiNetworkError, ApiTimeoutError, type ProblemDetails } from 
 
 /**
  * Client HTTP da API do PDV: um `fetch` com o que a API exige e não vem pronto no runtime —
- * bearer token, `Idempotency-Key` automática, timeout, retry de leitura e `problem+json`
- * traduzido para {@link ApiError} (§9.2 do plano).
+ * bearer token, `Idempotency-Key` automática, `If-Match` opcional das escritas com lock otimista,
+ * timeout, retry de leitura e `problem+json` traduzido para {@link ApiError} (§9.2 do plano).
  *
  * O caminho é o do recurso (`/api/v1/...`) e o tipo da resposta sai do contrato OpenAPI
  * (`components['schemas'][...]`), nunca de um tipo escrito à mão:
@@ -46,6 +46,12 @@ export interface ApiClientOptions {
 export interface RequestOptions {
   /** Sobrescreve a `Idempotency-Key` gerada automaticamente (POST/PUT/PATCH/DELETE). */
   idempotencyKey?: string;
+  /**
+   * Versão esperada do recurso no `If-Match` das escritas (lock otimista, §9.4): o valor vem do
+   * `version` lido no detalhe e o servidor responde 409 `CONCURRENT_MODIFICATION` quando alguém
+   * gravou no meio. Escrita sem a versão informada não leva o cabeçalho; GET nunca leva.
+   */
+  ifMatch?: string;
 }
 
 /** O client em si: verbo → caminho → resposta tipada pelo contrato. */
@@ -105,6 +111,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       // Toda escrita é idempotente por contrato: a chave nova por chamada é o que se sobrescreve
       // quando o chamador quer repetir a mesma operação (duplo clique, resposta perdida).
       headers.set('idempotency-key', requestOptions?.idempotencyKey ?? crypto.randomUUID());
+      // O `If-Match` é opt-in: só as escritas com lock otimista (PUT de cadastro, §9.4) o levam.
+      if (requestOptions?.ifMatch !== undefined) {
+        headers.set('if-match', requestOptions.ifMatch);
+      }
     }
 
     let response: Response;

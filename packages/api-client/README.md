@@ -63,6 +63,9 @@ const page = await client.get<components['schemas']['PageResponseProductResponse
   **mesma** operação (duplo clique, resposta perdida) passe a chave da 1ª chamada:
   `client.post(path, body, { idempotencyKey })` — o servidor devolve a mesma resposta, sem duplicar
   venda/movimento (§8 do plano).
+- **`If-Match`** é opt-in nas escritas com lock otimista: `client.put(path, body, { ifMatch: '3' })`
+  manda a versão lida no detalhe e o servidor responde 409 `CONCURRENT_MODIFICATION` se alguém
+  gravou no meio (§9.4 do plano). GET nunca leva o cabeçalho.
 - **Retry** acontece só em GET, e só em falha de rede ou 5xx: repetir escrita duplicaria dinheiro e
   estoque. Timeout **não** repete (a espera já foi gasta uma vez).
 - **Erros**: 4xx/5xx viram `ApiError` (`status`, `code`, `title`, `detail`, `errors[]`, `traceId`);

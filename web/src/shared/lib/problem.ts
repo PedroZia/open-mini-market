@@ -84,3 +84,11 @@ export function isUnauthorized(error: unknown): boolean {
 export function isForbidden(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403;
 }
+
+/**
+ * `true` para 409 de versão velha (`If-Match` do §9.4): o formulário mostra a mensagem de erro e
+ * recarrega o registro — retentar com a versão antiga só devolveria o mesmo conflito.
+ */
+export function isConcurrentModification(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'CONCURRENT_MODIFICATION';
+}

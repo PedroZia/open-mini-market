@@ -254,6 +254,28 @@ describe('createApiClient', () => {
     expect(api.requests[1]?.body).toBe('{"type":"PERCENT","value":10}');
   });
 
+  test('escrita manda If-Match quando o chamador informa a versão lida no detalhe', async () => {
+    const api = await startFakeApi((_request, response) => sendJson(response, 200, { id: '019' }));
+    const client = createApiClient({ baseUrl: api.baseUrl });
+
+    await client.put('/api/v1/products/019', { name: 'Arroz' }, { ifMatch: '7' });
+    await client.post('/api/v1/products/019/disable', undefined, { ifMatch: '"8"' });
+
+    expect(api.requests[0]?.headers['if-match']).toBe('7');
+    expect(api.requests[1]?.headers['if-match']).toBe('"8"');
+  });
+
+  test('If-Match fica de fora sem a versão informada e nunca vai em GET', async () => {
+    const api = await startFakeApi((_request, response) => sendJson(response, 200, { id: '019' }));
+    const client = createApiClient({ baseUrl: api.baseUrl });
+
+    await client.put('/api/v1/products/019', { name: 'Arroz' });
+    await client.get('/api/v1/products/019', { ifMatch: '7' });
+
+    expect(api.requests[0]?.headers['if-match']).toBeUndefined();
+    expect(api.requests[1]?.headers['if-match']).toBeUndefined();
+  });
+
   test('204 sem corpo resolve sem tentar ler JSON', async () => {
     const api = await startFakeApi((_request, response) => {
       response.writeHead(204);
