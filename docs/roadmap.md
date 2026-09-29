@@ -1195,7 +1195,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** testes de `DataTable` e do mapeamento de erro; 403 exibe mensagem clara.
   **Commit:** `feat(web): adiciona componentes e tratamento de erros`
 
-- [ ] **1204a — Produtos: lista, filtros e desativação**
+- [x] **1204a — Produtos: lista, filtros e desativação**
   **Objetivo:** consultar e tirar/voltar produto de linha. **Depende:** 1203, 412
   **Implementar:** rota e item de navegação `Produtos`; lista com `search`, filtros `categoryId`/`active`, paginação e `sort` do servidor (`name,price,createdat`) no `DataTable`; desativar/reativar (`POST /products/{id}/disable` e `/enable`) com `product.write` escondendo/desabilitando ações; preço formatado pt-BR. Passo dividido do 1204 (diff estimado acima de ~300 linhas); cadastro/edição/preço são o 1204b.
   **Testes/aceite:** lista renderiza/filtra/pagina/ordena e desativa/reativa; ações escondidas sem permissão.

@@ -4,7 +4,10 @@ import { NavLink } from 'react-router';
  * Itens da navegação lateral: só rotas que existem de verdade. Os módulos da retaguarda
  * (produtos, estoque, caixa...) entram aqui conforme cada passo cria a rota — sem link morto.
  */
-const navigationItems = [{ to: '/', label: 'Início' }] as const;
+const navigationItems = [
+  { to: '/', label: 'Início' },
+  { to: '/products', label: 'Produtos' },
+] as const;
 
 const itemClassName =
   'relative flex min-h-11 items-center rounded-md px-3 text-sm transition-colors duration-150 ease-out focus-visible:outline-nav-ink motion-reduce:transition-none';

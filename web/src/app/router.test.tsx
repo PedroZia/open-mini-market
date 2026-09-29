@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { createMemoryRouter } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 import { describe, expect, it, vi } from 'vitest';
@@ -54,4 +54,62 @@ describe('rota inicial', () => {
     expect(screen.getByText('Ana')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sair' })).toBeInTheDocument();
   });
+
+  it('navega para Produtos pelo item lateral e renderiza a lista (1204a)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        // A sessão é validada em paralelo com a lista; cada rota responde o seu contrato.
+        if (url.startsWith('/api/v1/products')) {
+          return jsonFetchResponse({
+            items: [],
+            page: 0,
+            size: 20,
+            totalItems: 0,
+            totalPages: 0,
+          });
+        }
+        if (url.startsWith('/api/v1/categories')) {
+          return jsonFetchResponse([]);
+        }
+        return jsonFetchResponse({
+          user: { id: 'u1', username: 'ana', displayName: 'Ana' },
+          roles: [],
+          permissions: ['product.read'],
+        });
+      }),
+    );
+
+    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('heading', { name: 'Início' });
+    fireEvent.click(screen.getByRole('link', { name: 'Produtos' }));
+
+    expect(await screen.findByRole('heading', { name: 'Produtos' })).toBeInTheDocument();
+
+    // Rota real (sem link morto): o item fica ativo e a URL muda para /products.
+    expect(screen.getByRole('link', { name: 'Produtos' })).toHaveAttribute('aria-current', 'page');
+    expect(router.state.location.pathname).toBe('/products');
+  });
 });
+
+/** Resposta mínima do `fetch` para as rotas do teste — mesmo formato que o client consome. */
+function jsonFetchResponse(body: unknown): {
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+} {
+  return {
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(body),
+  };
+}

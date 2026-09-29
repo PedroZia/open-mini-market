@@ -3,6 +3,7 @@ import { AuthProvider } from '../features/auth/AuthProvider';
 import { RequireAuth } from '../features/auth/RequireAuth';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
+import { ProductsPage } from '../features/products/pages/ProductsPage';
 import { AppLayout } from './layout/AppLayout';
 
 /**
@@ -24,7 +25,10 @@ export const routes: RouteObject[] = [
           {
             path: '/',
             element: <AppLayout />,
-            children: [{ index: true, element: <DashboardPage /> }],
+            children: [
+              { index: true, element: <DashboardPage /> },
+              { path: 'products', element: <ProductsPage /> },
+            ],
           },
         ],
       },
