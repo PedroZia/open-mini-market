@@ -1408,6 +1408,85 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/v1/reports/low-stock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Low Stock */
+        get: {
+            parameters: {
+                query?: {
+                    page?: string;
+                    size?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PageResponseLowStockItemResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/sales-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sales Summary */
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    groupBy?: string;
+                    to?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesSummaryResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/roles": {
         parameters: {
             query?: never;
@@ -2729,6 +2808,14 @@ export interface components {
             username?: string;
             displayName?: string;
         };
+        LowStockItemResponse: {
+            productId?: components["schemas"]["UUID"];
+            name?: string;
+            barcode?: string;
+            unit?: string;
+            quantity?: number;
+            minQuantity?: number;
+        };
         MetaResponse: {
             apiVersion?: string;
             storeCode?: string;
@@ -2754,6 +2841,17 @@ export interface components {
         };
         PageResponseCustomerResponse: {
             items?: components["schemas"]["CustomerResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            totalItems?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        PageResponseLowStockItemResponse: {
+            items?: components["schemas"]["LowStockItemResponse"][];
             /** Format: int32 */
             page?: number;
             /** Format: int32 */
@@ -2958,6 +3056,22 @@ export interface components {
             itemCount?: number;
             createdAt?: components["schemas"]["Instant"];
             completedAt?: components["schemas"]["Instant"];
+        };
+        SalesSummaryGroupResponse: {
+            key?: string;
+            /** Format: int64 */
+            salesCount?: number;
+            total?: number;
+        };
+        SalesSummaryResponse: {
+            from?: components["schemas"]["Instant"];
+            to?: components["schemas"]["Instant"];
+            groupBy?: string;
+            /** Format: int64 */
+            salesCount?: number;
+            total?: number;
+            ticketAverage?: number;
+            groups?: components["schemas"]["SalesSummaryGroupResponse"][];
         };
         /** @enum {string} */
         SessionClient: "TUI" | "WEB";

@@ -1279,7 +1279,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** details aninhados legíveis; histórico por entidade filtra pelo par.
   **Commit:** `feat(web): adiciona detalhes e historico por entidade`
 
-- [ ] **1212a — Relatórios: endpoints de agregação (backend)**
+- [x] **1212a — Relatórios: endpoints de agregação (backend)**
   **Objetivo:** dar base ao dashboard e aos relatórios. **Depende:** 002, 909
   **Implementar:** no módulo `reports` (hoje só `package-info`), `GET /api/v1/reports/sales-summary?from=&to=&groupBy=day|operator|paymentMethod` e `GET /api/v1/reports/low-stock?page=&size=`; `report.read`, leitura pura sem auditoria e sem migration; DTOs mínimos; período `from` inclusivo/`to` exclusivo (ISO-8601 com offset via `QueryParams.instantOf`) e `size` com teto de 100; rotas novas em `RouteSecurityTest.API_ROUTES`. Divisão autorizada (o passo original pedia endpoints inexistentes); o web é o 1212b.
   **Testes/aceite:** RestAssured com PostgreSQL real cobrindo os `groupBy`, período inclusivo/exclusivo, parâmetros inválidos, 403 do OPERADOR e 200 de GERENTE/ADMIN; `.\mvnw.cmd verify` verde; `schema.d.ts` regenerado só com os tipos novos.
