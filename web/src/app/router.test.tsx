@@ -319,6 +319,59 @@ describe('rota inicial', () => {
     expect(screen.getByRole('link', { name: 'Papéis' })).toHaveAttribute('aria-current', 'page');
     expect(router.state.location.pathname).toBe('/roles');
   });
+
+  it('navega para Vendas pelo item lateral e renderiza a lista (1209a)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith('/api/v1/sales')) {
+          return jsonFetchResponse({
+            items: [
+              {
+                id: 's1',
+                number: 12,
+                status: 'COMPLETED',
+                operatorUserId: '0198f3b7-8e2f-7c4a-8d1e-000000000002',
+                itemCount: 3,
+                total: 31.9,
+                createdAt: '2026-09-28T22:21:54Z',
+              },
+            ],
+            page: 0,
+            size: 20,
+            totalItems: 1,
+            totalPages: 1,
+          });
+        }
+        return jsonFetchResponse({
+          user: { id: 'u1', username: 'ana', displayName: 'Ana' },
+          roles: [],
+          permissions: ['report.read'],
+        });
+      }),
+    );
+
+    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('heading', { name: 'Início' });
+    // O item só aparece com `report.read` na sessão (GERENTE/ADMIN).
+    fireEvent.click(screen.getByRole('link', { name: 'Vendas' }));
+
+    expect(await screen.findByRole('heading', { name: 'Vendas' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: 'Concluída' })).toBeInTheDocument();
+
+    // Rota real (sem link morto): o item fica ativo e a URL muda para /sales.
+    expect(screen.getByRole('link', { name: 'Vendas' })).toHaveAttribute('aria-current', 'page');
+    expect(router.state.location.pathname).toBe('/sales');
+  });
 });
 
 /** Resposta mínima do `fetch` para as rotas do teste — mesmo formato que o client consome. */

@@ -1243,7 +1243,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** troca de permissões na UI; sem `role.write` não edita.
   **Commit:** `feat(web): adiciona tela de papeis e permissoes`
 
-- [ ] **1209a — Vendas: lista com filtros**
+- [x] **1209a — Vendas: lista com filtros**
   **Objetivo:** consultar vendas por período/status/operador. **Depende:** 1203, 813
   **Implementar:** rota e item de navegação `Vendas` (só com `report.read`); lista `GET /api/v1/sales` com filtros `from`/`to` (ISO-8601 com offset), `status` (`OPEN|COMPLETED|CANCELLED`) e `operatorUserId` (picker apenas com `user.read`) e paginação no `DataTable` (a rota não tem `sort`); colunas número, situação, data, operador, itens e total. Passo dividido do 1209 (diff estimado acima de ~300 linhas); detalhe, trilha e cancelamento são o 1209b.
   **Testes/aceite:** filtros funcionam e aparecem na query; menu só com `report.read`.

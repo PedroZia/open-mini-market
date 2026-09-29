@@ -5,10 +5,10 @@ import { AuthContext, type AuthContextValue } from '../../features/auth/AuthCont
 import { SidebarNav } from './SidebarNav';
 
 /**
- * Navegação com permissão (1208a/1208b): "Usuários" e "Papéis" só existem para quem tem `user.read`
- * na sessão — é assim que GERENTE e OPERADOR não veem a administração de acessos. Sem permissão
- * declarada, o item continua aparecendo para todo mundo. O servidor é quem barra de verdade (403 na
- * rota).
+ * Navegação com permissão (1208a/1208b/1209a): "Usuários" e "Papéis" só existem para quem tem
+ * `user.read` na sessão e "Vendas" só com `report.read` — é assim que GERENTE e OPERADOR não veem a
+ * administração de acessos e o OPERADOR não vê o histórico. Sem permissão declarada, o item continua
+ * aparecendo para todo mundo. O servidor é quem barra de verdade (403 na rota).
  */
 
 function sessionWith(permissions: string[]): AuthContextValue {
@@ -58,5 +58,17 @@ describe('SidebarNav — itens com permissão', () => {
     renderNav(['product.read', 'sale.create']);
 
     expect(screen.queryByRole('link', { name: 'Papéis' })).toBeNull();
+  });
+
+  it('mostra Vendas para quem tem report.read (GERENTE)', () => {
+    renderNav(['report.read', 'product.read']);
+
+    expect(screen.getByRole('link', { name: 'Vendas' })).toHaveAttribute('href', '/sales');
+  });
+
+  it('esconde Vendas do OPERADOR sem report.read', () => {
+    renderNav(['sale.create', 'product.read', 'customer.write']);
+
+    expect(screen.queryByRole('link', { name: 'Vendas' })).toBeNull();
   });
 });
