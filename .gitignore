@@ -16,6 +16,10 @@ coverage/
 npm-debug.log*
 yarn-error.log*
 
+# --- Playwright (E2E local do web) ---
+test-results/
+playwright-report/
+
 # --- Ambiente ---
 .env
 .env.*

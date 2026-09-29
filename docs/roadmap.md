@@ -1291,7 +1291,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** números conferem com os dados de teste; filtros de período corretos.
   **Commit:** `feat(web): adiciona dashboard e relatorios`
 
-- [ ] **1213 — E2E Playwright**
+- [x] **1213 — E2E Playwright**
   **Objetivo:** provar a retaguarda. **Depende:** 1212
   **Implementar:** cenários: login → criar produto → conferir na lista; login → consultar venda concluída → ver auditoria.
   **Testes/aceite:** E2E verde contra backend real.
