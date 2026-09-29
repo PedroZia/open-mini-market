@@ -36,8 +36,11 @@ describe('rota inicial', () => {
     // validação da sessão termina (antes disso a guarda mostra "Validando a sessão…").
     const heading = await screen.findByRole('heading', { name: 'Início' });
 
-    // Casca do 1201b: cabeçalho, navegação lateral e área de conteúdo.
-    expect(screen.getByRole('banner')).toBeInTheDocument();
+    // Casca do 1201b: cabeçalho, navegação lateral e área de conteúdo. A asserção é pela marca, e
+    // não por `getByRole('banner')`: cada página também tem o seu `<header>` de título (dentro da
+    // `<section>`) e o RTL mapeia todo `header` para o papel `banner`, então o papel já não
+    // identifica só o cabeçalho do layout.
+    expect(screen.getByText('Minimarket')).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Navegação principal' })).toBeInTheDocument();
     expect(screen.getByRole('main')).toContainElement(heading);
 

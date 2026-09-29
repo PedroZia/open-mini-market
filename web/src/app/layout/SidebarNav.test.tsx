@@ -73,6 +73,21 @@ describe('SidebarNav — itens com permissão', () => {
     expect(screen.queryByRole('link', { name: 'Vendas' })).toBeNull();
   });
 
+  it('mostra Relatórios para quem tem report.read (GERENTE)', () => {
+    renderNav(['report.read', 'product.read']);
+
+    expect(screen.getByRole('link', { name: 'Relatórios' })).toHaveAttribute(
+      'href',
+      '/reports',
+    );
+  });
+
+  it('esconde Relatórios do OPERADOR sem report.read', () => {
+    renderNav(['sale.create', 'product.read', 'cash.read']);
+
+    expect(screen.queryByRole('link', { name: 'Relatórios' })).toBeNull();
+  });
+
   it('mostra Caixa para quem tem cash.read (OPERADOR)', () => {
     renderNav(['cash.read', 'cash.open']);
 

@@ -7,9 +7,9 @@ import { hasPermission } from '../../shared/lib/permissions';
  * (produtos, estoque, caixa...) entram aqui conforme cada passo cria a rota — sem link morto.
  *
  * O item com `permission` só é oferecido a quem tem o código na sessão: GERENTE e OPERADOR não veem
- * "Usuários" nem "Papéis" (`user.read` é do ADMIN) e o OPERADOR não vê "Vendas" (`report.read`) nem
- * "Auditoria" (`audit.read`) — as duas são de GERENTE/ADMIN. É conveniência de UI — a rota segue
- * protegida pelo 403 do servidor, que é quem manda.
+ * "Usuários" nem "Papéis" (`user.read` é do ADMIN) e o OPERADOR não vê "Vendas", "Relatórios"
+ * (`report.read`) nem "Auditoria" (`audit.read`) — as três são de GERENTE/ADMIN. É conveniência de
+ * UI — a rota segue protegida pelo 403 do servidor, que é quem manda.
  */
 const navigationItems = [
   { to: '/', label: 'Início' },
@@ -19,6 +19,7 @@ const navigationItems = [
   { to: '/categories', label: 'Categorias' },
   { to: '/customers', label: 'Clientes' },
   { to: '/sales', label: 'Vendas', permission: 'report.read' },
+  { to: '/reports', label: 'Relatórios', permission: 'report.read' },
   { to: '/audit', label: 'Auditoria', permission: 'audit.read' },
   { to: '/users', label: 'Usuários', permission: 'user.read' },
   { to: '/roles', label: 'Papéis', permission: 'user.read' },

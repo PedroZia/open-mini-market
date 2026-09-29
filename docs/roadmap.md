@@ -1285,7 +1285,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** RestAssured com PostgreSQL real cobrindo os `groupBy`, período inclusivo/exclusivo, parâmetros inválidos, 403 do OPERADOR e 200 de GERENTE/ADMIN; `.\mvnw.cmd verify` verde; `schema.d.ts` regenerado só com os tipos novos.
   **Commit:** `feat(reports): adiciona endpoints de relatorios`
 
-- [ ] **1212b — Dashboard e relatórios (web)**
+- [x] **1212b — Dashboard e relatórios (web)**
   **Objetivo:** visão do dia e consultas de período. **Depende:** 1212a, 1203
   **Implementar:** dashboard (vendas do dia, faturamento, ticket médio, formas de pagamento) no lugar do placeholder de "Início" + relatório de vendas por período/operador e estoque baixo, consumindo os endpoints do 1212a com tipos do `@minimarket/api-client`; agregados sempre do servidor; itens de menu por permissão `report.read`.
   **Testes/aceite:** números conferem com os dados de teste; filtros de período corretos.

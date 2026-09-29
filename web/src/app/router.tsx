@@ -10,6 +10,7 @@ import { CategoriesPage } from '../features/categories/pages/CategoriesPage';
 import { CustomersPage } from '../features/customers/pages/CustomersPage';
 import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
 import { ProductsPage } from '../features/products/pages/ProductsPage';
+import { ReportsPage } from '../features/reports/pages/ReportsPage';
 import { RolesPage } from '../features/roles/pages/RolesPage';
 import { SaleDetailPage } from '../features/sales/pages/SaleDetailPage';
 import { SalesPage } from '../features/sales/pages/SalesPage';
@@ -46,6 +47,7 @@ export const routes: RouteObject[] = [
               { path: 'customers', element: <CustomersPage /> },
               { path: 'sales', element: <SalesPage /> },
               { path: 'sales/:id', element: <SaleDetailPage /> },
+              { path: 'reports', element: <ReportsPage /> },
               { path: 'audit', element: <AuditPage /> },
               { path: 'cash-registers', element: <CashRegistersPage /> },
               { path: 'cash-registers/:id', element: <CashRegisterDetailPage /> },
