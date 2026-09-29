@@ -95,3 +95,11 @@ export function isForbidden(error: unknown): boolean {
 export function isConcurrentModification(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'CONCURRENT_MODIFICATION';
 }
+
+/**
+ * `true` para 409 `CONFLICT`: regra de estado do servidor recusou a operação (ex.: desativar o
+ * último ADMIN ativo). Quem chama recarrega o recurso, porque a versão na tela pode estar velha.
+ */
+export function isConflict(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'CONFLICT';
+}

@@ -1,6 +1,13 @@
 import { ApiError, ApiNetworkError, ApiTimeoutError } from '@minimarket/api-client';
 import { describe, expect, it } from 'vitest';
-import { errorMessage, fieldErrors, isConcurrentModification, isForbidden, isUnauthorized } from './problem';
+import {
+  errorMessage,
+  fieldErrors,
+  isConcurrentModification,
+  isConflict,
+  isForbidden,
+  isUnauthorized,
+} from './problem';
 
 describe('errorMessage', () => {
   it('usa a mensagem do código estável, não o detalhe do servidor', () => {
@@ -106,5 +113,13 @@ describe('isConcurrentModification', () => {
     expect(isConcurrentModification(new ApiError(409, { code: 'CONCURRENT_MODIFICATION' }))).toBe(true);
     expect(isConcurrentModification(new ApiError(409, { code: 'BARCODE_ALREADY_EXISTS' }))).toBe(false);
     expect(isConcurrentModification(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('isConflict', () => {
+  it('reconhece a recusa de estado do servidor (último ADMIN ativo) e só ela', () => {
+    expect(isConflict(new ApiError(409, { code: 'CONFLICT' }))).toBe(true);
+    expect(isConflict(new ApiError(409, { code: 'CONCURRENT_MODIFICATION' }))).toBe(false);
+    expect(isConflict(new Error('boom'))).toBe(false);
   });
 });

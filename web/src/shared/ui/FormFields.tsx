@@ -61,6 +61,8 @@ export interface TextFieldProps {
   /** `decimal`/`numeric` abrem o teclado adequado no celular/tablet da retaguarda. */
   inputMode?: 'text' | 'decimal' | 'numeric';
   readOnly?: boolean;
+  /** `password` esconde o valor digitado (senha do usuário e reset). */
+  type?: 'text' | 'password';
 }
 
 export function TextField({
@@ -71,6 +73,7 @@ export function TextField({
   hint,
   inputMode = 'text',
   readOnly = false,
+  type = 'text',
 }: TextFieldProps) {
   return (
     <FieldFrame id={id} label={label} error={error} hint={hint}>
@@ -78,7 +81,7 @@ export function TextField({
         {...field}
         {...ariaOf(id, error)}
         id={id}
-        type="text"
+        type={type}
         inputMode={inputMode}
         readOnly={readOnly}
         className={fieldClassName}

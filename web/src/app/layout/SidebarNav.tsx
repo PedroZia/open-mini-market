@@ -1,8 +1,14 @@
 import { NavLink } from 'react-router';
+import { useAuth } from '../../features/auth/AuthContext';
+import { hasPermission } from '../../shared/lib/permissions';
 
 /**
  * Itens da navegação lateral: só rotas que existem de verdade. Os módulos da retaguarda
  * (produtos, estoque, caixa...) entram aqui conforme cada passo cria a rota — sem link morto.
+ *
+ * O item com `permission` só é oferecido a quem tem o código na sessão: GERENTE e OPERADOR não veem
+ * "Usuários" (`user.read` é do ADMIN). É conveniência de UI — a rota segue protegida pelo 403 do
+ * servidor, que é quem manda.
  */
 const navigationItems = [
   { to: '/', label: 'Início' },
@@ -10,6 +16,7 @@ const navigationItems = [
   { to: '/stock', label: 'Estoque' },
   { to: '/categories', label: 'Categorias' },
   { to: '/customers', label: 'Clientes' },
+  { to: '/users', label: 'Usuários', permission: 'user.read' },
 ] as const;
 
 const itemClassName =
@@ -17,13 +24,18 @@ const itemClassName =
 
 /** Navegação principal da retaguarda: coluna à esquerda no desktop, barra no topo no estreito. */
 export function SidebarNav() {
+  const { permissions } = useAuth();
+  const items = navigationItems.filter(
+    (item) => !('permission' in item) || hasPermission(permissions, item.permission),
+  );
+
   return (
     <nav
       aria-label="Navegação principal"
       className="bg-nav px-2 py-2 md:w-64 md:shrink-0 md:px-3 md:py-4"
     >
       <ul className="flex gap-1 md:flex-col md:gap-0.5">
-        {navigationItems.map((item) => (
+        {items.map((item) => (
           <li key={item.to} className="md:w-full">
             <NavLink
               to={item.to}

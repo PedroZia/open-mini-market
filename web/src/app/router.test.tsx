@@ -220,6 +220,61 @@ describe('rota inicial', () => {
     );
     expect(router.state.location.pathname).toBe('/customers');
   });
+
+  it('navega para Usuários pelo item lateral e renderiza a lista (1208a)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith('/api/v1/users')) {
+          return jsonFetchResponse({
+            items: [
+              {
+                id: 'u1',
+                username: 'ana',
+                displayName: 'Ana Souza',
+                roles: ['ADMIN'],
+                status: 'ACTIVE',
+                mustChangePassword: false,
+              },
+            ],
+            page: 0,
+            size: 20,
+            totalItems: 1,
+            totalPages: 1,
+          });
+        }
+        return jsonFetchResponse({
+          user: { id: 'u1', username: 'ana', displayName: 'Ana' },
+          roles: [],
+          permissions: ['user.read'],
+        });
+      }),
+    );
+
+    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('heading', { name: 'Início' });
+    // O item só aparece com `user.read` na sessão (ADMIN).
+    fireEvent.click(screen.getByRole('link', { name: 'Usuários' }));
+
+    expect(await screen.findByRole('heading', { name: 'Usuários' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: 'Ana Souza' })).toBeInTheDocument();
+
+    // Rota real (sem link morto): o item fica ativo e a URL muda para /users.
+    expect(screen.getByRole('link', { name: 'Usuários' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(router.state.location.pathname).toBe('/users');
+  });
 });
 
 /** Resposta mínima do `fetch` para as rotas do teste — mesmo formato que o client consome. */

@@ -1231,7 +1231,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** CRUD na UI; validação de CPF.
   **Commit:** `feat(web): adiciona gestao de clientes`
 
-- [ ] **1208a — Usuários**
+- [x] **1208a — Usuários**
   **Objetivo:** administrar acessos. **Depende:** 1203, 114
   **Implementar:** rota e item de navegação `Usuários` (só com `user.read`); lista `GET /users` com `search`, filtro `active` (`true`/`false`), `sort` (`username|displayname|createdat`) e paginação; criar/editar com os papéis de `GET /roles`; desativar/habilitar; reset de senha (`POST /{id}/password-reset`, mínimo 8) e revogar sessões (`DELETE /{id}/sessions`, `user.session.revoke`); último ADMIN ativo protegido pelo servidor (409 `CONFLICT`) com mensagem clara. Passo dividido do 1208 (diff estimado acima de ~300 linhas); a tela de papéis é o 1208b.
   **Testes/aceite:** ADMIN gerencia; GERENTE/OPERADOR não veem o menu; permissões aplicadas na UI.
