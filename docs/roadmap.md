@@ -1273,7 +1273,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** filtros combinados; OPERADOR não acessa.
   **Commit:** `feat(web): adiciona consulta de auditoria`
 
-- [ ] **1211b — Auditoria: details antes/depois e histórico por entidade**
+- [x] **1211b — Auditoria: details antes/depois e histórico por entidade**
   **Objetivo:** enxergar o que mudou. **Depende:** 1211a
   **Implementar:** visualização dos `details` (JSON livre) de forma legível, com `before`/`after` lado a lado e valores aninhados (arrays/objetos sem quebrar); atalho de histórico por entidade que fixa `entityType`+`entityId` na consulta a partir de um evento.
   **Testes/aceite:** details aninhados legíveis; histórico por entidade filtra pelo par.

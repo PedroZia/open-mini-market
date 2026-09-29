@@ -39,10 +39,12 @@ interface StubAuditEvent {
   source: string;
   reason?: string;
   cashSessionId?: string;
+  details?: Record<string, unknown>;
 }
 
 // UUIDs no formato do contrato: os campos de id só entram na query fechados nesse formato.
 const ENTITY_ID = '0198f9c4-5b6d-7e8f-9a0b-000000000010';
+const PRODUCT_ID = '0198f9c4-5b6d-7e8f-9a0b-000000000011';
 const ANA_ID = '0198f3a2-4c1d-7a2e-9b3f-000000000001';
 const BRUNO_ID = '0198f3b7-8e2f-7c4a-8d1e-000000000002';
 const CASH_SESSION_ID = '0198f5a1-3c4d-7e5f-8a91-000000000003';
@@ -58,9 +60,16 @@ const SALE_COMPLETED: StubAuditEvent = {
   source: 'TUI',
   reason: 'Fechamento do turno',
   cashSessionId: CASH_SESSION_ID,
+  // O antes/depois de uma alteração e mais uma chave fora do par: os dois têm que aparecer.
+  details: {
+    before: { total: 120 },
+    after: { total: 140 },
+    paymentsByMethod: { CASH: 140, PIX: 10 },
+  },
 };
 
-// Sem `actorUsername` e sem `entityId`: a tela cai no id curto do autor e no tipo puro da entidade.
+// Sem `actorUsername`, sem `entityId` e sem `details`: a tela cai no id curto do autor, no tipo
+// puro da entidade e no estado "Sem detalhes".
 const LOGIN_FAILED: StubAuditEvent = {
   id: 1,
   occurredAt: '2026-09-28T20:00:00Z',
@@ -403,5 +412,86 @@ describe('AuditPage — consulta', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sem permissão' })).toBeInTheDocument();
     expect(screen.queryByRole('table')).toBeNull();
+  });
+});
+
+describe('AuditPage — detalhes e histórico (1211b)', () => {
+  it('abre os detalhes do evento com o antes/depois e fecha com Esc', async () => {
+    stubBackend();
+    renderPage();
+    await waitForList();
+
+    const trigger = screen.getByRole('button', { name: 'Detalhes de SALE_COMPLETED' });
+    // Como no navegador: o clique parte de um gatilho já focado — é para ele que o foco volta.
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Detalhes do evento' });
+    expect(within(dialog).getByRole('button', { name: 'Fechar' })).toHaveFocus();
+    expect(
+      within(dialog).getByText(`SALE_COMPLETED · ${expectedDate(SALE_COMPLETED.occurredAt)}`),
+    ).toBeInTheDocument();
+
+    // O par `before`/`after` vira duas colunas; o resto do mapa continua visível.
+    const before = within(dialog).getByRole('region', { name: 'Antes' });
+    const after = within(dialog).getByRole('region', { name: 'Depois' });
+    expect(within(before).getByText('120')).toBeInTheDocument();
+    expect(within(after).getByText('140')).toBeInTheDocument();
+    expect(within(dialog).getByText('CASH')).toBeInTheDocument();
+    expect(within(dialog).getByText('PIX')).toBeInTheDocument();
+
+    // Teclado: Esc fecha o diálogo e o foco volta para o gatilho.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('evento sem detalhes mostra o estado vazio e não oferece histórico sem entidade', async () => {
+    stubBackend();
+    renderPage();
+    await waitForList();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Detalhes de LOGIN_FAILED' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Detalhes do evento' });
+    expect(within(dialog).getByText('Sem detalhes')).toBeInTheDocument();
+    // LOGIN_FAILED tem autor, mas não tem `entityId`: não há par para fixar nos filtros.
+    expect(within(dialog).queryByRole('button', { name: 'Ver histórico' })).toBeNull();
+  });
+
+  it('ver histórico fixa o par entidade nos filtros e volta à primeira página', async () => {
+    // 20 eventos de produto e 1 de venda: a venda, mais antiga, fica sozinha na página 2.
+    const products = Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1,
+      occurredAt: new Date(Date.UTC(2026, 8, 28, 12, index + 1)).toISOString(),
+      action: `PRODUCT_EVENT_${index + 1}`,
+      entityType: 'PRODUCT',
+      entityId: PRODUCT_ID,
+      source: 'WEB',
+    }));
+    const sale = { ...SALE_COMPLETED, id: 99, occurredAt: '2026-09-27T10:00:00Z' };
+    const fetchStub = stubBackend({ events: [...products, sale] });
+    renderPage();
+    await screen.findByRole('cell', { name: 'PRODUCT_EVENT_20' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Próxima página' }));
+    await waitFor(() => expect(lastQuery(fetchStub).get('page')).toBe('1'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Detalhes de SALE_COMPLETED' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Detalhes do evento' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Ver histórico' }));
+
+    await waitFor(() => expect(lastQuery(fetchStub).get('entityType')).toBe('SALE'));
+    const query = lastQuery(fetchStub);
+    expect(query.get('entityId')).toBe(ENTITY_ID);
+    expect(query.get('page')).toBe('0');
+    expect(screen.getByLabelText('Tipo da entidade')).toHaveValue('SALE');
+    expect(screen.getByLabelText('ID da entidade')).toHaveValue(ENTITY_ID);
+
+    // O modal fecha e a consulta passa a mostrar só a linha do tempo daquela entidade.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(await screen.findByText('Página 1 de 1 · 1 item')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'SALE_COMPLETED' })).toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: 'PRODUCT_EVENT_1' })).toBeNull();
   });
 });

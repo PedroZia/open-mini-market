@@ -5,6 +5,7 @@ import { isForbidden } from '../../../shared/lib/problem';
 import { DataTable, type DataTableColumn } from '../../../shared/ui/DataTable';
 import { NoPermission } from '../../../shared/ui/NoPermission';
 import type { AuditEventResponse, OperationSource } from '../api/auditApi';
+import { AuditEventDetailsModal } from '../components/AuditEventDetailsModal';
 import { useAuditEvents } from '../hooks/useAuditEvents';
 import { isUuid } from '../lib/uuid';
 
@@ -16,8 +17,12 @@ import { isUuid } from '../lib/uuid';
  * O instante é o único eixo ordenável do recurso: só a primeira coluna declara `sortKey`, com
  * estado inicial `occurredat,desc` (o default do servidor — a investigação lê o mais recente
  * primeiro). Os rótulos dos filtros são livres porque o catálogo de ações/entidades é do backend;
- * os exemplos do placeholder são códigos reais, nunca uma lista inventada. `details` fica de fora
- * nesta etapa: a leitura rica de antes/depois e o histórico por entidade são o 1211b.
+ * os exemplos do placeholder são códigos reais, nunca uma lista inventada.
+ *
+ * O 1211b acrescenta a coluna "Detalhes" — o evento abre no `Modal` (em vez de linha expansível:
+ * o `DataTable` não ganha API nova) — e o atalho "Ver histórico", que fixa `entityType`/`entityId`
+ * nos filtros já existentes e volta à primeira página: a linha do tempo da entidade é a própria
+ * consulta filtrada, sem endpoint novo.
  */
 
 /** Tamanho de página da consulta, o mesmo default do servidor (§9.1). */
@@ -32,6 +37,10 @@ const fieldClassName =
 
 const clearButtonClassName =
   'min-h-10 rounded-md border border-line px-4 text-sm font-medium text-ink transition-colors duration-150 ease-out hover:bg-canvas motion-reduce:transition-none';
+
+/** Botão de ação da linha (abre os detalhes): menor que o de filtro, mesmo traço. */
+const rowActionButtonClassName =
+  'min-h-9 rounded-md border border-line px-3 text-sm font-medium text-ink transition-colors duration-150 ease-out hover:bg-canvas motion-reduce:transition-none';
 
 /** Origem da operação em pt-BR (a mesma trilha registra terminal, retaguarda e sistema). */
 const SOURCE_LABELS: Record<OperationSource, string> = {
@@ -118,6 +127,8 @@ export function AuditPage() {
   const [to, setTo] = useState('');
   const [sort, setSort] = useState<Sort>({ field: OCCURRED_AT, direction: 'desc' });
   const [page, setPage] = useState(0);
+  /** Evento com os detalhes abertos; `null` fecha o modal. */
+  const [detailsEvent, setDetailsEvent] = useState<AuditEventResponse | null>(null);
 
   const audit = useAuditEvents({
     entityType: entityType.trim() === '' ? undefined : entityType.trim(),
@@ -190,6 +201,21 @@ export function AuditPage() {
       id: 'reason',
       header: 'Motivo',
       render: (event) => reasonLabel(event.reason),
+    },
+    {
+      id: 'details',
+      header: 'Detalhes',
+      render: (event) => (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-label={`Detalhes de ${event.action ?? 'evento'}`}
+          onClick={() => setDetailsEvent(event)}
+          className={rowActionButtonClassName}
+        >
+          Detalhes
+        </button>
+      ),
     },
   ];
 
@@ -327,6 +353,21 @@ export function AuditPage() {
         }}
         emptyMessage="Nenhum evento encontrado para os filtros."
       />
+
+      {detailsEvent !== null ? (
+        <AuditEventDetailsModal
+          event={detailsEvent}
+          onClose={() => setDetailsEvent(null)}
+          onViewHistory={(targetEntityType, targetEntityId) => {
+            // O par vai para os filtros do 1211a e a consulta recomeça da página 1: a linha do
+            // tempo da entidade é lida do mais recente para o mais antigo.
+            setEntityType(targetEntityType);
+            setEntityId(targetEntityId);
+            setPage(0);
+            setDetailsEvent(null);
+          }}
+        />
+      ) : null}
     </section>
   );
 }
