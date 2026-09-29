@@ -1,0 +1,10 @@
+# Contexto do build do serviço `web` (docker-compose.yml → web/Dockerfile), que é a **raiz do
+# monorepo** por causa do workspace `@minimarket/api-client`. O contexto fica só com o que o build
+# usa: os manifests dos workspaces, web/ e packages/api-client/.
+.git/
+node_modules/
+**/node_modules/
+backend/target/
+**/dist/
+test-results/
+playwright-report/

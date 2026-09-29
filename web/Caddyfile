@@ -1,0 +1,24 @@
+# SPA da retaguarda na mesma origem da API: o Caddy serve o build do Vite e repassa `/api/*` para o
+# backend, então o navegador usa o mesmo host/scheme nas duas — sem CORS.
+#
+# TLS, headers de segurança e rate limit ficam para o passo 1305 (proxy reverso da loja).
+
+# Sem hostname no endereço: HTTP na porta 80, sem HTTPS/ACME automático.
+:80 {
+	# Compressão das respostas (zstd quando o cliente aceita, senão gzip), inclusive o JSON da API.
+	encode zstd gzip
+
+	# API: preserva o prefixo `/api/v1/...` que o backend espera. Por ser um bloco exclusivo
+	# (`handle`), um 404 da API continua 404 — não cai no fallback da SPA.
+	handle /api/* {
+		reverse_proxy {$API_UPSTREAM:app:8080}
+	}
+
+	# SPA: serve o arquivo se ele existir; se não (deep link `/products`, `/sales/<id>`), entrega o
+	# index.html para o React Router resolver a rota no navegador.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

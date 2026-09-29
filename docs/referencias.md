@@ -97,6 +97,9 @@ Versões fixadas: **Quarkus 3.33 LTS · Java 25 · PostgreSQL 18 · OpenTUI 0.5 
 | [postgres — imagem Docker oficial](https://hub.docker.com/_/postgres) | variáveis do container, volume/PGDATA por versão, healthcheck |
 | [Quarkus — Quarkus and Maven](https://quarkus.io/version/3.33/guides/maven-tooling) | empacotamento `fast-jar` (`target/quarkus-app`, `quarkus-run.jar`) e perfil de build |
 | [Docker Hub — `maven` e `eclipse-temurin`](https://hub.docker.com/_/eclipse-temurin) | tags das imagens do `backend/Dockerfile` (build e runtime) |
+| [Caddy — Caddyfile](https://caddyserver.com/docs/caddyfile) | sintaxe do `web/Caddyfile`: `handle`, `reverse_proxy`, `try_files` + `file_server` (fallback de SPA), `encode` e variáveis de ambiente (`{$VAR:default}`) |
+| [Docker Hub — `caddy`](https://hub.docker.com/_/caddy) | imagem `caddy:2-alpine` do `web/Dockerfile`: Caddyfile em `/etc/caddy`, site em `/srv`, porta 80, `encode` com zstd+gzip no 2.11 |
+| [Docker Hub — `node`](https://hub.docker.com/_/node) | imagem `node:22-alpine` (estágio de build do `web/Dockerfile`) |
 
 ---
 

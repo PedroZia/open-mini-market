@@ -1297,7 +1297,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** E2E verde contra backend real.
   **Commit:** `test(web): adiciona testes ponta a ponta`
 
-- [ ] **1214 — Build e publicação**
+- [x] **1214 — Build e publicação**
   **Objetivo:** servir a SPA. **Depende:** 1213
   **Implementar:** build estático servido pelo proxy (mesma origem da API) com fallback de SPA; documentar no compose.
   **Testes/aceite:** aplicação acessível por uma origem única; API e web sem CORS.

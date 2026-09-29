@@ -40,7 +40,7 @@ terminal/               TUI do PDV (OpenTUI + Bun)
 web/                    React Web (retaguarda)
 packages/api-client/    client/tipos TS gerados do OpenAPI
 docs/                   plano técnico e roadmap
-docker-compose.yml      PostgreSQL (+ app) para desenvolvimento
+docker-compose.yml      PostgreSQL + API (+ retaguarda web publicada pelo Caddy) em dev
 ```
 
 ## Subindo o ambiente (dev)
@@ -69,6 +69,12 @@ Para subir banco e API em containers, use `docker compose up -d --build` depois 
 para `.env` (`APP_PORT=8081`): a API fica em http://localhost:8081 (health em `/q/health`, porta
 configurável por `APP_PORT`) e roda no perfil de produção, sem o seed de dev. Nesse caso não rode o
 `quarkus:dev` junto, os dois usam a mesma porta.
+
+O mesmo `docker compose up -d --build` constrói e sobe a **retaguarda web** (serviço `web`, imagem em
+[`web/Dockerfile`](web/Dockerfile)) em http://localhost:8082 (`WEB_PORT`): o Caddy serve o build da SPA
+e faz proxy de `/api` para o `app`, então navegador e API ficam na **mesma origem** — sem CORS — e os
+deep links (`/products`, `/sales/<id>`) caem no `index.html` ([`web/Caddyfile`](web/Caddyfile)). O
+contexto do build é a raiz do monorepo por causa do workspace `@minimarket/api-client`.
 
 No Windows (PowerShell/cmd), use `.\mvnw.cmd` no lugar de `./mvnw`. Ao subir, o Flyway aplica o schema
 e o seed de desenvolvimento (`backend/src/main/resources/db/seed-dev/R__seed_dev.sql`, idempotente);
