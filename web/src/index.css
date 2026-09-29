@@ -7,7 +7,7 @@
  *
  * Contraste WCAG AA conferido nos pares usados (valores do tema padrão do Tailwind):
  * ink/surface 17,8:1 · ink-muted/surface 7,6:1 · nav-ink/nav 16,3:1 · texto do item ativo 10,4:1 ·
- * foco/superfície clara 5,3:1 · foco/nav 16,3:1 · indicador do item ativo 6,8:1.
+ * foco/superfície clara 5,3:1 · foco/nav 16,3:1 · indicador do item ativo 6,8:1 · danger/surface 6,5:1.
  *
  * `static` mantém as variáveis no CSS final mesmo quando só o `var()` do CSS base as consome.
  */
@@ -18,6 +18,7 @@
   --color-ink-muted: oklch(44.6% 0.043 257.281); /* slate-600: texto secundário */
   --color-line: oklch(92.9% 0.013 255.508); /* slate-200: bordas e divisores */
   --color-brand: oklch(54.6% 0.245 262.881); /* blue-600: marca */
+  --color-danger: oklch(50.5% 0.213 27.518); /* red-700: erro (ex.: falha de login) */
   --color-nav: oklch(20.8% 0.042 265.755); /* slate-900: fundo da navegação */
   --color-nav-ink: oklch(96.8% 0.007 247.896); /* slate-100: foco sobre a navegação */
   --color-nav-ink-muted: oklch(86.9% 0.022 252.894); /* slate-300: item inativo */

@@ -1,11 +1,15 @@
 import { Outlet } from 'react-router';
+import { useAuth } from '../../features/auth/AuthContext';
 import { SidebarNav } from './SidebarNav';
 
 /**
  * Casca visual única da retaguarda (§10.2): cabeçalho, navegação lateral e o conteúdo da rota.
- * Cada tela entra pelo `Outlet`, então o layout não conhece feature nenhuma.
+ * Cada tela entra pelo `Outlet`, então o layout não conhece feature nenhuma. O layout só é
+ * renderizado sob a guarda de sessão (1202); o cabeçalho mostra quem entrou e o `Sair`.
  */
 export function AppLayout() {
+  const { user, logout } = useAuth();
+
   return (
     <div className="flex min-h-dvh flex-col">
       {/* Fora de tela até o primeiro Tab: o operador pula a navegação e cai no conteúdo. */}
@@ -23,10 +27,22 @@ export function AppLayout() {
         >
           M
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-ink">Minimarket</p>
           <p className="text-xs text-ink-muted">Retaguarda</p>
         </div>
+        {user !== null ? (
+          <p className="truncate text-sm text-ink-muted">{user.displayName ?? user.username}</p>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            void logout();
+          }}
+          className="min-h-9 shrink-0 rounded-md border border-line px-3 text-sm font-medium text-ink transition-colors duration-150 ease-out hover:bg-canvas motion-reduce:transition-none"
+        >
+          Sair
+        </button>
       </header>
 
       <div className="flex flex-1 flex-col md:flex-row">

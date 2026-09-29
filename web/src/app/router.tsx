@@ -1,17 +1,34 @@
 import { createBrowserRouter, type RouteObject } from 'react-router';
+import { AuthProvider } from '../features/auth/AuthProvider';
+import { RequireAuth } from '../features/auth/RequireAuth';
+import { LoginPage } from '../features/auth/pages/LoginPage';
 import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
 import { AppLayout } from './layout/AppLayout';
 
 /**
  * Rotas da retaguarda. Ficam como dados (e não só dentro do router) para o teste montar um
- * `createMemoryRouter` com as mesmas rotas. O layout é a casca única: cada tela nova vira filha
- * dele e aparece no `Outlet`.
+ * `createMemoryRouter` com as mesmas rotas.
+ *
+ * O `AuthProvider` é a raiz (rota sem path): o login é a única rota pública, fora do layout, e
+ * todo o resto vive sob a guarda `RequireAuth` — cada tela nova entra como filha do layout e
+ * aparece no `Outlet`.
  */
 export const routes: RouteObject[] = [
   {
-    path: '/',
-    element: <AppLayout />,
-    children: [{ index: true, element: <DashboardPage /> }],
+    element: <AuthProvider />,
+    children: [
+      { path: '/login', element: <LoginPage /> },
+      {
+        element: <RequireAuth />,
+        children: [
+          {
+            path: '/',
+            element: <AppLayout />,
+            children: [{ index: true, element: <DashboardPage /> }],
+          },
+        ],
+      },
+    ],
   },
 ];
 

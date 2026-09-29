@@ -1183,7 +1183,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** rota inicial renderiza o layout com a navegação lateral; gate do web verde.
   **Commit:** `chore(web): adiciona layout base com navegacao lateral`
 
-- [ ] **1202 — Autenticação e guarda de rotas**
+- [x] **1202 — Autenticação e guarda de rotas**
   **Objetivo:** só gente autorizada entra. **Depende:** 1201b, 207
   **Implementar:** tela de login, provider de auth (token em memória + `sessionStorage`), `GET /auth/me` na inicialização, interceptor `401`, guarda de rota, logout.
   **Testes/aceite:** login navega ao dashboard; refresh mantém sessão; 401 desloga e redireciona.
