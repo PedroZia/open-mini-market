@@ -275,6 +275,50 @@ describe('rota inicial', () => {
     );
     expect(router.state.location.pathname).toBe('/users');
   });
+
+  it('navega para Papéis pelo item lateral e renderiza o catálogo (1208b)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'token-de-teste');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith('/api/v1/roles')) {
+          return jsonFetchResponse([
+            {
+              code: 'ADMIN',
+              name: 'Administrador',
+              description: 'Acesso total ao sistema.',
+              system: true,
+              permissions: ['user.read'],
+            },
+          ]);
+        }
+        return jsonFetchResponse({
+          user: { id: 'u1', username: 'ana', displayName: 'Ana' },
+          roles: [],
+          permissions: ['user.read'],
+        });
+      }),
+    );
+
+    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('heading', { name: 'Início' });
+    fireEvent.click(screen.getByRole('link', { name: 'Papéis' }));
+
+    expect(await screen.findByRole('heading', { name: 'Administrador' })).toBeInTheDocument();
+    expect(screen.getByText('user.read')).toBeInTheDocument();
+
+    // Rota real (sem link morto): o item fica ativo e a URL muda para /roles.
+    expect(screen.getByRole('link', { name: 'Papéis' })).toHaveAttribute('aria-current', 'page');
+    expect(router.state.location.pathname).toBe('/roles');
+  });
 });
 
 /** Resposta mínima do `fetch` para as rotas do teste — mesmo formato que o client consome. */

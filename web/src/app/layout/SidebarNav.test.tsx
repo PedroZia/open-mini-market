@@ -5,9 +5,10 @@ import { AuthContext, type AuthContextValue } from '../../features/auth/AuthCont
 import { SidebarNav } from './SidebarNav';
 
 /**
- * Navegação com permissão (1208a): o item "Usuários" só existe para quem tem `user.read` na sessão
- * — é assim que GERENTE e OPERADOR não veem a administração de acessos. Sem permissão declarada, o
- * item continua aparecendo para todo mundo. O servidor é quem barra de verdade (403 na rota).
+ * Navegação com permissão (1208a/1208b): "Usuários" e "Papéis" só existem para quem tem `user.read`
+ * na sessão — é assim que GERENTE e OPERADOR não veem a administração de acessos. Sem permissão
+ * declarada, o item continua aparecendo para todo mundo. O servidor é quem barra de verdade (403 na
+ * rota).
  */
 
 function sessionWith(permissions: string[]): AuthContextValue {
@@ -45,5 +46,17 @@ describe('SidebarNav — itens com permissão', () => {
     // Os itens sem permissão declarada continuam na navegação.
     expect(screen.getByRole('link', { name: 'Produtos' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Início' })).toBeInTheDocument();
+  });
+
+  it('mostra Papéis para quem tem user.read (ADMIN)', () => {
+    renderNav(['user.read', 'role.write']);
+
+    expect(screen.getByRole('link', { name: 'Papéis' })).toHaveAttribute('href', '/roles');
+  });
+
+  it('esconde Papéis de quem não tem user.read', () => {
+    renderNav(['product.read', 'sale.create']);
+
+    expect(screen.queryByRole('link', { name: 'Papéis' })).toBeNull();
   });
 });

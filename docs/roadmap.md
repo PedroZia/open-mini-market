@@ -1237,7 +1237,7 @@ regra pura não sobem Quarkus; testes de persistência usam PostgreSQL real via 
   **Testes/aceite:** ADMIN gerencia; GERENTE/OPERADOR não veem o menu; permissões aplicadas na UI.
   **Commit:** `feat(web): adiciona gestao de usuarios`
 
-- [ ] **1208b — Papéis e permissões**
+- [x] **1208b — Papéis e permissões**
   **Objetivo:** editar o mapa de permissões. **Depende:** 1208a
   **Implementar:** rota e tela `Papéis` (menu só com `user.read`); lista `GET /roles` com as permissões de cada papel; edição com `PUT /roles/{code}/permissions` (`role.write`) usando o catálogo derivado da união das permissões de `GET /roles`; `400 UNKNOWN_PERMISSION` tratado.
   **Testes/aceite:** troca de permissões na UI; sem `role.write` não edita.
